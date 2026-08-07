@@ -53,7 +53,12 @@ services:
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:?set AUTH_GOOGLE_SECRET in .env}"
       NODE_ENV: production
     ports:
-      - "${APP_PORT:-3000}:3000"
+      # APP_BIND defaults to every interface, which is what you want for direct
+      # access. Behind a reverse proxy on a shared Docker network, set it to
+      # 127.0.0.1 so the only route in is through the proxy — and therefore
+      # through TLS. Auth.js issues __Secure- cookies for an https AUTH_URL, so
+      # plain-http access would not be able to sign in anyway.
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
     healthcheck:
       test:
         [

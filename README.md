@@ -179,6 +179,55 @@ AUTH_GOOGLE_ID=...
 AUTH_GOOGLE_SECRET=...
 ```
 
+### Behind SWAG
+
+Put SWAG and Hearth on a shared Docker network so SWAG can reach the app by
+container name, then stop publishing plain HTTP to your LAN altogether.
+
+```bash
+# 1. A shared network, if you don't already have one, with SWAG attached.
+docker network create proxynet          # skip if it exists
+docker network connect proxynet swag    # skip if SWAG is already on it
+
+# 2. Tell Hearth to join it. Add to .env:
+#      COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+#      PROXY_NETWORK=proxynet
+#      APP_BIND=127.0.0.1
+#      AUTH_URL=https://hearth.example.com
+#      AUTH_TRUST_HOST=true
+
+# 3. Install the proxy config and reload SWAG.
+cp deploy/swag/hearth.subdomain.conf \
+   /mnt/user/appdata/swag/nginx/proxy-confs/hearth.subdomain.conf
+docker restart swag
+
+# 4. Recreate Hearth so it picks up the network and the new binding.
+sh scripts/docker-up.sh
+```
+
+`COMPOSE_FILE` in `.env` makes `docker compose` load the overlay automatically,
+so every later command — including `scripts/docker-up.sh` — stays a plain
+invocation with no `-f` flags to remember.
+
+Three things are easy to get wrong here:
+
+- **`AUTH_TRUST_HOST=true` is required.** Without it Auth.js ignores the
+  `X-Forwarded-Proto` header SWAG sets, decides the request was plain HTTP, and
+  builds an `http://` OAuth callback that Google then rejects.
+- **`resolver.conf` matters.** nginx resolves an upstream hostname once at
+  startup unless a resolver is configured. The app container gets a new IP every
+  time it's recreated, so without that include, Hearth works until the first
+  rebuild and then 502s until SWAG is restarted.
+- **`APP_BIND=127.0.0.1` is what actually closes the LAN door.** SWAG reaches the
+  container over the Docker network, so the published host port is only there for
+  local `curl`. Leaving it on `0.0.0.0` means anyone on your LAN can hit Hearth
+  over plain HTTP — and since `AUTH_URL` is `https`, Auth.js issues `__Secure-`
+  cookies, so that path can't sign in anyway. It's an open door to nowhere.
+
+If a wildcard certificate already covers your domain, `hearth.example.com` works
+immediately. Otherwise add `hearth` to SWAG's `SUBDOMAINS` and restart it to have
+a certificate issued.
+
 ### Afterwards
 
 - **Autostart** is handled by `restart: unless-stopped` once Docker is up. To get

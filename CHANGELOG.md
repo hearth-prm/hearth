@@ -28,6 +28,16 @@ bump and may include breaking changes; patch releases are fixes only.
 - Deployment guide for Unraid, covering the Google redirect-URI restriction on
   LAN addresses, pool paths versus `/mnt/user`, and getting the source onto a
   host with no `git`.
+- `docker-compose.proxy.yml` overlay for running behind a reverse proxy. Joins
+  the proxy's existing Docker network and fixes the container name, so the proxy
+  can address Hearth as `hearth-app:3000` — Docker's embedded DNS only resolves
+  container names on user-defined networks, so a shared network is the only way
+  name-based upstreams work.
+- `APP_BIND` setting to choose which interface the port publishes on. Set to
+  `127.0.0.1` behind a proxy so the only route in is through TLS.
+- `deploy/swag/hearth.subdomain.conf`, a ready-to-use SWAG proxy config with the
+  Docker resolver (so the upstream survives container recreation) and response
+  buffering disabled (so streamed renders are not held back).
 
 ### Fixed
 

@@ -1,0 +1,34 @@
+# Overlay for running Hearth behind a reverse proxy (SWAG, Nginx Proxy Manager,
+# Traefik) that lives in its own Docker network.
+#
+# Joining the proxy's network lets it reach Hearth by container name. That is
+# worth the extra file: Docker's embedded DNS only resolves container names on
+# user-defined networks, never on the default bridge, so name-based upstreams
+# cannot work without it.
+#
+# Enable by adding to .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+#   PROXY_NETWORK=proxynet      # the network your proxy container is on
+#   APP_BIND=127.0.0.1          # stop exposing plain http to the LAN
+#
+# The network must already exist — it belongs to the proxy's stack, so this
+# declares it external rather than creating it:
+#
+#   docker network create proxynet     # only if you do not have one yet
+#   docker network connect proxynet swag
+
+services:
+  app:
+    # Fixed name so the proxy's upstream never changes. Without this, the name
+    # is derived from the project directory and silently changes if the folder
+    # is renamed.
+    container_name: hearth-app
+    networks:
+      - default   # keep talking to the db service
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxynet}
