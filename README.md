@@ -101,6 +101,101 @@ a reconnect when a scope or offline access is missing.
 
 ---
 
+## Running on Unraid
+
+Three Unraid-specific things matter, and the first one will stop you dead if you
+don't deal with it up front.
+
+### 1. Google will not accept a LAN address as a redirect URI
+
+Google requires OAuth redirect URIs to use `https`, with `http://localhost` and
+`http://127.0.0.1` as the only exceptions, and it rejects private IP addresses
+outright. So `http://192.168.1.50:3000/...` cannot be registered, and sign-in
+cannot work that way. Pick one:
+
+- **A hostname with a certificate (recommended).** Put Hearth behind Nginx Proxy
+  Manager or SWAG (both in Community Applications), get a Let's Encrypt cert via
+  the DNS-01 challenge, and point a DNS record at your server's LAN IP. Then
+  `AUTH_URL=https://hearth.example.com`. This works entirely on your LAN —
+  Google never contacts your server, it only redirects your *browser* — so no
+  port forwarding is required. Keep `AUTH_TRUST_HOST=true`.
+- **An SSH tunnel**, if you want to try it today without a domain:
+  `ssh -N -L 3000:localhost:3000 root@tower`, then use
+  `AUTH_URL=http://localhost:3000`. Your browser genuinely sees localhost, so
+  Google is satisfied. Only works while the tunnel is open, and only from that
+  one machine.
+- **A Cloudflare Tunnel**, for a public `https` hostname with no open ports.
+
+### 2. Postgres must not live in a Docker named volume
+
+Named volumes live on `docker.img`, which is a fixed size and is erased whenever
+you rebuild the Docker image file — a routine Unraid troubleshooting step that
+would take your database with it. Set `PGDATA_PATH` to a real path instead.
+
+Point it at the **pool directly** (`/mnt/cache/appdata/...`) rather than
+`/mnt/user/appdata/...`: the latter goes through Unraid's FUSE layer, which adds
+overhead and has a poor track record under database write patterns. Substitute
+your actual pool name if it isn't `cache`.
+
+Set the `appdata` share to **primary storage: cache, secondary storage: none**,
+so the Mover never relocates the files out from under that path. The same files
+are still reachable at `/mnt/user/appdata/...` over SMB, which is the comfortable
+way to edit `.env`.
+
+### 3. Neither `git` nor `node` is installed
+
+`docker compose` needs the **Docker Compose Manager** plugin from Community
+Applications. For the source, use a throwaway container instead of installing
+git. `scripts/docker-up.sh` deliberately depends on neither tool — it reads the
+version out of `package.json` and the commit out of `.git/` with plain shell, so
+your image still gets a correct build stamp.
+
+```bash
+# one-time layout (adjust the pool name if yours isn't "cache")
+mkdir -p /mnt/cache/appdata/hearth/postgres
+
+docker run --rm -v /mnt/cache/appdata/hearth:/work \
+  alpine/git clone https://gitlab.com/hammerling/hearth.git /work/app
+
+cd /mnt/cache/appdata/hearth/app
+cp .env.example .env
+openssl rand -base64 32          # paste into AUTH_SECRET
+vi .env                          # or edit \\TOWER\appdata\hearth\app\.env over SMB
+
+sh scripts/docker-up.sh
+curl -s http://localhost:3000/api/health
+```
+
+`.env` needs, at minimum:
+
+```ini
+POSTGRES_PASSWORD=<something long>
+DATABASE_URL=postgresql://hearth:<same password>@db:5432/hearth?schema=public
+PGDATA_PATH=/mnt/cache/appdata/hearth/postgres
+AUTH_SECRET=<openssl rand -base64 32>
+AUTH_URL=https://hearth.example.com
+AUTH_TRUST_HOST=true
+AUTH_GOOGLE_ID=...
+AUTH_GOOGLE_SECRET=...
+```
+
+### Afterwards
+
+- **Autostart** is handled by `restart: unless-stopped` once Docker is up. To get
+  the stack in the Unraid UI, add it in Docker Compose Manager with the project
+  directory set to `/mnt/cache/appdata/hearth/app` and enable autostart.
+- **Updating**: `docker run --rm -v /mnt/cache/appdata/hearth:/work alpine/git -C /work/app pull`
+  then `sh scripts/docker-up.sh` again. Migrations apply automatically on boot.
+- **Backups**: the Appdata Backup plugin covers `/mnt/user/appdata`. For a
+  restorable logical dump, prefer
+  `docker compose exec -T db pg_dump -U hearth hearth | gzip > hearth-$(date +%F).sql.gz`.
+- **Build space**: `next build` needs roughly 2 GB of RAM and a couple of GB of
+  layer space on `docker.img`. If a build fails for space, `docker system prune`.
+- **Port 3000** is a popular default; set `APP_PORT` in `.env` if something else
+  already has it.
+
+---
+
 ## Using it
 
 **People** — add contacts with as many emails, phones, addresses and links as you

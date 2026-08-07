@@ -7,7 +7,12 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
       POSTGRES_DB: "${POSTGRES_DB:-hearth}"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # Defaults to the named volume below. Set PGDATA_PATH to an absolute path
+      # to bind-mount instead — required on Unraid and similar appliances, where
+      # the Docker volume store lives on a fixed-size docker.img that is erased
+      # by a "delete docker image file" reset. Compose treats a source starting
+      # with / or ./ as a bind mount and anything else as a named volume.
+      - "${PGDATA_PATH:-pgdata}:/var/lib/postgresql/data"
     healthcheck:
       # -d/-U are required, otherwise pg_isready checks the wrong database and
       # reports healthy while the app's database is still being created.

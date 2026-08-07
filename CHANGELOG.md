@@ -18,6 +18,24 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- `PGDATA_PATH` setting to bind-mount the Postgres data directory instead of
+  using a Docker named volume. Needed on appliance hosts such as Unraid, where
+  the volume store sits on a fixed-size `docker.img` that routine
+  troubleshooting erases. Unset or empty keeps the previous named-volume
+  behaviour, so existing installs are unaffected.
+- Deployment guide for Unraid, covering the Google redirect-URI restriction on
+  LAN addresses, pool paths versus `/mnt/user`, and getting the source onto a
+  host with no `git`.
+
+### Fixed
+
+- `scripts/docker-up.sh` no longer requires `node` or `git` on the host. It reads
+  the version from `package.json` and the commit from `.git/` (loose refs and
+  `packed-refs`) using only POSIX shell, so images built on Unraid, Synology or
+  TrueNAS still carry a correct build stamp instead of reporting `unknown`.
+
 ## [0.1.0] — 2026-08-07
 
 First working release. The complete data model and CRUD application, plus the
