@@ -12,7 +12,9 @@ you opt into, is pulling event RSVPs from calendar guests.)
 
 ## Status
 
-**Milestone 1 of 4 — complete and running.**
+**v0.1.0 — milestone 1 of 4, complete and running.** See
+[CHANGELOG.md](CHANGELOG.md) for what landed, and
+[Versioning](#versioning) for the scheme.
 
 | | Feature | State |
 |---|---|---|
@@ -199,6 +201,7 @@ npm run dev
 | `npm run db:deploy` | Apply committed migrations |
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
+| `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
 
 `GET /api/health` returns `{"status":"ok"}` and is what the container healthcheck
 uses.
@@ -207,6 +210,70 @@ Pinned to Next 15 rather than 16 so the toolchain runs on Node 18 as well; movin
 to 16 is a version bump plus Node 20+, with no code changes expected.
 
 ---
+
+## Versioning
+
+Hearth follows [Semantic Versioning](https://semver.org). Below `1.0.0`, each
+milestone lands as a **minor** bump and may break things; patches are fixes only.
+`1.0.0` means all four milestones are shipped and stable.
+
+`package.json` is the single source of truth. Everything else derives from it —
+there is no second place to remember to edit.
+
+### Knowing what's deployed
+
+The version alone can't tell you whether the container on your server is the
+build you think it is, so build identity is baked in at compile time and readable
+three ways:
+
+```bash
+curl -s http://localhost:3000/api/health
+# {"status":"ok","database":"up","version":"0.1.0",
+#  "commit":"c5f4a75","builtAt":"2026-08-07T17:16:58.392Z"}
+
+docker image inspect hearth:0.1.0 \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+```
+
+…and in the footer of every page (hover it for the commit and build time).
+
+A build made from uncommitted work is stamped `<sha>-dirty`, so an image never
+claims to be a commit it isn't. Building with plain `docker compose up --build`
+instead of `npm run docker:up` still works — the commit is just reported as
+`unknown`, because `.dockerignore` excludes `.git` and the build has no
+repository to ask.
+
+### Cutting a release
+
+```bash
+# 1. Describe the changes under "## [Unreleased]" in CHANGELOG.md
+$EDITOR CHANGELOG.md
+
+# 2. Bump, promote the changelog, commit and tag in one step
+npm version minor        # or: patch / major
+
+# 3. Publish
+git push --follow-tags
+```
+
+`npm version` runs `typecheck` first, then
+[scripts/release-changelog.mjs](scripts/release-changelog.mjs), which renames
+`[Unreleased]` to the new version with today's date, opens a fresh `[Unreleased]`
+section, and updates the comparison links. That edit lands *inside* the release
+commit, so the changelog can never drift from the tag.
+
+It **refuses to run when `[Unreleased]` is empty.** That is deliberate: an
+undocumented release fails loudly now rather than being discovered months later
+when you're trying to work out what changed.
+
+### The other version axis
+
+`prisma migrate deploy` records applied migrations in a `_prisma_migrations`
+table — your *schema* version, tracked independently of the app version and
+**forward-only**. Rolling the app image back to an older tag does **not** roll the
+schema back, so old code can end up talking to a newer database. If a release
+includes a destructive migration, say so in the changelog; otherwise "just
+redeploy the previous tag" quietly stops being a safe rollback.
 
 ## Data model
 

@@ -15,3 +15,5 @@ npm-debug.log*
 .idea
 .vscode
 tsconfig.tsbuildinfo
+scripts
+CHANGELOG.md

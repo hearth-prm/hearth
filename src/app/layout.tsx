@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { currentUser } from "@/lib/access";
 import { AppNav } from "@/components/nav";
+import { AppFooter } from "@/components/app-footer";
 
 export const metadata: Metadata = {
   title: "Hearth",
@@ -17,9 +18,12 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className="min-h-dvh bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
+      <body className="flex min-h-dvh flex-col bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
         {user ? <AppNav user={user} /> : null}
-        <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">{children}</main>
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
+          {children}
+        </main>
+        <AppFooter />
       </body>
     </html>
   );

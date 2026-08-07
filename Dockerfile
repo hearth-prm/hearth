@@ -21,6 +21,15 @@ RUN npm ci --no-audit --no-fund
 
 # --- build -----------------------------------------------------------------
 FROM base AS builder
+
+# Build identity. .dockerignore excludes .git, so the build cannot discover the
+# commit itself — pass it in. docker-compose.yml wires these up.
+ARG GIT_SHA=unknown
+ARG BUILD_TIME
+ARG APP_VERSION=
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_TIME=${BUILD_TIME}
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -30,12 +39,39 @@ COPY . .
 ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# package.json is the single source of truth for the version. When the caller
+# also supplies APP_VERSION (for the image labels), fail loudly on a mismatch
+# rather than shipping an image whose label contradicts its own bundle.
+RUN if [ -n "$APP_VERSION" ]; then \
+      actual=$(node -e "process.stdout.write(require('./package.json').version)"); \
+      if [ "$actual" != "$APP_VERSION" ]; then \
+        echo "APP_VERSION=$APP_VERSION does not match package.json version $actual" >&2; \
+        exit 1; \
+      fi; \
+    fi
+
 RUN npx prisma generate
+# next.config.ts bakes APP_VERSION / GIT_SHA / BUILD_TIME into the bundle here.
 RUN npm run build
 
 
 # --- runtime ---------------------------------------------------------------
 FROM base AS runner
+
+ARG APP_VERSION=0.0.0
+ARG GIT_SHA=unknown
+ARG BUILD_TIME
+
+# Standard OCI annotations, so `docker inspect` and any registry UI can report
+# what this image is without starting it. The app reports the same values at
+# runtime via /api/health; the builder stage guards them against diverging.
+LABEL org.opencontainers.image.title="Hearth" \
+      org.opencontainers.image.description="Self-hosted personal relationship manager" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.source="https://gitlab.com/hammerling/hearth"
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
