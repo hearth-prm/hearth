@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Let the browser render form controls and scrollbars to match the theme. */
+html {
+  color-scheme: light dark;
+}
+
+/* Tailwind resets these, but a PRM is a form-heavy app and native validation
+   bubbles / date pickers look wrong without a consistent accent. */
+:root {
+  accent-color: theme(--color-teal-600);
+}

@@ -1,93 +1,232 @@
 # Hearth
 
+A self-hosted personal relationship manager. Keep track of the people in your
+life, how they're connected, and who was where — with fields you define
+yourself, and one-way sync out to Google.
 
+Hearth is always the source of truth. It writes to Google Contacts and Google
+Calendar; it does not read your Google data back in. (The single exception, which
+you opt into, is pulling event RSVPs from calendar guests.)
 
-## Getting started
+---
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Status
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+**Milestone 1 of 4 — complete and running.**
 
-## Add your files
+| | Feature | State |
+|---|---|---|
+| ✅ | Add people, with contact details | Done |
+| ✅ | Link people by typed relationship | Done |
+| ✅ | Add events | Done |
+| ✅ | Put people at events, with roles and RSVPs | Done |
+| ✅ | Extensible fields on people **and** events | Done |
+| ✅ | Google sign-in, with contacts + calendar consent | Done |
+| ✅ | "Add to Google" toggle on both record types, default on | Stored; acted on in M2 |
+| ✅ | Deletion/opt-out bookkeeping so Google copies can be removed | Recording now |
+| ⏳ | Contacts push worker | M2 |
+| ⏳ | Calendar push + attendee invites + RSVP writeback | M3 |
+| ⏳ | Field ↔ Google field mapping settings page | M4 |
+| ⏳ | Sharing contacts and events between users | M4 |
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Nothing is sent to Google yet — the worker that talks to Google's APIs is M2.
+Everything it will need is already in place: per-record sync state, and a
+tombstone queue that records the Google resource id whenever a synced record is
+deleted or opted out, so the remote copy can still be found and removed.
+
+---
+
+## Running it
+
+You need Docker and a Google Cloud project. Two commands, once the `.env` is
+filled in.
+
+```bash
+cp .env.example .env
+$EDITOR .env          # see "Configuration" below
+docker compose up -d --build
+```
+
+Then open <http://localhost:3000>.
+
+The app container runs `prisma migrate deploy` and seeds the built-in
+relationship types on every start, so upgrades that add columns need no extra
+step, and a fresh volume comes up ready to use.
+
+```bash
+docker compose logs -f app     # follow startup and migrations
+docker compose down            # stop (data survives in the pgdata volume)
+docker compose down -v         # stop and destroy the database
+```
+
+### Configuration
+
+| Variable | Required | Notes |
+|---|---|---|
+| `POSTGRES_PASSWORD` | yes | Change it. Also appears inside `DATABASE_URL`. |
+| `DATABASE_URL` | yes | Host is `db` (the compose service name), not localhost. |
+| `AUTH_SECRET` | yes | `openssl rand -base64 32` |
+| `AUTH_URL` | yes | Public origin, no trailing slash. Must match Google's redirect URI. |
+| `AUTH_TRUST_HOST` | behind a proxy | `true` when running behind Caddy/nginx/Traefik. |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
+| `APP_PORT` | no | Host port, default `3000`. |
+
+### Google Cloud setup
+
+1. Create (or pick) a project at <https://console.cloud.google.com>.
+2. **APIs & Services → Library** — enable both:
+   - **People API** (contacts)
+   - **Google Calendar API**
+3. **APIs & Services → OAuth consent screen**
+   - User type **External** is fine for a personal install.
+   - Add yourself under **Test users**. An app in "Testing" doesn't need Google
+     verification, and its refresh tokens last indefinitely for test users.
+   - Add these scopes:
+     - `.../auth/userinfo.email`, `.../auth/userinfo.profile`, `openid`
+     - `https://www.googleapis.com/auth/contacts`
+     - `https://www.googleapis.com/auth/calendar.events`
+     - `https://www.googleapis.com/auth/calendar.readonly`
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**
+   - Application type **Web application**.
+   - Authorised redirect URI: `${AUTH_URL}/api/auth/callback/google`
+     — e.g. `http://localhost:3000/api/auth/callback/google`.
+5. Copy the client ID and secret into `.env`.
+
+Hearth asks for granular calendar scopes rather than the blanket
+`.../auth/calendar`, so a stolen token cannot delete your calendars — only manage
+events on them. Settings shows exactly which permissions were granted and offers
+a reconnect when a scope or offline access is missing.
+
+---
+
+## Using it
+
+**People** — add contacts with as many emails, phones, addresses and links as you
+like. The first email and phone of each person are treated as primary; that's the
+address used when inviting them to a calendar event.
+
+**Relationships** — link two people with a type such as *Parent of*, *Spouse of*
+or one you define yourself. Each link is stored once and reads correctly from
+both ends: the row that says "Jack is the *parent of* Jill" renders on Jill's page
+as "*Child of* Jack". Directional types have an inverse label; symmetric ones
+(sibling, friend) read the same both ways.
+
+**Events** — record a gathering and tick everyone who was there. Each attendee
+carries a role (host / required / optional) and an RSVP. Times are entered as
+wall-clock times in the event's own timezone and stored as absolute instants, so
+they stay correct across daylight-saving changes.
+
+**Custom fields** — Settings → *Contact fields* / *Event fields*. Pick a label
+and a type (text, number, date, yes/no, single or multiple choice, email, phone,
+link) and it appears on every form immediately. No restart, no migration.
+
+- Fields can be marked **required**, given **help text**, and shown as a
+  **column** in list views.
+- **Archive** a field to hide it from forms while keeping its stored values — they
+  come back intact if you restore it.
+- **Delete** a field to also erase its value from every record.
+- A field's storage key and type are fixed once created, because values already
+  stored were validated against them.
+
+---
+
+## How it's built
+
+Next.js 15 (App Router) · React 19 · Prisma 6 · Postgres 16 · Auth.js v5 ·
+Tailwind 4 · TypeScript.
+
+### The field registry
+
+The extensibility requirement shapes most of the architecture. Rather than a
+fixed schema plus a bolted-on "extras" blob, Hearth has one **registry** that
+describes every field on a record, and the UI, validation and (from M2) the
+Google mapping all read from it.
+
+Two storage strategies sit behind one interface:
+
+- **Core fields** (`givenName`, `startAt`, …) are real Postgres columns — fast to
+  sort, filter and constrain. They're declared in
+  [src/lib/fields/core.ts](src/lib/fields/core.ts), *in code*, because a user
+  cannot delete a column without a migration, so they must not be modelled as
+  deletable data.
+- **Custom fields** live as keys inside a `custom` JSONB column, described by
+  `FieldDefinition` rows. Adding one is an INSERT, not a migration. A GIN index
+  makes them queryable.
+
+[`loadRegistry()`](src/lib/fields/registry.ts) merges both into a single
+`FieldDef[]`, each entry tagged with its `storage`. So a form doesn't enumerate
+its inputs — it maps over the registry — and
+[`partitionFieldValues()`](src/lib/fields/values.ts) is the only code that knows
+which values become columns and which become JSON.
+
+Core field keys are checked against `keyof Person` / `keyof Event` with a
+`satisfies` clause, so a typo or a renamed column fails the build rather than
+surfacing as a runtime Prisma error.
+
+### Where the seams are
+
+| Concern | File | Why it's isolated |
+|---|---|---|
+| Authorisation | [src/lib/access.ts](src/lib/access.ts) | Every query uses a `*Where` helper. Sharing (M4) becomes `OR: [{ownerId}, {shares:{some:…}}]` in one file. |
+| Deletion bookkeeping | [src/lib/sync/tombstones.ts](src/lib/sync/tombstones.ts) | The Google resource id dies with the local row, so it's recorded *before* the delete. |
+| Timezone maths | [src/lib/time.ts](src/lib/time.ts) | Wall-clock ↔ instant conversion, DST-correct, no date library. |
+| Google scopes | [src/lib/google/scopes.ts](src/lib/google/scopes.ts) | One list, plus a `grantCovers()` check driving the reconnect prompt. |
+
+Scheduling fields (`startAt`/`endAt`/`allDay`/`timeZone`) are in the registry but
+flagged `generic: false`: they're validated uniformly and will be mappable to
+Google, but a bespoke component renders them, because the all-day toggle changes
+the input type and the timezone decides what instant a time refers to. Validation
+stays uniform; rendering doesn't have to be.
+
+### Local development
+
+Requires Node 20+ (the Docker image uses Node 22) and a reachable Postgres.
+
+```bash
+npm install
+cp .env.example .env          # point DATABASE_URL at localhost:5432
+npx prisma migrate deploy
+npm run db:seed
+npm run dev
+```
+
+| Script | Does |
+|---|---|
+| `npm run dev` | Dev server with hot reload |
+| `npm run build` | `prisma generate` + production build |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run db:migrate` | Create a migration from schema changes |
+| `npm run db:deploy` | Apply committed migrations |
+| `npm run db:seed` | Seed built-in relationship types (idempotent) |
+| `npm run db:studio` | Prisma Studio |
+
+`GET /api/health` returns `{"status":"ok"}` and is what the container healthcheck
+uses.
+
+Pinned to Next 15 rather than 16 so the toolchain runs on Node 18 as well; moving
+to 16 is a version bump plus Node 20+, with no code changes expected.
+
+---
+
+## Data model
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/hammerling/hearth.git
-git branch -M main
-git push -uf origin main
+User ─┬─ UserSettings          sync toggles, target calendar, default timezone
+      ├─ Account               Google tokens (Auth.js)
+      ├─ Person ─┬─ ContactPoint      repeatable emails/phones/addresses/links
+      │          ├─ custom JSONB      user-defined field values
+      │          └─ google sync state addToGoogle, resourceName, etag, status
+      ├─ Event ──┬─ EventAttendee     role + RSVP + per-person invite flag
+      │          ├─ custom JSONB
+      │          └─ google sync state
+      ├─ Relationship ── RelationshipType   directional or symmetric
+      ├─ FieldDefinition       describes one custom field
+      └─ SyncTombstone         Google resources awaiting deletion
 ```
 
-## Integrate with your tools
+Deleting a user cascades to everything they own. The seeded relationship types
+(`ownerId = null`) are shared and survive.
 
-* [Set up project integrations](https://gitlab.com/hammerling/hearth/-/settings/integrations)
+## Licence
 
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Not yet chosen.

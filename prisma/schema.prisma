@@ -1,0 +1,423 @@
+// Hearth — self-hosted Personal Relationship Manager
+//
+// Schema conventions
+// -----------------
+// * Every user-owned row carries `ownerId`. Read access is always funnelled
+//   through the helpers in src/lib/access.ts so that record sharing (M4) can be
+//   introduced by changing one file rather than every query.
+// * "Core" fields on Person/Event are real columns. User-defined fields live in
+//   the `custom` JSONB column and are described by FieldDefinition rows. See
+//   src/lib/fields/ for the registry that unifies the two.
+// * Google sync state is stored inline on the synced entity. Deletions and
+//   opt-outs record a SyncTombstone so the remote copy can still be found and
+//   removed after the local row is gone.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js (NextAuth v5) models — shapes are dictated by @auth/prisma-adapter
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+
+  settings          UserSettings?
+  people            Person[]
+  events            Event[]
+  relationships     Relationship[]
+  relationshipTypes RelationshipType[]
+  fieldDefinitions  FieldDefinition[]
+  tombstones        SyncTombstone[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String? @db.Text
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// Per-user preferences
+// ---------------------------------------------------------------------------
+
+model UserSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  /// Master switch for the one-way PRM -> Google Contacts push.
+  syncContactsEnabled Boolean @default(false)
+  /// Master switch for PRM <-> Google Calendar event sync.
+  syncCalendarEnabled Boolean @default(false)
+  /// Value pre-filled into "Add to Google" on newly created records.
+  defaultAddToGoogle  Boolean @default(true)
+  /// Target calendar for pushed events; "primary" unless the user picks another.
+  googleCalendarId    String  @default("primary")
+  /// Invite people added to a PRM event as Google Calendar attendees.
+  inviteAttendees     Boolean @default(true)
+  /// Pull RSVP responses from Google back into EventAttendee.rsvp.
+  importRsvps         Boolean @default(true)
+  /// IANA zone used when creating events and rendering times.
+  timeZone            String  @default("UTC")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Extensible field registry
+// ---------------------------------------------------------------------------
+
+enum FieldEntity {
+  PERSON
+  EVENT
+}
+
+enum FieldType {
+  TEXT
+  LONGTEXT
+  NUMBER
+  DATE
+  DATETIME
+  BOOLEAN
+  SELECT
+  MULTISELECT
+  EMAIL
+  PHONE
+  URL
+}
+
+/// A user-defined field added to Person or Event. Values are stored under
+/// `key` inside the entity's `custom` JSONB column. Core (built-in) fields are
+/// NOT rows here — they are declared in src/lib/fields/core.ts, because their
+/// existence and storage location are fixed by the Prisma schema itself.
+model FieldDefinition {
+  id      String      @id @default(cuid())
+  ownerId String
+  entity  FieldEntity
+  /// snake_case identifier, unique per owner+entity, also the JSONB key.
+  key     String
+  label   String
+  type    FieldType
+  /// Allowed values for SELECT / MULTISELECT.
+  options String[]    @default([])
+  helpText String?
+  required Boolean    @default(false)
+  /// Show on list views / cards.
+  showInList Boolean  @default(false)
+  order    Int        @default(0)
+  /// Archived fields keep their stored values but disappear from forms.
+  archived Boolean    @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, entity, key])
+  @@index([ownerId, entity, archived])
+}
+
+// ---------------------------------------------------------------------------
+// People
+// ---------------------------------------------------------------------------
+
+enum SyncStatus {
+  /// Local changes not yet pushed.
+  PENDING
+  /// Remote copy matches the last local write.
+  SYNCED
+  /// Last push failed; see googleSyncError.
+  ERROR
+  /// addToGoogle is false — intentionally not synced.
+  DISABLED
+}
+
+model Person {
+  id      String @id @default(cuid())
+  ownerId String
+
+  // --- core fields (mirrored in src/lib/fields/core.ts) ---
+  givenName    String?
+  familyName   String?
+  nickname     String?
+  organization String?
+  jobTitle     String?
+  birthday     DateTime? @db.Date
+  notes        String?   @db.Text
+
+  /// Denormalised "Given Family" (or nickname/org fallback) for sort + search.
+  displayName String @default("")
+
+  /// User-defined field values, keyed by FieldDefinition.key.
+  custom Json @default("{}")
+
+  // --- Google Contacts sync state ---
+  addToGoogle          Boolean    @default(true)
+  googleResourceName   String?
+  googleEtag           String?
+  googleSyncedAt       DateTime?
+  googleSyncStatus     SyncStatus @default(PENDING)
+  googleSyncError      String?    @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner             User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  contactPoints     ContactPoint[]
+  relationshipsFrom Relationship[]  @relation("RelationshipFrom")
+  relationshipsTo   Relationship[]  @relation("RelationshipTo")
+  eventAttendances  EventAttendee[]
+
+  @@index([ownerId, displayName])
+  @@index([ownerId, updatedAt])
+  @@unique([ownerId, googleResourceName])
+  @@index([custom(ops: JsonbOps)], type: Gin)
+}
+
+enum ContactKind {
+  EMAIL
+  PHONE
+  URL
+  ADDRESS
+  SOCIAL
+}
+
+/// Repeatable contact details. Modelled as rows rather than columns because
+/// Google People API stores these as arrays with per-entry types, and a person
+/// legitimately has several (work email, home phone, ...).
+model ContactPoint {
+  id       String      @id @default(cuid())
+  personId String
+  kind     ContactKind
+  /// Free-text type: "home", "work", "mobile", "linkedin", ...
+  label    String?
+  value    String
+  isPrimary Boolean    @default(false)
+  order    Int         @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId, kind, order])
+  @@index([value])
+}
+
+// ---------------------------------------------------------------------------
+// Relationships
+// ---------------------------------------------------------------------------
+
+/// A kind of link between two people. Rows with ownerId = null are the seeded
+/// system types available to everyone; users may add their own.
+model RelationshipType {
+  id      String  @id @default(cuid())
+  ownerId String?
+  key     String
+  /// Reads from -> to, e.g. "Parent of".
+  label   String
+  /// Reads to -> from, e.g. "Child of". Equals `label` when symmetric.
+  inverseLabel String
+  /// True when direction carries no meaning (spouse, sibling, friend).
+  symmetric Boolean @default(false)
+  order   Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  owner         User?          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  relationships Relationship[]
+
+  @@unique([ownerId, key])
+  @@index([ownerId])
+}
+
+model Relationship {
+  id           String  @id @default(cuid())
+  ownerId      String
+  fromPersonId String
+  toPersonId   String
+  typeId       String
+  notes        String? @db.Text
+  startedOn    DateTime? @db.Date
+  endedOn      DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  from  Person           @relation("RelationshipFrom", fields: [fromPersonId], references: [id], onDelete: Cascade)
+  to    Person           @relation("RelationshipTo", fields: [toPersonId], references: [id], onDelete: Cascade)
+  type  RelationshipType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  @@unique([fromPersonId, toPersonId, typeId])
+  @@index([ownerId])
+  @@index([toPersonId])
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+model Event {
+  id      String @id @default(cuid())
+  ownerId String
+
+  // --- core fields (mirrored in src/lib/fields/core.ts) ---
+  title       String
+  description String?   @db.Text
+  location    String?
+  startAt     DateTime
+  endAt       DateTime?
+  allDay      Boolean   @default(false)
+  timeZone    String    @default("UTC")
+
+  /// User-defined field values, keyed by FieldDefinition.key.
+  custom Json @default("{}")
+
+  // --- Google Calendar sync state ---
+  addToGoogle      Boolean    @default(true)
+  googleEventId    String?
+  googleCalendarId String?
+  googleEtag       String?
+  /// Opaque cursor for incremental RSVP pulls (M3).
+  googleSyncToken  String?
+  googleSyncedAt   DateTime?
+  googleSyncStatus SyncStatus @default(PENDING)
+  googleSyncError  String?    @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  attendees EventAttendee[]
+
+  @@index([ownerId, startAt])
+  @@unique([ownerId, googleCalendarId, googleEventId])
+  @@index([custom(ops: JsonbOps)], type: Gin)
+}
+
+enum AttendeeRole {
+  HOST
+  REQUIRED
+  OPTIONAL
+}
+
+enum RsvpStatus {
+  NEEDS_ACTION
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+}
+
+model EventAttendee {
+  id       String @id @default(cuid())
+  eventId  String
+  personId String
+
+  role AttendeeRole @default(OPTIONAL)
+  rsvp RsvpStatus   @default(NEEDS_ACTION)
+  notes String?     @db.Text
+
+  /// Include this person as an attendee on the Google Calendar event.
+  inviteToGoogle Boolean @default(true)
+  /// Email actually used on the Google invite — RSVP pulls match on this.
+  googleInviteEmail String?
+  /// Set when rsvp was last updated from Google rather than in the PRM.
+  rsvpFromGoogleAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event  Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, personId])
+  @@index([personId])
+}
+
+// ---------------------------------------------------------------------------
+// Sync bookkeeping
+// ---------------------------------------------------------------------------
+
+enum SyncTarget {
+  GOOGLE_CONTACT
+  GOOGLE_EVENT
+}
+
+/// Records a remote resource that must be deleted from Google. Written when a
+/// synced record is deleted locally, or when "Add to Google" is unchecked — in
+/// both cases the local row can no longer tell us what to remove. Consumed by
+/// the sync worker (M2/M3); rows are written from M1 onward so nothing leaks.
+model SyncTombstone {
+  id         String     @id @default(cuid())
+  ownerId    String
+  target     SyncTarget
+  /// people/c1234... for contacts, the event id for calendar events.
+  resourceId String
+  /// Calendar the event lived on; null for contacts.
+  calendarId String?
+  etag       String?
+  /// Why the delete was queued, for audit: "deleted" | "opted_out".
+  reason     String
+
+  attempts    Int       @default(0)
+  processedAt DateTime?
+  lastError   String?   @db.Text
+  createdAt   DateTime  @default(now())
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, processedAt])
+  @@index([target, resourceId])
+}

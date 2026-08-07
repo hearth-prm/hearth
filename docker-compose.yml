@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-hearth}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-hearth}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # -d/-U are required, otherwise pg_isready checks the wrong database and
+      # reports healthy while the app's database is still being created.
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hearth} -d ${POSTGRES_DB:-hearth}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Not published to the host by default: nothing outside the compose network
+    # needs it. Uncomment to connect a local client.
+    # ports:
+    #   - "5432:5432"
+
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Quoted because a ${VAR:?message} whose message contains ": " would
+      # otherwise be parsed by YAML as a nested mapping.
+      DATABASE_URL: "${DATABASE_URL:?set DATABASE_URL in .env}"
+      AUTH_SECRET: "${AUTH_SECRET:?missing - generate one with openssl rand -base64 32}"
+      AUTH_URL: "${AUTH_URL:-http://localhost:3000}"
+      AUTH_TRUST_HOST: "${AUTH_TRUST_HOST:-true}"
+      AUTH_GOOGLE_ID: "${AUTH_GOOGLE_ID:?set AUTH_GOOGLE_ID in .env}"
+      AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:?set AUTH_GOOGLE_SECRET in .env}"
+      NODE_ENV: production
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  pgdata:
