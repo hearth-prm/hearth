@@ -222,48 +222,68 @@ AUTH_GOOGLE_SECRET=...
 
 ### Behind SWAG
 
-Put SWAG and Hearth on a shared Docker network so SWAG can reach the app by
-container name, then stop publishing plain HTTP to your LAN altogether.
+There are two ways to point SWAG at Hearth. Both work; the difference is only
+what SWAG connects *to*.
+
+**Host IP — the default, and the one to pick if you already manage your reverse
+proxies in SWAG.** SWAG connects to the port Hearth publishes on the Docker host,
+so it doesn't matter what network anything is on, and nothing about your SWAG
+container changes.
 
 ```bash
-# 1. A shared network, if you don't already have one, with SWAG attached.
+cp deploy/swag/hearth-hostip.subdomain.conf \
+   /mnt/user/appdata/swag/nginx/proxy-confs/hearth.subdomain.conf
+# replace UNRAID_HOST_IP with your server's LAN IP
+docker restart swag
+```
+
+`.env` needs `AUTH_URL`, `AUTH_TRUST_HOST=true`, and **`APP_BIND` left unset**.
+
+The trade-off: port 3000 stays open on your LAN over plain HTTP. Anyone hitting it
+directly gets the sign-in page but cannot establish a session, because an `https`
+`AUTH_URL` makes Auth.js issue `__Secure-` cookies that browsers refuse to send
+over HTTP. It is an open door to nowhere rather than a hole, but it is open.
+
+**Shared Docker network — if you'd rather nothing listened on the LAN at all.**
+SWAG reaches the container by name, and the host port binds to loopback only.
+
+```bash
 docker network create proxynet          # skip if it exists
-docker network connect proxynet swag    # skip if SWAG is already on it
-
-# 2. Tell Hearth to join it. Add to .env:
-#      COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
-#      PROXY_NETWORK=proxynet
-#      APP_BIND=127.0.0.1
-#      AUTH_URL=https://hearth.example.com
-#      AUTH_TRUST_HOST=true
-
-# 3. Install the proxy config and reload SWAG.
+docker network connect proxynet swag    # attaches to your existing SWAG
 cp deploy/swag/hearth.subdomain.conf \
    /mnt/user/appdata/swag/nginx/proxy-confs/hearth.subdomain.conf
 docker restart swag
-
-# 4. Recreate Hearth so it picks up the network and the new binding.
-sh scripts/docker-up.sh
 ```
 
-`COMPOSE_FILE` in `.env` makes `docker compose` load the overlay automatically,
-so every later command — including `scripts/docker-up.sh` — stays a plain
-invocation with no `-f` flags to remember.
+…plus in `.env`:
 
-Three things are easy to get wrong here:
+```ini
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+PROXY_NETWORK=proxynet
+APP_BIND=127.0.0.1
+```
+
+`COMPOSE_FILE` in `.env` makes compose load the overlay automatically, so later
+commands need no `-f` flags.
+
+`deploy-hearth.sh` picks host mode automatically when it finds SWAG; use
+`--proxy network` for the second option, or `--no-proxy` to be left alone. It
+never overwrites an existing proxy config.
+
+Whichever you choose, three things are easy to get wrong:
 
 - **`AUTH_TRUST_HOST=true` is required.** Without it Auth.js ignores the
   `X-Forwarded-Proto` header SWAG sets, decides the request was plain HTTP, and
-  builds an `http://` OAuth callback that Google then rejects.
-- **`resolver.conf` matters.** nginx resolves an upstream hostname once at
-  startup unless a resolver is configured. The app container gets a new IP every
-  time it's recreated, so without that include, Hearth works until the first
-  rebuild and then 502s until SWAG is restarted.
-- **`APP_BIND=127.0.0.1` is what actually closes the LAN door.** SWAG reaches the
-  container over the Docker network, so the published host port is only there for
-  local `curl`. Leaving it on `0.0.0.0` means anyone on your LAN can hit Hearth
-  over plain HTTP — and since `AUTH_URL` is `https`, Auth.js issues `__Secure-`
-  cookies, so that path can't sign in anyway. It's an open door to nowhere.
+  builds an `http://` OAuth callback that Google then rejects — which looks like
+  a Google Console problem and isn't.
+- **Don't set `APP_BIND=127.0.0.1` in host mode.** SWAG connects from outside the
+  container to your host's LAN address, so binding the port to loopback gives it
+  connection refused.
+- **In network mode, `resolver.conf` matters.** nginx resolves an upstream
+  hostname once at startup unless a resolver is configured. The app container gets
+  a new IP each time it's recreated, so without that include Hearth works until
+  your first rebuild and then 502s until SWAG is restarted. Not an issue in host
+  mode, where the upstream is a literal IP.
 
 If a wildcard certificate already covers your domain, `hearth.example.com` works
 immediately. Otherwise add `hearth` to SWAG's `SUBDOMAINS` and restart it to have

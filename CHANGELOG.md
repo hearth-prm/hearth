@@ -52,9 +52,26 @@ bump and may include breaking changes; patch releases are fixes only.
 - `deploy/swag/hearth.subdomain.conf`, a ready-to-use SWAG proxy config with the
   Docker resolver (so the upstream survives container recreation) and response
   buffering disabled (so streamed renders are not held back).
+- `deploy/swag/hearth-hostip.subdomain.conf`, the host-IP variant: an http-to-https
+  redirect, SWAG's own `proxy.conf` include (which maps `Connection` through
+  `$connection_upgrade` rather than hardcoding `upgrade` on every request), and no
+  resolver, the upstream being a literal address.
+
+### Changed
+
+- The installer now defaults to proxying via the **host IP** rather than creating
+  a shared Docker network. Proxying to the published port works regardless of
+  what networks exist and, unlike the shared-network mode, does not modify the
+  reverse-proxy container at all — the least surprising thing to do to
+  infrastructure someone already set up. `--proxy network` opts into the old
+  behaviour, `--no-proxy` skips it entirely.
 
 ### Fixed
 
+- The installer no longer sets `APP_BIND=127.0.0.1` whenever it detects SWAG.
+  That is only correct when SWAG reaches the app over a shared Docker network; for
+  the common `proxy_pass http://<host-ip>:3000` setup it bound the port to
+  loopback and the proxy got connection refused.
 - `scripts/docker-up.sh` no longer requires `node` or `git` on the host. It reads
   the version from `package.json` and the commit from `.git/` (loose refs and
   `packed-refs`) using only POSIX shell, so images built on Unraid, Synology or

@@ -22,7 +22,15 @@
 #   --proxy-network <n> Docker network shared with the reverse proxy.
 #                       Default proxynet
 #   --swag-container <n> Name of the SWAG container. Default swag
-#   --no-proxy          Skip all reverse-proxy setup and publish on 0.0.0.0
+#   --proxy <mode>      How the reverse proxy reaches Hearth:
+#                         host    - proxy_pass to <host-ip>:PORT. Default when
+#                                   SWAG is found. Changes nothing about your
+#                                   SWAG container or its networks.
+#                         network - share a Docker network and proxy_pass to
+#                                   hearth-app:3000, so no port need be exposed
+#                                   on the LAN. Connects SWAG to that network.
+#                         none    - do not touch the proxy at all.
+#   --no-proxy          Same as --proxy none
 #   --force-path        Allow an install root that is not on a mounted pool
 #   --repo <url>        Source repository
 #   -h, --help          This message
@@ -36,7 +44,7 @@ DOMAIN=""
 APP_PORT="3000"
 PROXY_NETWORK="proxynet"
 SWAG_CONTAINER="swag"
-SETUP_PROXY="auto"
+PROXY_MODE="auto" # auto|host|network|none
 FORCE_PATH="no"
 GIT_IMAGE="alpine/git:latest"
 
@@ -73,12 +81,19 @@ while [ $# -gt 0 ]; do
   --swag-container=*) SWAG_CONTAINER="${1#*=}" && shift ;;
   --repo) need_arg "$1" "${2:-}" && REPO_URL="$2" && shift 2 ;;
   --repo=*) REPO_URL="${1#*=}" && shift ;;
-  --no-proxy) SETUP_PROXY="no" && shift ;;
+  --proxy) need_arg "$1" "${2:-}" && PROXY_MODE="$2" && shift 2 ;;
+  --proxy=*) PROXY_MODE="${1#*=}" && shift ;;
+  --no-proxy) PROXY_MODE="none" && shift ;;
   --force-path) FORCE_PATH="yes" && shift ;;
   -h | --help) usage 0 ;;
   *) die "unknown option: $1  (try --help)" ;;
   esac
 done
+
+case "$PROXY_MODE" in
+auto | host | network | none) ;;
+*) die "--proxy must be one of: host, network, none" ;;
+esac
 
 APP_DIR="$INSTALL_ROOT/app"
 PGDATA_DIR="$INSTALL_ROOT/postgres"
@@ -140,25 +155,47 @@ case "$INSTALL_ROOT" in
 esac
 
 # --- reverse proxy detection ---------------------------------------------
+#
+# Default to "host" when SWAG is present. Proxying to the published host port
+# works regardless of what networks exist, and — unlike the shared-network mode —
+# it does not modify the SWAG container at all. Least surprising thing to do to
+# infrastructure someone else already set up.
 SWAG_CONFIG=""
-if [ "$SETUP_PROXY" != "no" ]; then
+HOST_IP=""
+
+if [ "$PROXY_MODE" != "none" ]; then
   if docker inspect "$SWAG_CONTAINER" >/dev/null 2>&1; then
     # Ask the container where its /config lives rather than assuming
     # /mnt/user/appdata/swag — people relocate it.
     SWAG_CONFIG=$(docker inspect "$SWAG_CONTAINER" \
       --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || true)
     if [ -n "$SWAG_CONFIG" ] && [ -d "$SWAG_CONFIG/nginx/proxy-confs" ]; then
-      SETUP_PROXY="yes"
+      [ "$PROXY_MODE" = auto ] && PROXY_MODE=host
       ok "found SWAG (config at $SWAG_CONFIG)"
     else
-      SETUP_PROXY="no"
-      note "container '$SWAG_CONTAINER' found but its /config/nginx/proxy-confs is not visible; skipping proxy setup"
+      SWAG_CONFIG=""
+      note "container '$SWAG_CONTAINER' found but its /config/nginx/proxy-confs is not visible"
+      [ "$PROXY_MODE" = auto ] && PROXY_MODE=none
     fi
   else
-    SETUP_PROXY="no"
-    note "no container named '$SWAG_CONTAINER'; skipping proxy setup"
+    note "no container named '$SWAG_CONTAINER'"
+    [ "$PROXY_MODE" = auto ] && PROXY_MODE=none
   fi
 fi
+
+if [ "$PROXY_MODE" = host ]; then
+  # The address SWAG will proxy to. "ip route get" reports the source address the
+  # kernel would actually use, which beats guessing from the interface list on a
+  # host with bridges, VLANs and docker0 all present.
+  HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -n 1)
+  [ -n "$HOST_IP" ] || HOST_IP=$(hostname -i 2>/dev/null | awk '{print $1}')
+  if [ -n "$HOST_IP" ]; then
+    ok "host address for the proxy upstream: $HOST_IP:$APP_PORT"
+  else
+    note "could not determine this host's LAN IP; you will need to fill it in yourself"
+  fi
+fi
+ok "proxy mode: $PROXY_MODE"
 
 # --- directories ----------------------------------------------------------
 say "Creating $INSTALL_ROOT"
@@ -209,10 +246,12 @@ else
     AUTH_URL="https://hearth.example.com"
   fi
 
-  if [ "$SETUP_PROXY" = "yes" ]; then
+  case "$PROXY_MODE" in
+  network)
     PROXY_BLOCK=$(
       cat <<EOF
-# Join the reverse proxy's network so it can reach this app as hearth-app:3000.
+# Join the reverse proxy's Docker network so it can reach this app by name as
+# hearth-app:3000.
 COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 PROXY_NETWORK=$PROXY_NETWORK
 # Publish on loopback only: the proxy reaches the container over the Docker
@@ -220,12 +259,25 @@ PROXY_NETWORK=$PROXY_NETWORK
 APP_BIND=127.0.0.1
 EOF
     )
-  else
+    ;;
+  host)
+    PROXY_BLOCK=$(
+      cat <<EOF
+# The reverse proxy connects to the published port on this host, so the port must
+# stay reachable from it. Do NOT set APP_BIND=127.0.0.1 in this mode — that would
+# bind to loopback only and the proxy would get connection refused.
+#APP_BIND=127.0.0.1
+#COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+EOF
+    )
+    ;;
+  *)
     PROXY_BLOCK="# No reverse proxy configured; the app listens on all interfaces.
 #COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 #PROXY_NETWORK=$PROXY_NETWORK
 #APP_BIND=127.0.0.1"
-  fi
+    ;;
+  esac
 
   umask 077
   cat >.env <<EOF
@@ -277,39 +329,57 @@ EOF
 fi
 
 # --- reverse proxy wiring -------------------------------------------------
-if [ "$SETUP_PROXY" = "yes" ]; then
-  say "Wiring up the reverse proxy"
+CONF_DST=""
+if [ -n "$SWAG_CONFIG" ] && [ "$PROXY_MODE" != none ]; then
+  say "Configuring the reverse proxy ($PROXY_MODE mode)"
 
-  if docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1; then
-    ok "network '$PROXY_NETWORK' exists"
-  else
-    docker network create "$PROXY_NETWORK" >/dev/null
-    ok "created network '$PROXY_NETWORK'"
-  fi
-
-  if docker inspect "$SWAG_CONTAINER" \
-    --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null |
-    tr ' ' '\n' | grep -qx "$PROXY_NETWORK"; then
-    ok "$SWAG_CONTAINER already on '$PROXY_NETWORK'"
-  else
-    docker network connect "$PROXY_NETWORK" "$SWAG_CONTAINER"
-    ok "connected $SWAG_CONTAINER to '$PROXY_NETWORK'"
-  fi
-
-  CONF_SRC="$APP_DIR/deploy/swag/hearth.subdomain.conf"
   SUBDOMAIN="hearth"
   [ -n "$DOMAIN" ] && SUBDOMAIN="${DOMAIN%%.*}"
   CONF_DST="$SWAG_CONFIG/nginx/proxy-confs/$SUBDOMAIN.subdomain.conf"
 
+  if [ "$PROXY_MODE" = network ]; then
+    if docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1; then
+      ok "network '$PROXY_NETWORK' exists"
+    else
+      docker network create "$PROXY_NETWORK" >/dev/null
+      ok "created network '$PROXY_NETWORK'"
+    fi
+
+    if docker inspect "$SWAG_CONTAINER" \
+      --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null |
+      tr ' ' '\n' | grep -qx "$PROXY_NETWORK"; then
+      ok "$SWAG_CONTAINER already on '$PROXY_NETWORK'"
+    else
+      docker network connect "$PROXY_NETWORK" "$SWAG_CONTAINER"
+      ok "connected $SWAG_CONTAINER to '$PROXY_NETWORK'"
+    fi
+    CONF_SRC="$APP_DIR/deploy/swag/hearth.subdomain.conf"
+  else
+    CONF_SRC="$APP_DIR/deploy/swag/hearth-hostip.subdomain.conf"
+  fi
+
   if [ ! -f "$CONF_SRC" ]; then
     note "$CONF_SRC missing; skipping proxy config"
+    CONF_DST=""
   elif [ -f "$CONF_DST" ]; then
-    note "$CONF_DST already exists; leaving it alone"
+    # Never clobber a hand-written config. Anyone already running SWAG has
+    # configs they care about, and silently replacing one would be hostile.
+    note "$CONF_DST already exists; leaving your version alone"
+    if [ "$PROXY_MODE" = host ] && [ -n "$HOST_IP" ]; then
+      note "check that it proxies to http://$HOST_IP:$APP_PORT"
+    fi
+    CONF_DST=""
   else
-    # SWAG matches on "<subdomain>.*", so the file has to name the subdomain the
-    # user actually chose or nginx will never route to it.
-    sed "s/^\( *server_name *\)hearth\.\*;/\1$SUBDOMAIN.*;/" "$CONF_SRC" >"$CONF_DST"
+    # SWAG routes on "<subdomain>.*", so the file has to name the subdomain the
+    # user actually chose or nginx will never match the request.
+    sed -e "s/^\( *server_name *\)hearth\.\*;/\1$SUBDOMAIN.*;/" \
+      -e "s|UNRAID_HOST_IP|${HOST_IP:-UNRAID_HOST_IP}|g" \
+      -e "s|:3000;|:$APP_PORT;|" \
+      "$CONF_SRC" >"$CONF_DST"
     ok "installed $CONF_DST"
+    if [ "$PROXY_MODE" = host ] && [ -z "$HOST_IP" ]; then
+      note "edit it and replace UNRAID_HOST_IP before restarting SWAG"
+    fi
     docker restart "$SWAG_CONTAINER" >/dev/null
     ok "restarted $SWAG_CONTAINER"
   fi
