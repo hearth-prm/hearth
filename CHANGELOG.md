@@ -59,6 +59,13 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Changed
 
+- The default install root is now `/mnt/user/appdata/hearth`, the standard Unraid
+  appdata location — what official templates use, what the Appdata Backup plugin
+  covers, and what is reachable over SMB. Pointing `--install-root` at a pool
+  directly (`/mnt/cache/appdata/hearth`) still works and bypasses the FUSE layer
+  for database writes. The mount-point safety check is unaffected: Unraid mounts
+  shfs at `/mnt/user`, so a real share and a real pool both pass, while a typo
+  still fails.
 - The installer now defaults to proxying via the **host IP** rather than creating
   a shared Docker network. Proxying to the published port works regardless of
   what networks exist and, unlike the shared-network mode, does not modify the

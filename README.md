@@ -173,15 +173,19 @@ Named volumes live on `docker.img`, which is a fixed size and is erased whenever
 you rebuild the Docker image file — a routine Unraid troubleshooting step that
 would take your database with it. Set `PGDATA_PATH` to a real path instead.
 
-Point it at the **pool directly** (`/mnt/cache/appdata/...`) rather than
-`/mnt/user/appdata/...`: the latter goes through Unraid's FUSE layer, which adds
-overhead and has a poor track record under database write patterns. Substitute
-your actual pool name if it isn't `cache`.
+The default is `/mnt/user/appdata/hearth`, the standard Unraid appdata location —
+it's what every official template uses, what the Appdata Backup plugin covers, and
+what you can reach over SMB to edit `.env` comfortably.
 
-Set the `appdata` share to **primary storage: cache, secondary storage: none**,
-so the Mover never relocates the files out from under that path. The same files
-are still reachable at `/mnt/user/appdata/...` over SMB, which is the comfortable
-way to edit `.env`.
+Whichever path you use, set the `appdata` share to **primary storage: cache,
+secondary storage: none**. This is the part that actually matters: if the Mover is
+allowed to relocate appdata to the array, it will move the database files out from
+under a running container.
+
+If you'd rather bypass Unraid's FUSE layer for database writes, point the install
+at a pool directly — `--install-root /mnt/user/appdata/hearth`, substituting your
+pool's real name. It's measurably faster for write-heavy workloads, at the cost of
+a path that breaks if you ever move the share.
 
 ### 3. Neither `git` nor `node` is installed
 
@@ -193,12 +197,12 @@ your image still gets a correct build stamp.
 
 ```bash
 # one-time layout (adjust the pool name if yours isn't "cache")
-mkdir -p /mnt/cache/appdata/hearth/postgres
+mkdir -p /mnt/user/appdata/hearth/postgres
 
-docker run --rm -v /mnt/cache/appdata/hearth:/work \
+docker run --rm -v /mnt/user/appdata/hearth:/work \
   alpine/git clone https://gitlab.com/hammerling/hearth.git /work/app
 
-cd /mnt/cache/appdata/hearth/app
+cd /mnt/user/appdata/hearth/app
 cp .env.example .env
 openssl rand -base64 32          # paste into AUTH_SECRET
 vi .env                          # or edit \\TOWER\appdata\hearth\app\.env over SMB
@@ -212,7 +216,7 @@ curl -s http://localhost:3000/api/health
 ```ini
 POSTGRES_PASSWORD=<something long>
 DATABASE_URL=postgresql://hearth:<same password>@db:5432/hearth?schema=public
-PGDATA_PATH=/mnt/cache/appdata/hearth/postgres
+PGDATA_PATH=/mnt/user/appdata/hearth/postgres
 AUTH_SECRET=<openssl rand -base64 32>
 AUTH_URL=https://hearth.example.com
 AUTH_TRUST_HOST=true
@@ -293,8 +297,8 @@ a certificate issued.
 
 - **Autostart** is handled by `restart: unless-stopped` once Docker is up. To get
   the stack in the Unraid UI, add it in Docker Compose Manager with the project
-  directory set to `/mnt/cache/appdata/hearth/app` and enable autostart.
-- **Updating**: `docker run --rm -v /mnt/cache/appdata/hearth:/work alpine/git -C /work/app pull`
+  directory set to `/mnt/user/appdata/hearth/app` and enable autostart.
+- **Updating**: `docker run --rm -v /mnt/user/appdata/hearth:/work alpine/git -C /work/app pull`
   then `sh scripts/docker-up.sh` again. Migrations apply automatically on boot.
 - **Backups**: the Appdata Backup plugin covers `/mnt/user/appdata`. For a
   restorable logical dump, prefer

@@ -16,7 +16,7 @@
 #   --domain <host>     Public hostname, e.g. hearth.example.com. Without it a
 #                       placeholder is written and sign-in will not work until
 #                       you set AUTH_URL yourself.
-#   --install-root <p>  Where to install. Default /mnt/cache/appdata/hearth
+#   --install-root <p>  Where to install. Default /mnt/user/appdata/hearth
 #   --port <n>          Host port to publish. Default 3000
 #   --branch <name>     Branch to deploy. Default main
 #   --proxy-network <n> Docker network shared with the reverse proxy.
@@ -39,7 +39,7 @@ set -eu
 
 REPO_URL="https://gitlab.com/hammerling/hearth.git"
 BRANCH="main"
-INSTALL_ROOT="/mnt/cache/appdata/hearth"
+INSTALL_ROOT="/mnt/user/appdata/hearth"
 DOMAIN=""
 APP_PORT="3000"
 PROXY_NETWORK="proxynet"
@@ -119,21 +119,22 @@ command -v openssl >/dev/null 2>&1 || die "openssl not found — needed to gener
 command -v curl >/dev/null 2>&1 || die "curl not found — needed to verify the app started."
 ok "openssl, curl"
 
-# Verify the storage pool, not just the parent directory.
+# Verify the storage root is really mounted, not just that the path resolves.
 #
-# This guards a genuinely nasty Unraid failure mode: pool names vary (cache,
-# nvme, ssd...), and `mkdir -p /mnt/nvme-typo/appdata/hearth` SUCCEEDS — Unraid's
-# root filesystem is a RAM disk, so the typo produces a directory that works
-# perfectly until the next reboot, then takes the database with it. Requiring the
-# pool to be a real mount point is the only way to catch that before the fact.
+# This guards a genuinely nasty Unraid failure mode: `mkdir -p /mnt/typo/appdata`
+# SUCCEEDS — the root filesystem is a RAM disk, so a mistyped share or pool name
+# produces a directory that works perfectly until the next reboot, then takes the
+# database with it. Both /mnt/user (the FUSE share layer) and /mnt/<pool> appear
+# in /proc/mounts on a healthy system, so requiring a real mount point catches the
+# typo without caring which of the two you chose.
 case "$INSTALL_ROOT" in
 /mnt/*)
   POOL_ROOT="/mnt/$(printf '%s' "${INSTALL_ROOT#/mnt/}" | cut -d/ -f1)"
   if [ ! -d "$POOL_ROOT" ]; then
-    printf '\033[1;31mERROR\033[0m storage pool %s does not exist.\n' "$POOL_ROOT" >&2
+    printf '\033[1;31mERROR\033[0m %s does not exist.\n' "$POOL_ROOT" >&2
     printf '      Available under /mnt:\n' >&2
     ls -1 /mnt 2>/dev/null | sed 's/^/        /' >&2
-    printf '      Re-run with --install-root /mnt/<pool>/appdata/hearth\n' >&2
+    printf '      Re-run with --install-root <path>, e.g. /mnt/user/appdata/hearth\n' >&2
     exit 1
   fi
   if [ "$FORCE_PATH" != yes ] && [ -r /proc/mounts ] &&
@@ -141,12 +142,12 @@ case "$INSTALL_ROOT" in
     printf '\033[1;31mERROR\033[0m %s exists but is not a mount point.\n' "$POOL_ROOT" >&2
     printf "      On Unraid that means it is on the RAM-backed root filesystem,\n" >&2
     printf "      and everything written there is lost on reboot.\n" >&2
-    printf '      Check the pool name against:\n' >&2
+    printf '      Currently mounted under /mnt:\n' >&2
     awk '$2 ~ /^\/mnt\// {print "        " $2}' /proc/mounts 2>/dev/null >&2
     printf '      Pass --force-path if you really mean this location.\n' >&2
     exit 1
   fi
-  ok "pool $POOL_ROOT is mounted"
+  ok "$POOL_ROOT is mounted"
   ;;
 *)
   mkdir -p "$INSTALL_ROOT" 2>/dev/null || die "cannot create $INSTALL_ROOT"
