@@ -17,3 +17,5 @@ npm-debug.log*
 tsconfig.tsbuildinfo
 scripts
 CHANGELOG.md
+deploy-hearth.sh
+update-hearth.sh

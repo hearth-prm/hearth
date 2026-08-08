@@ -20,6 +20,20 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Added
 
+- `deploy-hearth.sh`, a one-command first-time install. Checks prerequisites,
+  clones through a container (no `git` on the host required), generates `.env`
+  with real random secrets, auto-detects and wires up SWAG, builds, starts and
+  waits for the health endpoint. Idempotent: it never overwrites an existing
+  `.env`, since the database password in it is baked into the Postgres data
+  directory.
+- `update-hearth.sh`, which takes a verified `pg_dump` before pulling and
+  rebuilding, aborts without rebuilding if that backup fails or looks truncated,
+  applies backup retention, and reports the running version before and after.
+- Storage-pool safety check in the installer. `mkdir -p /mnt/typo/...` succeeds
+  on Unraid's RAM-backed root filesystem, producing an install that works until
+  the next reboot and then loses the database, so the pool must be a real mount
+  point (override with `--force-path`).
+
 - `PGDATA_PATH` setting to bind-mount the Postgres data directory instead of
   using a Docker named volume. Needed on appliance hosts such as Unraid, where
   the volume store sits on a fixed-size `docker.img` that routine

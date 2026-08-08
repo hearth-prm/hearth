@@ -103,8 +103,49 @@ a reconnect when a scope or offline access is missing.
 
 ## Running on Unraid
 
-Three Unraid-specific things matter, and the first one will stop you dead if you
-don't deal with it up front.
+### Scripted install
+
+```bash
+# On Unraid, via SSH as root
+curl -fsSLO https://gitlab.com/hammerling/hearth/-/raw/main/deploy-hearth.sh
+sh deploy-hearth.sh --domain hearth.example.com
+```
+
+[deploy-hearth.sh](deploy-hearth.sh) does the whole first-time install: checks
+prerequisites, verifies your storage pool is really a mounted pool, clones the
+repo through a container (no `git` needed), generates `.env` with real random
+secrets, wires up SWAG if it finds it, builds, starts, and waits for the health
+endpoint. It is safe to re-run — it never overwrites an existing `.env`, because
+the generated database password is baked into the Postgres data directory and
+regenerating it would lock the app out of its own data.
+
+You still have to create the Google OAuth client yourself; the script writes
+placeholders and prints exactly what to do, including the redirect URI to
+register.
+
+```bash
+sh deploy-hearth.sh --help          # all options
+sh deploy-hearth.sh --no-proxy      # skip reverse-proxy setup
+sh deploy-hearth.sh --install-root /mnt/nvme/appdata/hearth
+```
+
+To deploy changes later, from the install directory:
+
+```bash
+sh update-hearth.sh                 # backup, pull, rebuild, restart, verify
+sh update-hearth.sh --no-pull       # rebuild after editing .env only
+sh update-hearth.sh --prune         # also reclaim docker.img space
+```
+
+[update-hearth.sh](update-hearth.sh) takes a verified `pg_dump` **before**
+anything else, because the container applies migrations on boot and migrations
+only run forwards — that dump is the only thing that can undo a bad one. It
+aborts without rebuilding if the backup fails, keeps the newest 10, and reports
+the version before and after.
+
+The rest of this section explains what those scripts are doing and why, which is
+worth reading once — particularly the first item, which will stop you dead if you
+haven't dealt with it.
 
 ### 1. Google will not accept a LAN address as a redirect URI
 
