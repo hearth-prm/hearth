@@ -79,6 +79,13 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Changed
 
+- `--proxy-conf-dir` now accepts a path relative to the reverse proxy's `/config`
+  mount, so `nginx/site-confs` is correct regardless of whether the host side of
+  that mount is `.../appdata/swag` or `.../appdata/swag/config`. An absolute path
+  that does not exist reports the real mount point and lists the directories that
+  are actually there, rather than just failing. Documentation no longer hardcodes a
+  SWAG appdata path anywhere, since that path is not portable between setups.
+
 - Both scripts now use the host's `git` directly instead of borrowing it from an
   `alpine/git` container. The container detour was based on a wrong assumption that
   Unraid ships without git; it made the commands harder to read, and forced

@@ -32,9 +32,11 @@
 #                         none    - do not touch the proxy at all.
 #   --no-proxy          Same as --proxy none
 #   --proxy-conf-dir <p>  Directory to write the nginx config into. Default is
-#                         <swag>/nginx/proxy-confs, discovered from the container.
-#                         Use e.g. /mnt/user/appdata/swag/nginx/site-confs for a
-#                         site-confs style config.
+#                         nginx/proxy-confs under the SWAG container's /config
+#                         mount, discovered from the container itself. A relative
+#                         path is resolved against that mount, so
+#                         "nginx/site-confs" works regardless of where appdata
+#                         lives. Absolute paths are used as given.
 #   --proxy-conf-name <f> Exact filename to write. Default <subdomain>.subdomain.conf
 #   --host-ip <addr>      Address the proxy should connect to, overriding
 #                         auto-detection (useful on a multi-homed server).
@@ -381,7 +383,19 @@ if [ "$PROXY_MODE" != none ]; then
   # Destination directory: an explicit --proxy-conf-dir wins, otherwise derive it
   # from the container's own /config mount.
   if [ -n "$PROXY_CONF_DIR" ]; then
-    CONF_DIR="$PROXY_CONF_DIR"
+    case "$PROXY_CONF_DIR" in
+    /*) CONF_DIR="$PROXY_CONF_DIR" ;;
+    *)
+      # A relative path is resolved against the container's discovered /config
+      # mount. Worth supporting because that host path varies with how the
+      # template was set up — some map .../swag to /config, others
+      # .../swag/config — so "nginx/site-confs" is correct everywhere while a
+      # hardcoded absolute path is a coin flip.
+      [ -n "$SWAG_CONFIG" ] ||
+        die "--proxy-conf-dir '$PROXY_CONF_DIR' is relative, but the SWAG container could not be inspected to resolve it against. Give an absolute path."
+      CONF_DIR="$SWAG_CONFIG/$PROXY_CONF_DIR"
+      ;;
+    esac
   elif [ -n "$SWAG_CONFIG" ]; then
     CONF_DIR="$SWAG_CONFIG/nginx/proxy-confs"
   else
@@ -391,7 +405,18 @@ if [ "$PROXY_MODE" != none ]; then
   if [ -n "$CONF_DIR" ]; then
     say "Configuring the reverse proxy ($PROXY_MODE mode)"
 
-    [ -d "$CONF_DIR" ] || die "proxy config directory does not exist: $CONF_DIR"
+    if [ ! -d "$CONF_DIR" ]; then
+      printf '\033[1;31mERROR\033[0m proxy config directory does not exist:\n        %s\n' "$CONF_DIR" >&2
+      if [ -n "$SWAG_CONFIG" ]; then
+        printf '      %s reports its /config mounted at:\n        %s\n' "$SWAG_CONTAINER" "$SWAG_CONFIG" >&2
+        printf '      Directories under %s/nginx:\n' "$SWAG_CONFIG" >&2
+        ls -1d "$SWAG_CONFIG"/nginx/*/ 2>/dev/null | sed 's|^|        |' >&2 ||
+          printf '        (none found)\n' >&2
+        printf '      You can also pass a path relative to the /config mount, e.g.\n' >&2
+        printf '        --proxy-conf-dir nginx/site-confs\n' >&2
+      fi
+      exit 1
+    fi
 
     SUBDOMAIN="hearth"
     [ -n "$DOMAIN" ] && SUBDOMAIN="${DOMAIN%%.*}"

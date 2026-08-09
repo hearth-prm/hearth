@@ -142,10 +142,17 @@ If you keep your nginx configs somewhere specific, or name them your own way:
 sh deploy-hearth.sh \
   --domain hearth.example.com \
   --port 3080 \
-  --proxy-conf-dir  /mnt/user/appdata/swag/nginx/site-confs \
+  --proxy-conf-dir  nginx/site-confs \
   --proxy-conf-name HEARTH.EXAMPLE.COM.conf \
   --host-ip 192.168.0.2          # override the detected address if needed
 ```
+
+`--proxy-conf-dir` accepts a path relative to SWAG's `/config` mount, which the
+script discovers from the container. That matters because the host side of that
+mount differs between setups — some map `.../appdata/swag` to `/config`, others
+`.../appdata/swag/config` — so `nginx/site-confs` is correct everywhere while an
+absolute path is a guess. Absolute paths still work if you prefer them, and a wrong
+one now reports the real mount and lists what's actually there.
 
 `--port` is the **host** port. The container always listens on 3000 internally, so
 in host mode the generated `proxy_pass` gets your port, while in network mode the
@@ -281,8 +288,13 @@ so it doesn't matter what network anything is on, and nothing about your SWAG
 container changes.
 
 ```bash
+# SWAG's appdata path varies with how the template was set up, so ask the
+# container where its /config actually is rather than guessing.
+SWAG_CONFIG=$(docker inspect swag \
+  --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}')
+
 cp deploy/swag/hearth-hostip.subdomain.conf \
-   /mnt/user/appdata/swag/nginx/proxy-confs/hearth.subdomain.conf
+   "$SWAG_CONFIG/nginx/proxy-confs/hearth.subdomain.conf"
 # replace UNRAID_HOST_IP with your server's LAN IP
 docker restart swag
 ```
@@ -300,8 +312,13 @@ SWAG reaches the container by name, and the host port binds to loopback only.
 ```bash
 docker network create proxynet          # skip if it exists
 docker network connect proxynet swag    # attaches to your existing SWAG
+# SWAG's appdata path varies with how the template was set up, so ask the
+# container where its /config actually is rather than guessing.
+SWAG_CONFIG=$(docker inspect swag \
+  --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}')
+
 cp deploy/swag/hearth.subdomain.conf \
-   /mnt/user/appdata/swag/nginx/proxy-confs/hearth.subdomain.conf
+   "$SWAG_CONFIG/nginx/proxy-confs/hearth.subdomain.conf"
 docker restart swag
 ```
 
