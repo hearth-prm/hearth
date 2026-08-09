@@ -13,23 +13,34 @@ import { btnPrimary, btnSecondary, Card, CardHeader, FormMessage } from "@/compo
  * "queued 40 contacts" under a button the user never pressed.
  */
 export function SyncPanel({
+  title,
+  description,
+  noun,
   syncNow,
   resyncAll,
   enabled,
+  disabledNotice,
   lastSyncAt,
   lastSummary,
   pendingCount,
   errorCount,
   timeZone,
+  footnote,
 }: {
+  title: string;
+  description: string;
+  /** Plural noun for the buttons and hints, e.g. "contacts". */
+  noun: string;
   syncNow: (state: ActionState, form: FormData) => Promise<ActionState>;
   resyncAll: (state: ActionState, form: FormData) => Promise<ActionState>;
   enabled: boolean;
+  disabledNotice: string;
   lastSyncAt: Date | null;
   lastSummary: string | null;
   pendingCount: number;
   errorCount: number;
   timeZone: string;
+  footnote?: string;
 }) {
   const [nowState, nowAction] = useActionState(syncNow, EMPTY_ACTION_STATE);
   const [allState, allAction] = useActionState(resyncAll, EMPTY_ACTION_STATE);
@@ -44,16 +55,12 @@ export function SyncPanel({
 
   return (
     <Card>
-      <CardHeader
-        title="Contact sync"
-        description="Hearth pushes to Google Contacts. It never reads changes back."
-      />
+      <CardHeader title={title} description={description} />
 
       <div className="space-y-4 px-5 py-5">
         {!enabled ? (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            Contact sync is turned off below. Nothing is sent to Google until you
-            enable it and save.
+            {disabledNotice}
           </p>
         ) : null}
 
@@ -98,15 +105,14 @@ export function SyncPanel({
 
           <form action={allAction}>
             <SubmitButton className={btnSecondary} pendingLabel="Queueing…">
-              Re-queue every contact
+              Re-queue every {noun.replace(/s$/, "")}
             </SubmitButton>
           </form>
         </div>
 
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          Only contacts that changed are pushed. Re-queue every contact after
-          changing what gets synced, or to overwrite edits made directly in
-          Google.
+          {footnote ??
+            `Only ${noun} that changed are pushed. Re-queue everything after changing what gets synced, or to overwrite edits made directly in Google.`}
         </p>
       </div>
     </Card>

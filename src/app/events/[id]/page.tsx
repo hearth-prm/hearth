@@ -81,6 +81,11 @@ export default async function EventPage({
     }),
   ]);
 
+  // Guests Google cannot be told about: it identifies attendees only by email.
+  const uninvitable = event.attendees
+    .filter((a) => a.inviteToGoogle && a.person.contactPoints.length === 0)
+    .map((a) => a.person.displayName);
+
   const populated = defs
     .filter((d) => !["title", "startAt", "endAt", "allDay", "timeZone", "description"].includes(d.key))
     .map((def) => ({ def, value: readFieldValue(event, def) }))
@@ -308,6 +313,31 @@ export default async function EventPage({
               </DetailRow>
               {event.googleCalendarId ? (
                 <DetailRow label="Calendar">{event.googleCalendarId}</DetailRow>
+              ) : null}
+              {event.addToGoogle && event.googleEventId ? (
+                <DetailRow label="Google event">
+                  <a
+                    href={`https://calendar.google.com/calendar/u/0/r/eventedit/${Buffer.from(
+                      `${event.googleEventId} ${event.googleCalendarId ?? "primary"}`,
+                    ).toString("base64url")}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="text-teal-700 hover:underline dark:text-teal-400"
+                  >
+                    Open in Google Calendar
+                  </a>
+                </DetailRow>
+              ) : null}
+              {uninvitable.length > 0 ? (
+                <DetailRow label="Not invited">
+                  <span className="text-amber-700 dark:text-amber-400">
+                    {uninvitable.join(", ")}
+                  </span>
+                  <span className="mt-0.5 block text-neutral-500 dark:text-neutral-400">
+                    Google identifies guests by email address, so anyone without one
+                    cannot be added. They stay on the Hearth guest list.
+                  </span>
+                </DetailRow>
               ) : null}
               {event.googleSyncedAt ? (
                 <DetailRow label="Last synced">

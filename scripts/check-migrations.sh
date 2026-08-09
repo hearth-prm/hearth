@@ -16,7 +16,10 @@ status=0
 for f in prisma/migrations/*/migration.sql; do
   [ -f "$f" ] || continue
   grep -q -- '-- hearth:allow-destructive' "$f" && continue
-  hits=$(grep -inE '^[[:space:]]*(DROP[[:space:]]+(TABLE|SCHEMA|DATABASE|TYPE)|TRUNCATE)' "$f" || true)
+  # DROP COLUMN and a column type change lose data just as surely as DROP TABLE,
+  # and both appear mid-statement rather than at the start of a line, so this
+  # cannot anchor to ^.
+  hits=$(grep -inE '(DROP[[:space:]]+(TABLE|SCHEMA|DATABASE|TYPE|COLUMN)|TRUNCATE|ALTER[[:space:]]+COLUMN[[:space:]]+"?[A-Za-z_]+"?[[:space:]]+(SET[[:space:]]+DATA[[:space:]]+)?TYPE)' "$f" || true)
   if [ -n "$hits" ]; then
     echo "DESTRUCTIVE statements in $f:" >&2
     printf '%s\n' "$hits" | sed 's/^/  /' >&2

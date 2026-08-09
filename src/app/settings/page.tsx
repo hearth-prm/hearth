@@ -5,23 +5,37 @@ import { getGoogleConnection, getUserSettings } from "@/lib/settings";
 import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
 import { commonTimeZones } from "@/lib/time";
 import { updateSettings } from "@/lib/actions/settings";
-import { resyncAllContacts, syncContactsNow } from "@/lib/actions/sync";
+import {
+  resyncAllContacts,
+  resyncAllEvents,
+  syncContactsNow,
+  syncEventsNow,
+} from "@/lib/actions/sync";
+import { listUserCalendars } from "@/lib/google/calendars";
 import { SyncPanel } from "@/components/sync-panel";
 import { Badge, btnSecondary, Card, CardHeader, DetailRow } from "@/components/ui";
 import { SettingsForm } from "@/components/settings-form";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [settings, google, pendingCount, errorCount] = await Promise.all([
-    getUserSettings(user.id),
-    getGoogleConnection(user.id),
-    prisma.person.count({
-      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
-    }),
-    prisma.person.count({
-      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
-    }),
-  ]);
+  const [settings, google, pendingCount, errorCount, eventsPending, eventsError, calendars] =
+    await Promise.all([
+      getUserSettings(user.id),
+      getGoogleConnection(user.id),
+      prisma.person.count({
+        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
+      }),
+      prisma.person.count({
+        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+      }),
+      prisma.event.count({
+        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
+      }),
+      prisma.event.count({
+        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+      }),
+      listUserCalendars(user.id),
+    ]);
 
   return (
     <div className="space-y-6">
@@ -96,9 +110,13 @@ export default async function SettingsPage() {
       ) : null}
 
       <SyncPanel
+        title="Contact sync"
+        description="Hearth pushes to Google Contacts. It never reads changes back."
+        noun="contacts"
         syncNow={syncContactsNow}
         resyncAll={resyncAllContacts}
         enabled={settings.syncContactsEnabled}
+        disabledNotice="Contact sync is turned off below. Nothing is sent to Google until you enable it and save."
         lastSyncAt={settings.lastContactSyncAt}
         lastSummary={settings.lastContactSyncSummary}
         pendingCount={pendingCount}
@@ -106,11 +124,28 @@ export default async function SettingsPage() {
         timeZone={settings.timeZone}
       />
 
+      <SyncPanel
+        title="Calendar sync"
+        description="Hearth pushes events and their guest list. Guest RSVPs come back."
+        noun="events"
+        syncNow={syncEventsNow}
+        resyncAll={resyncAllEvents}
+        enabled={settings.syncCalendarEnabled}
+        disabledNotice="Calendar sync is turned off below. No events are sent to Google until you enable it and save."
+        lastSyncAt={settings.lastEventSyncAt}
+        lastSummary={settings.lastEventSyncSummary}
+        pendingCount={eventsPending}
+        errorCount={eventsError}
+        timeZone={settings.timeZone}
+        footnote="An event's guest list depends on your contacts, so changing someone's email does not by itself re-push the events they are on — re-queue events after changing addresses."
+      />
+
       <SettingsForm
         action={updateSettings}
         values={{
           syncContactsEnabled: settings.syncContactsEnabled,
           syncCustomFields: settings.syncCustomFields,
+          sendInvites: settings.sendInvites,
           syncCalendarEnabled: settings.syncCalendarEnabled,
           defaultAddToGoogle: settings.defaultAddToGoogle,
           inviteAttendees: settings.inviteAttendees,
@@ -119,6 +154,7 @@ export default async function SettingsPage() {
           timeZone: settings.timeZone,
         }}
         timeZones={commonTimeZones()}
+        calendars={calendars}
         canSyncContacts={google.canSyncContacts}
         canSyncCalendar={google.canSyncCalendar}
       />

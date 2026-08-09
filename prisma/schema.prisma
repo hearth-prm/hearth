@@ -105,6 +105,14 @@ model UserSettings {
   inviteAttendees     Boolean @default(true)
   /// Pull RSVP responses from Google back into EventAttendee.rsvp.
   importRsvps         Boolean @default(true)
+  /// Let Google email guests when an event is created or changed.
+  ///
+  /// Off by default, and deliberately so: Hearth records past gatherings as
+  /// relationship history, so a naive push would email real people about a dinner
+  /// that happened years ago. Even when on, notifications are suppressed for
+  /// events that have already ended. Attendees are mirrored to Google either way —
+  /// only the emails are gated.
+  sendInvites         Boolean @default(false)
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
@@ -122,6 +130,15 @@ model UserSettings {
   /// Outcome of the last contacts push, for the settings page.
   lastContactSyncAt      DateTime?
   lastContactSyncSummary String?
+
+  /// Outcome of the last calendar push.
+  lastEventSyncAt      DateTime?
+  lastEventSyncSummary String?
+
+  /// Watermark for the RSVP poll. Google's events.list accepts `updatedMin`, so
+  /// one call per run returns every event changed since this instant — far cheaper
+  /// than fetching each synced event individually.
+  calendarRsvpCheckedAt DateTime?
 
   /// Lease preventing two sync runs for this user at once — the scheduled loop
   /// and a manual "Sync now" can otherwise overlap. A lease rather than a
@@ -358,11 +375,13 @@ model Event {
   googleEventId    String?
   googleCalendarId String?
   googleEtag       String?
-  /// Opaque cursor for incremental RSVP pulls (M3).
-  googleSyncToken  String?
   googleSyncedAt   DateTime?
   googleSyncStatus SyncStatus @default(PENDING)
   googleSyncError  String?    @db.Text
+  /// Consecutive failed pushes, driving exponential backoff.
+  googleSyncAttempts      Int       @default(0)
+  /// Earliest time this event should be tried again. Null means "now".
+  googleSyncNextAttemptAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -371,6 +390,8 @@ model Event {
   attendees EventAttendee[]
 
   @@index([ownerId, startAt])
+  /// Drives the sync queue: pending/errored events whose backoff has elapsed.
+  @@index([ownerId, addToGoogle, googleSyncStatus, googleSyncNextAttemptAt])
   @@unique([ownerId, googleCalendarId, googleEventId])
   @@index([custom(ops: JsonbOps)], type: Gin)
 }

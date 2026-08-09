@@ -27,11 +27,12 @@ you opt into, is pulling event RSVPs from calendar guests.)
 | ✅ | "Add to Google" toggle on both record types, default on | Done |
 | ✅ | Deletion/opt-out removes the Google copy | Done |
 | ✅ | One-way contacts push to Google | Done |
-| ⏳ | Calendar push + attendee invites + RSVP writeback | M3 |
+| ✅ | Calendar push + attendee invites + RSVP writeback | Done |
 | ⏳ | Field ↔ Google field mapping settings page | M4 |
 | ⏳ | Sharing contacts and events between users | M4 |
 
-Contacts sync. Events do not yet — the calendar push is M3.
+Contacts and events both sync. What remains is the field↔Google mapping page and
+sharing records between users (M4).
 
 ---
 
@@ -450,6 +451,49 @@ differs sharply:
 - **Contact deleted in Google** — the resource id is forgotten and the contact is
   re-created.
 - **Server or network wobble** — retried with backoff.
+
+## Calendar sync
+
+Turn it on in Settings and pick a target calendar. Every event with **Add to
+Google** ticked is created there and kept up to date; unticking one, or deleting
+it, removes the Google copy.
+
+Hearth owns the event's title, description, location, timing and guest list.
+Changing the target calendar moves existing events — the old copy is deleted and
+recreated on the new one.
+
+### Guests
+
+Attendees with a primary email are added as Google guests, marked **optional** when
+their Hearth role is Optional. Anyone without an email cannot be sent at all —
+Google identifies guests only by address — so they stay on the Hearth guest list and
+the event page says who was left off.
+
+**Google does not email anyone by default.** That is deliberate: Hearth records past
+gatherings as relationship history, so a naive push would email eight people about a
+dinner from 2019. Enabling *Let Google email the guests* only affects events that
+have not finished yet; anything already over stays silent regardless. Guests are
+mirrored to Google either way — only the emails are gated.
+
+### RSVPs coming back
+
+This is the one place Google is authoritative. Each run asks Google for events
+changed since the last check and copies guest replies onto the matching Hearth
+attendee, which then shows "RSVP from Google" on the event page.
+
+Replies are matched on **the address the guest was actually invited under**, not the
+person's current primary email — those diverge once someone changes their address,
+and the invite Google holds still carries the old one.
+
+Two consequences worth knowing:
+
+- A push has to read the event first, because patching the attendee list would
+  otherwise reset everyone's reply to "no response". Hearth carries each existing
+  responseStatus back into the payload.
+- An event's Google form depends on data outside the event: changing someone's
+  email changes who gets invited but touches only the Person row, so the events
+  they are on are not re-pushed automatically. **Re-queue every event** in Settings
+  after changing addresses.
 
 ## Using it
 

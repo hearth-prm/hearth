@@ -1,4 +1,4 @@
-import { runContactSyncForAllUsers } from "./runner";
+import { runContactSyncForAllUsers, runEventSyncForAllUsers } from "./runner";
 
 /**
  * In-process periodic sync.
@@ -32,21 +32,27 @@ function enabled(): boolean {
 
 async function tick(): Promise<void> {
   try {
-    const runs = await runContactSyncForAllUsers();
-    for (const { userId, outcome } of runs) {
+    // Contacts first: events reference people, and an event's guest list is built
+    // from contact data, so pushing people first keeps the two consistent within
+    // a single cycle.
+    const runs = [
+      ...(await runContactSyncForAllUsers()).map((r) => ({ ...r, kind: "contacts" })),
+      ...(await runEventSyncForAllUsers()).map((r) => ({ ...r, kind: "events" })),
+    ];
+    for (const { userId, outcome, kind } of runs) {
       switch (outcome.status) {
         case "ok":
           // Silent when there was nothing to do, or the log becomes noise that
           // hides the runs that mattered.
           if (outcome.summary !== "nothing to do") {
-            console.log(`[hearth] contacts ${userId}: ${outcome.summary}`);
+            console.log(`[hearth] ${kind} ${userId}: ${outcome.summary}`);
           }
           break;
         case "auth":
-          console.warn(`[hearth] contacts ${userId}: ${outcome.message}`);
+          console.warn(`[hearth] ${kind} ${userId}: ${outcome.message}`);
           break;
         case "error":
-          console.error(`[hearth] contacts ${userId}: ${outcome.message}`);
+          console.error(`[hearth] ${kind} ${userId}: ${outcome.message}`);
           break;
         default:
           break;

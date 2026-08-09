@@ -26,6 +26,31 @@ that formally marks its milestone.
 
 ### Added
 
+- **Calendar sync with attendee invites and RSVP writeback (milestone 3).** Events
+  with "Add to Google" ticked are created on the chosen calendar and kept current;
+  unticking or deleting one removes the Google copy. Changing the target calendar
+  moves existing events rather than orphaning them.
+  - Attendees with a primary email become Google guests, optional when their Hearth
+    role is. Anyone without an email is reported on the event page rather than
+    silently dropped, since Google identifies guests only by address.
+  - **Notifications are off by default and suppressed for finished events even when
+    on.** Hearth records past gatherings as history, so an ungated push would email
+    real people about events that already happened. Guests are mirrored either way.
+  - RSVPs flow back from Google — the one direction where Google is authoritative —
+    matched on the address the guest was invited under rather than the person's
+    current email, because those diverge.
+  - A push reads the event before patching, so carrying each guest's existing
+    responseStatus across stops the write from resetting every reply.
+  - Target calendar is picked from a list of calendars you can write to, falling
+    back to a text field if Google cannot be reached.
+  - Per-event error state and exponential backoff, matching contact sync.
+- The migration guard now also catches `DROP COLUMN` and column type changes, which
+  lose data just as surely as `DROP TABLE`. Deliberate cases are marked with
+  `-- hearth:allow-destructive` and a reason, as the M3 migration does for removing
+  the unused `Event.googleSyncToken`.
+
+### Added
+
 - A link to the synced Google contact on each person's page. The SYNCED badge only
   means Google accepted the write, and changes take a while to surface in the
   Contacts UI, so being able to open the record settles "did that actually go

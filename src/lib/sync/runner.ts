@@ -1,9 +1,15 @@
 import { prisma } from "@/lib/db";
 import { getGoogleClient, GoogleAuthError, recordAuthError } from "@/lib/google/auth";
 import { createPeopleClient } from "@/lib/google/people-client";
-import { CONTACT_SYNC_SCOPES, grantCovers } from "@/lib/google/scopes";
+import { createCalendarClient } from "@/lib/google/calendar-client";
+import {
+  CALENDAR_SYNC_SCOPES,
+  CONTACT_SYNC_SCOPES,
+  grantCovers,
+} from "@/lib/google/scopes";
 import { withSyncLease } from "./lease";
 import { summarise, syncContactsForUser, type ContactSyncResult } from "./contacts";
+import { summariseEvents, syncEventsForUser, type EventSyncResult } from "./events";
 
 /**
  * Wraps the push engine with everything it should not have to know about:
@@ -118,6 +124,95 @@ export async function runContactSyncForUser(
   return outcome ?? { status: "busy" };
 }
 
+export type EventRunOutcome =
+  | { status: "ok"; result: EventSyncResult; summary: string }
+  | { status: "skipped"; reason: string }
+  | { status: "busy" }
+  | { status: "auth"; message: string }
+  | { status: "error"; message: string };
+
+export async function runEventSyncForUser(
+  userId: string,
+  options: RunOptions = {},
+): Promise<EventRunOutcome> {
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: {
+      syncCalendarEnabled: true,
+      googleAuthError: true,
+      googleAuthErrorAt: true,
+    },
+  });
+
+  if (!settings) return { status: "skipped", reason: "no settings for this user" };
+  if (!settings.syncCalendarEnabled) {
+    return { status: "skipped", reason: "calendar sync is turned off" };
+  }
+
+  if (
+    !options.force &&
+    settings.googleAuthError &&
+    settings.googleAuthErrorAt &&
+    Date.now() - settings.googleAuthErrorAt.getTime() < AUTH_ERROR_COOLDOWN_MS
+  ) {
+    return { status: "auth", message: settings.googleAuthError };
+  }
+
+  const account = await prisma.account.findFirst({
+    where: { userId, provider: "google" },
+    select: { scope: true },
+  });
+  if (!grantCovers(account?.scope, CALENDAR_SYNC_SCOPES)) {
+    const message =
+      "The Google connection does not include permission to manage calendar events. Reconnect Google in Settings.";
+    await recordAuthError(userId, message);
+    return { status: "auth", message };
+  }
+
+  // The same lease as contacts, deliberately: both write sync state on the same
+  // user and a Google project's quota is shared, so serialising them is both safer
+  // and kinder to the rate limit.
+  const outcome = await withSyncLease(userId, async (): Promise<EventRunOutcome> => {
+    try {
+      const auth = await getGoogleClient(userId);
+      const calendar = createCalendarClient(auth);
+      const result = await syncEventsForUser(userId, { calendar }, options);
+      const summary = summariseEvents(result);
+
+      await prisma.userSettings.updateMany({
+        where: { userId },
+        data: { lastEventSyncAt: new Date(), lastEventSyncSummary: summary },
+      });
+
+      return { status: "ok", result, summary };
+    } catch (err) {
+      if (err instanceof GoogleAuthError) {
+        await recordAuthError(userId, err.message);
+        await prisma.userSettings.updateMany({
+          where: { userId },
+          data: {
+            lastEventSyncAt: new Date(),
+            lastEventSyncSummary: `stopped: ${err.message}`,
+          },
+        });
+        return { status: "auth", message: err.message };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[hearth] event sync failed for ${userId}:`, err);
+      await prisma.userSettings.updateMany({
+        where: { userId },
+        data: {
+          lastEventSyncAt: new Date(),
+          lastEventSyncSummary: `failed: ${message}`,
+        },
+      });
+      return { status: "error", message };
+    }
+  });
+
+  return outcome ?? { status: "busy" };
+}
+
 /** Every user who has switched contact sync on. Used by the scheduler. */
 export async function runContactSyncForAllUsers(): Promise<
   Array<{ userId: string; outcome: RunOutcome }>
@@ -133,6 +228,21 @@ export async function runContactSyncForAllUsers(): Promise<
     // quota and make rate limiting more likely, and a personal install has few
     // users anyway.
     out.push({ userId, outcome: await runContactSyncForUser(userId) });
+  }
+  return out;
+}
+
+export async function runEventSyncForAllUsers(): Promise<
+  Array<{ userId: string; outcome: EventRunOutcome }>
+> {
+  const users = await prisma.userSettings.findMany({
+    where: { syncCalendarEnabled: true },
+    select: { userId: true },
+  });
+
+  const out: Array<{ userId: string; outcome: EventRunOutcome }> = [];
+  for (const { userId } of users) {
+    out.push({ userId, outcome: await runEventSyncForUser(userId) });
   }
   return out;
 }

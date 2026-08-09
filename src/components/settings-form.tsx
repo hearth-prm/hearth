@@ -13,9 +13,16 @@ import {
   labelClass,
 } from "@/components/ui";
 
+export interface CalendarOption {
+  id: string;
+  summary: string;
+  primary: boolean;
+}
+
 export interface SettingsValues {
   syncContactsEnabled: boolean;
   syncCustomFields: boolean;
+  sendInvites: boolean;
   syncCalendarEnabled: boolean;
   defaultAddToGoogle: boolean;
   inviteAttendees: boolean;
@@ -28,12 +35,15 @@ export function SettingsForm({
   action,
   values,
   timeZones,
+  calendars,
   canSyncContacts,
   canSyncCalendar,
 }: {
   action: (state: ActionState, form: FormData) => Promise<ActionState>;
   values: SettingsValues;
   timeZones: string[];
+  /** Null when Google could not be asked; the field falls back to free text. */
+  calendars: CalendarOption[] | null;
   canSyncContacts: boolean;
   canSyncCalendar: boolean;
 }) {
@@ -105,19 +115,60 @@ export function SettingsForm({
             defaultChecked={values.importRsvps}
           />
 
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 dark:border-amber-900 dark:bg-amber-950/30">
+            <Toggle
+              name="sendInvites"
+              label="Let Google email the guests"
+              help="Off by default. Hearth records past gatherings as history, so this stays suppressed for anything that has already finished — but with it on, creating or changing a future event will email everyone on the guest list for real."
+              defaultChecked={values.sendInvites}
+            />
+          </div>
+
           <div>
             <label htmlFor="googleCalendarId" className={labelClass}>
               Target calendar
             </label>
-            <input
-              id="googleCalendarId"
-              name="googleCalendarId"
-              defaultValue={values.googleCalendarId}
-              className={`${inputClass} mt-1.5`}
-            />
-            <p className={helpClass}>
-              Calendar id, or <code>primary</code> for your default calendar.
-            </p>
+            {calendars && calendars.length > 0 ? (
+              <>
+                <select
+                  id="googleCalendarId"
+                  name="googleCalendarId"
+                  defaultValue={values.googleCalendarId}
+                  className={`${inputClass} mt-1.5`}
+                >
+                  {/* Keep whatever is configured selectable even if it is not in
+                      the list, so saving cannot silently move every event. */}
+                  {calendars.some((c) => c.id === values.googleCalendarId) ? null : (
+                    <option value={values.googleCalendarId}>
+                      {values.googleCalendarId} (current)
+                    </option>
+                  )}
+                  {calendars.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.summary}
+                      {c.primary ? " (primary)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className={helpClass}>
+                  Only calendars you can write to are listed. Changing this moves
+                  existing events: the old copy is deleted and recreated.
+                </p>
+              </>
+            ) : (
+              <>
+                <input
+                  id="googleCalendarId"
+                  name="googleCalendarId"
+                  defaultValue={values.googleCalendarId}
+                  className={`${inputClass} mt-1.5`}
+                />
+                <p className={helpClass}>
+                  Calendar id, or <code>primary</code> for your default calendar.
+                  Connect Google with calendar permission to pick from a list.
+                </p>
+              </>
+            )}
           </div>
         </div>
       </Card>
