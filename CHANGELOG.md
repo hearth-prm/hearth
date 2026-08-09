@@ -79,6 +79,10 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Changed
 
+- The installer discovers and names the actual storage pools on the server when the
+  database would land on `/mnt/user`, rather than suggesting `/mnt/cache` — pools
+  are user-named, and plenty of servers have no pool called `cache` at all. Array
+  disks, the FUSE union shares and Unraid's auxiliary mounts are filtered out.
 - `--pgdata-path` to put the database somewhere other than under the install root,
   so the app files and backups can stay on `/mnt/user` — visible to SMB and the
   Appdata Backup plugin — while the fsync-heavy database sits on a pool. The
@@ -108,7 +112,7 @@ bump and may include breaking changes; patch releases are fixes only.
 - The default install root is now `/mnt/user/appdata/hearth`, the standard Unraid
   appdata location — what official templates use, what the Appdata Backup plugin
   covers, and what is reachable over SMB. Pointing `--install-root` at a pool
-  directly (`/mnt/cache/appdata/hearth`) still works and bypasses the FUSE layer
+  directly (`/mnt/<pool>/appdata/hearth`) still works and bypasses the FUSE layer
   for database writes. The mount-point safety check is unaffected: Unraid mounts
   shfs at `/mnt/user`, so a real share and a real pool both pass, while a typo
   still fails.

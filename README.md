@@ -136,7 +136,7 @@ sh deploy-hearth.sh --install-root /mnt/nvme/appdata/hearth
 sh deploy-hearth.sh --port 3080     # if 3000 is already taken
 
 # keep the install on /mnt/user but put the database on a pool
-sh deploy-hearth.sh --pgdata-path /mnt/cache/appdata/hearth/postgres
+sh deploy-hearth.sh --pgdata-path /mnt/YOURPOOL/appdata/hearth/postgres
 ```
 
 **If the first start times out, this is almost always why.** Postgres is
@@ -146,12 +146,17 @@ actually landed — `/mnt/user` is a union, so the real location is a specific
 disk or pool:
 
 ```bash
+# where did the data actually go?
 ls -d /mnt/*/appdata/hearth/postgres
+
+# what pools exist? "cache" is only a convention — yours may be named anything
+awk '$2 ~ /^\/mnt\// {print $2, $3}' /proc/mounts
 ```
 
-A `/mnt/diskN/...` result means it's on the array. Move it to the pool with
-`--pgdata-path`, which leaves the app files and backups on `/mnt/user` where the
-Appdata Backup plugin and SMB can still see them.
+A `/mnt/diskN/...` result means it's on the array, behind parity. Move it to a pool
+with `--pgdata-path`, which leaves the app files and backups on `/mnt/user` where
+the Appdata Backup plugin and SMB can still see them. If the database would land on
+`/mnt/user`, the installer lists the pools it can see and suggests one.
 
 If you keep your nginx configs somewhere specific, or name them your own way:
 

@@ -19,9 +19,10 @@
 #   --install-root <p>  Where to install. Default /mnt/user/appdata/hearth
 #   --port <n>          Host port to publish. Default 3000
 #   --pgdata-path <p>   Where Postgres keeps its data. Default <install-root>/postgres.
-#                       Point this at a pool (/mnt/cache/appdata/hearth/postgres)
-#                       when the install root is on /mnt/user: the database is
-#                       fsync-heavy and the FUSE layer and array are slow at it.
+#                       Point this at a pool when the install root is on
+#                       /mnt/user: the database is fsync-heavy, and the FUSE layer
+#                       and the array are both slow at it. The script lists the
+#                       pools it can see if the database would land on /mnt/user.
 #   --branch <name>     Branch to deploy. Default main
 #   --proxy-network <n> Docker network shared with the reverse proxy.
 #                       Default proxynet
@@ -76,6 +77,17 @@ die() {
 # Strip any embedded credential before echoing a URL. A private repo is cloned
 # with a token in the URL, and printing it verbatim would leave it in terminal
 # scrollback, CI logs and anything scraping stdout.
+# Storage pools mounted under /mnt, excluding the FUSE union shares, array disks
+# and Unraid's own auxiliary mounts. "cache" is only a conventional name — pools
+# are user-named, and on some servers there is no "cache" at all — so anything
+# suggesting a path has to read the real list rather than assume one.
+list_pools() {
+  [ -r /proc/mounts ] || return 0
+  awk '$2 ~ /^\/mnt\/[^\/]+$/ && $3 != "fuse.shfs" && $3 != "shfs" {print $2}' /proc/mounts |
+    grep -Ev '^/mnt/(user0?|disk[0-9]+|addons|remotes|rootshare)$' |
+    sort -u
+}
+
 redact_url() {
   printf '%s\n' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
 }
@@ -179,7 +191,7 @@ case "$INSTALL_ROOT" in
     printf "      On Unraid that means it is on the RAM-backed root filesystem,\n" >&2
     printf "      and everything written there is lost on reboot.\n" >&2
     printf '      Currently mounted under /mnt:\n' >&2
-    awk '$2 ~ /^\/mnt\// {print "        " $2}' /proc/mounts 2>/dev/null >&2
+    awk '$2 ~ /^\/mnt\// {print "        " $2 "   (" $3 ")"}' /proc/mounts 2>/dev/null >&2
     printf '      Pass --force-path if you really mean this location.\n' >&2
     exit 1
   fi
@@ -248,9 +260,15 @@ ok "proxy mode: $PROXY_MODE"
 case "$PGDATA_DIR" in
 /mnt/user/*)
   note "the database will live on /mnt/user, which goes through Unraid's FUSE layer"
-  note "Postgres is fsync-heavy: expect a slow first start, and a slow app overall"
-  note "if the share also spills to the array. To put just the database on a pool:"
-  note "  --pgdata-path /mnt/cache/appdata/hearth/postgres"
+  note "Postgres is fsync-heavy, so expect a slow first start and slower queries"
+  POOLS=$(list_pools)
+  if [ -n "$POOLS" ]; then
+    note "pools on this server: $(printf '%s' "$POOLS" | tr '\n' ' ')"
+    note "to put just the database on one, keeping app files and backups here:"
+    note "  --pgdata-path $(printf '%s' "$POOLS" | head -n 1)/appdata/hearth/postgres"
+  else
+    note "no separate pool detected, so there is nowhere faster to move it to"
+  fi
   ;;
 esac
 
