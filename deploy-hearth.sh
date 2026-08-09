@@ -67,6 +67,13 @@ die() {
   exit 1
 }
 
+# Strip any embedded credential before echoing a URL. A private repo is cloned
+# with a token in the URL, and printing it verbatim would leave it in terminal
+# scrollback, CI logs and anything scraping stdout.
+redact_url() {
+  printf '%s\n' "$1" | sed -E 's#(https?://)[^/@]+@#\1***@#'
+}
+
 usage() {
   sed -n '3,/^# ===/p' "$0" | sed 's/^# \{0,1\}//;$d'
   exit "${1:-0}"
@@ -243,7 +250,7 @@ elif [ -f "$SCRIPT_DIR/docker-compose.yml" ] && [ -f "$SCRIPT_DIR/prisma/schema.
   APP_DIR="$SCRIPT_DIR"
   ok "using $APP_DIR"
 else
-  say "Cloning $REPO_URL ($BRANCH)"
+  say "Cloning $(redact_url "$REPO_URL") ($BRANCH)"
   note "git is not installed on Unraid, so this runs in a container"
   docker run --rm -v "$INSTALL_ROOT:/work" "$GIT_IMAGE" \
     clone --branch "$BRANCH" --depth 1 "$REPO_URL" /work/app ||

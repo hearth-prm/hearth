@@ -73,6 +73,10 @@ bump and may include breaking changes; patch releases are fixes only.
   an existing cluster keeps its original credentials while a regenerated `.env`
   carries new ones — an install that looks fine and cannot authenticate.
 
+- The installer redacts embedded credentials when echoing the repository URL, so
+  cloning a private repo with a token in the URL does not leave that token in
+  terminal scrollback or logs.
+
 ### Changed
 
 - Pinned the Compose project name to `hearth`. It was previously derived from the
