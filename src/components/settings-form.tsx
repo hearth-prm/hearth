@@ -79,7 +79,8 @@ export function SettingsForm({
           />
           <Toggle
             name="defaultAddToGoogle"
-            label="Tick “Add to Google” by default on new records"
+            label="Tick “Add to Google” by default on new contacts"
+            help="Events are never ticked by default — sending one to your calendar is always a deliberate choice."
             defaultChecked={values.defaultAddToGoogle}
           />
         </div>
@@ -119,7 +120,7 @@ export function SettingsForm({
             <Toggle
               name="sendInvites"
               label="Let Google email the guests"
-              help="Off by default. Hearth records past gatherings as history, so this stays suppressed for anything that has already finished — but with it on, creating or changing a future event will email everyone on the guest list for real."
+              help="Needed for guests to be able to RSVP at all — a guest who is never emailed can never reply. Safe to leave on, because an event only reaches Google when you tick “Send to Google Calendar” on it, and notifications stay suppressed for events that have already finished."
               defaultChecked={values.sendInvites}
             />
           </div>

@@ -1,7 +1,13 @@
 import { labelClass } from "@/components/ui";
 
 /**
- * The "Add to Google" opt-in, checked by default.
+ * The Google opt-in.
+ *
+ * Contacts default to ticked: a PRM contact is a person you want in your address
+ * book. Events default to unticked, because most of what Hearth records is history
+ * — who was at a gathering — and history does not belong on a calendar. Sending an
+ * event to Google is therefore a deliberate per-event decision, which is also what
+ * makes it safe for guest notifications to default on.
  *
  * The hidden `addToGooglePresent` marker distinguishes "the user unchecked this"
  * from "the form never rendered the control" — an unchecked checkbox submits
@@ -30,12 +36,16 @@ export function AddToGoogleToggle({
         />
         <span>
           <span className={labelClass}>
-            Add to Google {kind === "contact" ? "Contacts" : "Calendar"}
+            {kind === "contact"
+              ? "Add to Google Contacts"
+              : "Send to Google Calendar"}
           </span>
           <span className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">
             {synced
               ? `Unchecking this will remove the ${kind} from Google on the next sync.`
-              : `Hearth stays the source of truth — it pushes this ${kind} to Google and never reads changes back.`}
+              : kind === "event"
+                ? "Leave this off for gatherings you are recording after the fact — they stay in Hearth only, and nobody is emailed. Tick it for something you actually want on your calendar, and guests with an email address will be invited."
+                : "Hearth stays the source of truth — it pushes this contact to Google and never reads changes back."}
           </span>
         </span>
       </label>

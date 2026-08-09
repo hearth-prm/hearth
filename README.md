@@ -454,9 +454,17 @@ differs sharply:
 
 ## Calendar sync
 
-Turn it on in Settings and pick a target calendar. Every event with **Add to
-Google** ticked is created there and kept up to date; unticking one, or deleting
-it, removes the Google copy.
+Turn it on in Settings and pick a target calendar. Then tick **Send to Google
+Calendar** on the events you actually want there.
+
+**Events are Hearth-only by default.** Most of what a PRM records is history — who
+was at a gathering — and history does not belong on a calendar, least of all with
+invitations attached. So unlike contacts, an event reaches Google only when you say
+so, per event. Recording last year's dinner party needs no thought: leave the box
+unticked and nothing is sent and nobody is emailed.
+
+Once ticked, the event is created on the calendar and kept up to date; unticking it,
+or deleting the event, removes the Google copy.
 
 Hearth owns the event's title, description, location, timing and guest list.
 Changing the target calendar moves existing events — the old copy is deleted and
@@ -469,11 +477,12 @@ their Hearth role is Optional. Anyone without an email cannot be sent at all —
 Google identifies guests only by address — so they stay on the Hearth guest list and
 the event page says who was left off.
 
-**Google does not email anyone by default.** That is deliberate: Hearth records past
-gatherings as relationship history, so a naive push would email eight people about a
-dinner from 2019. Enabling *Let Google email the guests* only affects events that
-have not finished yet; anything already over stays silent regardless. Guests are
-mirrored to Google either way — only the emails are gated.
+Google **does** email the guests, because a guest who is never emailed can never
+RSVP, and the RSVP writeback is the point of inviting them. That is only safe
+because nothing reaches Google unasked: you ticked *Send to Google Calendar* on this
+specific event. As a further guard, notifications are suppressed for events that
+have already finished even with the setting on, and *Let Google email the guests*
+can be turned off entirely for silent mirroring.
 
 ### RSVPs coming back
 

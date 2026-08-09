@@ -44,7 +44,8 @@ export default async function NewEventPage() {
         people={people}
         selectedAttendeeIds={[]}
         peopleTruncated={people.length === PEOPLE_LIMIT}
-        addToGoogle={settings.defaultAddToGoogle}
+        // Events are Hearth-only unless explicitly sent: see AddToGoogleToggle.
+        addToGoogle={false}
         cancelHref="/events"
         submitLabel="Create event"
       />

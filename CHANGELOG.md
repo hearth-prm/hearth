@@ -33,9 +33,15 @@ that formally marks its milestone.
   - Attendees with a primary email become Google guests, optional when their Hearth
     role is. Anyone without an email is reported on the event page rather than
     silently dropped, since Google identifies guests only by address.
-  - **Notifications are off by default and suppressed for finished events even when
-    on.** Hearth records past gatherings as history, so an ungated push would email
-    real people about events that already happened. Guests are mirrored either way.
+  - **Events are Hearth-only unless you tick "Send to Google Calendar".** Unlike
+    contacts, which default to syncing, an event reaches Google only by explicit
+    per-event choice — most of what a PRM records is history, and history does not
+    belong on a calendar. Existing events are switched off by the migration, since
+    they predate calendar sync and carried the old default.
+  - Because nothing reaches Google unasked, guest notifications default **on**: a
+    guest who is never emailed can never RSVP, which would make the writeback
+    pointless. Notifications remain suppressed for events that have already
+    finished, and can be turned off entirely.
   - RSVPs flow back from Google — the one direction where Google is authoritative —
     matched on the address the guest was invited under rather than the person's
     current email, because those diverge.

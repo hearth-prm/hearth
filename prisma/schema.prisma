@@ -97,7 +97,8 @@ model UserSettings {
   syncContactsEnabled Boolean @default(false)
   /// Master switch for PRM <-> Google Calendar event sync.
   syncCalendarEnabled Boolean @default(false)
-  /// Value pre-filled into "Add to Google" on newly created records.
+  /// Value pre-filled into "Add to Google" on newly created *contacts*.
+  /// Events deliberately do not follow this: see Event.addToGoogle.
   defaultAddToGoogle  Boolean @default(true)
   /// Target calendar for pushed events; "primary" unless the user picks another.
   googleCalendarId    String  @default("primary")
@@ -107,12 +108,12 @@ model UserSettings {
   importRsvps         Boolean @default(true)
   /// Let Google email guests when an event is created or changed.
   ///
-  /// Off by default, and deliberately so: Hearth records past gatherings as
-  /// relationship history, so a naive push would email real people about a dinner
-  /// that happened years ago. Even when on, notifications are suppressed for
-  /// events that have already ended. Attendees are mirrored to Google either way —
-  /// only the emails are gated.
-  sendInvites         Boolean @default(false)
+  /// On by default, because a guest who is never emailed can never RSVP, and the
+  /// RSVP writeback is the point of inviting them. This is only safe because an
+  /// event reaches Google solely when someone ticks "Send to Google" on it — see
+  /// Event.addToGoogle. As a further guard, notifications stay suppressed for
+  /// events that have already finished even when this is on.
+  sendInvites         Boolean @default(true)
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
@@ -371,7 +372,14 @@ model Event {
   custom Json @default("{}")
 
   // --- Google Calendar sync state ---
-  addToGoogle      Boolean    @default(true)
+  /// Whether this event belongs on the user's Google Calendar.
+  ///
+  /// Defaults to FALSE, unlike Person.addToGoogle. Most of what Hearth records is
+  /// history — who was at a gathering — and history does not belong on a calendar,
+  /// least of all with invitations attached. Sending an event to Google is
+  /// therefore an explicit per-event choice, which also means notifications can
+  /// default on without risk.
+  addToGoogle      Boolean    @default(false)
   googleEventId    String?
   googleCalendarId String?
   googleEtag       String?
