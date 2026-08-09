@@ -22,9 +22,20 @@ fi
 # Postgres may still be starting even once its port is open, and compose's
 # healthcheck only gates the first start. Retry rather than crash-loop.
 # Invoke the CLI's entry script directly rather than through npx: the runtime
-# image copies node_modules/prisma but not node_modules/.bin, which is where npx
-# would look for the shim.
-PRISMA_CLI="node_modules/prisma/build/index.js"
+# image has no node_modules/.bin for npx to find a shim in.
+#
+# It lives in its own tree (see the prisma-cli stage in the Dockerfile) because
+# its dependency closure is 34 packages that npm hoists to the top level —
+# `effect`, required by @prisma/config, among them. Node resolves them relative to
+# this file's location, so running it from here works without polluting the app's
+# own node_modules.
+PRISMA_CLI="/app/prisma-cli/node_modules/prisma/build/index.js"
+
+if [ ! -f "$PRISMA_CLI" ]; then
+  echo "[hearth] the Prisma CLI is missing from the image at $PRISMA_CLI" >&2
+  echo "[hearth] this image was built incorrectly — rebuild with --no-cache" >&2
+  exit 1
+fi
 
 attempt=1
 until node "$PRISMA_CLI" migrate deploy; do

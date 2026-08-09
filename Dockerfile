@@ -55,6 +55,28 @@ RUN npx prisma generate
 RUN npm run build
 
 
+# --- prisma CLI ------------------------------------------------------------
+#
+# The migration CLI gets its own clean-room install, because its dependency
+# closure reaches far outside node_modules/prisma: npm hoists transitive deps to
+# the top level, so `@prisma/config` requires `effect` from node_modules/effect.
+# Copying hand-picked directories out of the build tree therefore produced a CLI
+# that failed at runtime with MODULE_NOT_FOUND — 34 packages are needed, and
+# guessing which is a losing game.
+#
+# Letting npm resolve it into an empty directory is correct by construction. Doing
+# it in a stage derived from `base` also means the schema engine downloaded is the
+# musl build the alpine runtime actually needs, rather than a glibc one.
+FROM base AS prisma-cli
+COPY package.json ./
+RUN PRISMA_VERSION=$(node -e "const p=require('./package.json'); process.stdout.write((p.devDependencies&&p.devDependencies.prisma)||(p.dependencies&&p.dependencies.prisma)||'')") \
+ && if [ -z "$PRISMA_VERSION" ]; then echo "could not find the prisma version in package.json" >&2; exit 1; fi \
+ && rm -f package.json \
+ && npm init -y >/dev/null \
+ && npm install --no-audit --no-fund --omit=dev "prisma@$PRISMA_VERSION" \
+ && node node_modules/prisma/build/index.js --version
+
+
 # --- runtime ---------------------------------------------------------------
 FROM base AS runner
 
@@ -84,14 +106,20 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Migrations and the seed run at boot, so the runtime image needs the Prisma CLI,
-# the schema, the migration SQL and the seed's data file. Standalone tracing does
-# not pick any of these up, because nothing the app imports references them.
+# Migrations and the seed run at boot, so the runtime image needs the schema, the
+# migration SQL and the seed's data file. Standalone tracing does not pick any of
+# these up, because nothing the app imports references them.
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder --chown=nextjs:nodejs /app/src/lib/relationship-types.json ./src/lib/relationship-types.json
+
+# The generated client and its query engine, for the app itself. Kept explicit
+# because standalone tracing does not reliably follow Prisma's generated output.
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder --chown=nextjs:nodejs /app/src/lib/relationship-types.json ./src/lib/relationship-types.json
+
+# The migration CLI, in its own tree so its 34-package closure cannot collide with
+# the app's dependencies. Resolution from this path finds everything it needs.
+COPY --from=prisma-cli --chown=nextjs:nodejs /app/node_modules ./prisma-cli/node_modules
 
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh

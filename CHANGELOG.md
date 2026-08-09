@@ -90,6 +90,16 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Fixed
 
+- **The container failed to start: `Cannot find module 'effect'`.** The runtime
+  image copied hand-picked directories (`prisma`, `@prisma`, `.prisma`) out of the
+  build tree, but the Prisma CLI's dependency closure is 34 packages that npm
+  hoists to the top level — `@prisma/config` requires `effect` from
+  `node_modules/effect`, which was never copied. The CLI now gets a clean-room
+  install in its own build stage, so npm computes the closure instead of us
+  guessing, and lives in a separate tree that cannot collide with the app's
+  dependencies. Building that stage from the same alpine base also means the
+  schema engine is the musl build the runtime needs.
+
 - The installer no longer sets `APP_BIND=127.0.0.1` whenever it detects SWAG.
   That is only correct when SWAG reaches the app over a shared Docker network; for
   the common `proxy_pass http://<host-ip>:3000` setup it bound the port to
