@@ -79,6 +79,13 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Changed
 
+- Both scripts now use the host's `git` directly instead of borrowing it from an
+  `alpine/git` container. The container detour was based on a wrong assumption that
+  Unraid ships without git; it made the commands harder to read, and forced
+  `update-hearth.sh` to parse `.git/HEAD` and `packed-refs` by hand to find the
+  commit. `git` joins `openssl` and `curl` as a checked prerequisite. Net 28 lines
+  removed.
+
 - Pinned the Compose project name to `hearth`. It was previously derived from the
   directory the compose file sits in, so a checkout at `.../hearth/app` produced a
   project named `app` with containers called `app-1`, liable to collide with any

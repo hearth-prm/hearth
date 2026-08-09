@@ -107,17 +107,23 @@ a reconnect when a scope or offline access is missing.
 
 ```bash
 # On Unraid, via SSH as root
-curl -fsSLO https://gitlab.com/hammerling/hearth/-/raw/main/deploy-hearth.sh
+git clone https://gitlab.com/hammerling/hearth.git /mnt/user/appdata/hearth/app
+cd /mnt/user/appdata/hearth/app
 sh deploy-hearth.sh --domain hearth.example.com
 ```
 
+Run from inside a checkout, the script uses it in place rather than cloning a
+second copy. If the repository is private, put a token in the clone URL —
+`https://oauth2:YOUR_TOKEN@gitlab.com/...` — which also lets `update-hearth.sh`
+pull unattended later.
+
 [deploy-hearth.sh](deploy-hearth.sh) does the whole first-time install: checks
-prerequisites, verifies your storage pool is really a mounted pool, clones the
-repo through a container (no `git` needed), generates `.env` with real random
-secrets, wires up SWAG if it finds it, builds, starts, and waits for the health
-endpoint. It is safe to re-run — it never overwrites an existing `.env`, because
-the generated database password is baked into the Postgres data directory and
-regenerating it would lock the app out of its own data.
+prerequisites, verifies your storage root is really mounted, clones the repo if
+you haven't already, generates `.env` with real random secrets, wires up SWAG if
+it finds it, builds, starts, and waits for the health endpoint. It is safe to
+re-run — it never overwrites an existing `.env`, because the generated database
+password is baked into the Postgres data directory and regenerating it would lock
+the app out of its own data.
 
 You still have to create the Google OAuth client yourself; the script writes
 placeholders and prints exactly what to do, including the redirect URI to
@@ -214,20 +220,22 @@ at a pool directly — `--install-root /mnt/user/appdata/hearth`, substituting y
 pool's real name. It's measurably faster for write-heavy workloads, at the cost of
 a path that breaks if you ever move the share.
 
-### 3. Neither `git` nor `node` is installed
+### 3. Prerequisites
 
 `docker compose` needs the **Docker Compose Manager** plugin from Community
-Applications. For the source, use a throwaway container instead of installing
-git. `scripts/docker-up.sh` deliberately depends on neither tool — it reads the
-version out of `package.json` and the commit out of `.git/` with plain shell, so
-your image still gets a correct build stamp.
+Applications. `git`, `openssl` and `curl` must be on the host — recent Unraid has
+all three, and the Nerd Tools plugin provides git if yours doesn't.
+
+`scripts/docker-up.sh` is the one exception: it deliberately depends on neither
+git nor node, reading the version out of `package.json` and the commit out of
+`.git/` with plain shell, so an image built somewhere leaner still gets a correct
+build stamp.
+
+Doing it by hand rather than with `deploy-hearth.sh`:
 
 ```bash
-# one-time layout (adjust the pool name if yours isn't "cache")
 mkdir -p /mnt/user/appdata/hearth/postgres
-
-docker run --rm -v /mnt/user/appdata/hearth:/work \
-  alpine/git clone https://gitlab.com/hammerling/hearth.git /work/app
+git clone https://gitlab.com/hammerling/hearth.git /mnt/user/appdata/hearth/app
 
 cd /mnt/user/appdata/hearth/app
 cp .env.example .env
@@ -237,6 +245,17 @@ vi .env                          # or edit \\TOWER\appdata\hearth\app\.env over 
 sh scripts/docker-up.sh
 curl -s http://localhost:3000/api/health
 ```
+
+For a private repository, put a token in the clone URL:
+
+```bash
+git clone https://oauth2:YOUR_TOKEN@gitlab.com/hammerling/hearth.git \
+  /mnt/user/appdata/hearth/app
+```
+
+It persists in that clone's `.git/config`, which is what lets `update-hearth.sh`
+pull unattended. A deploy token scoped to `read_repository` is a better fit than a
+personal access token, since the server only ever needs to read.
 
 `.env` needs, at minimum:
 
@@ -325,8 +344,8 @@ a certificate issued.
 - **Autostart** is handled by `restart: unless-stopped` once Docker is up. To get
   the stack in the Unraid UI, add it in Docker Compose Manager with the project
   directory set to `/mnt/user/appdata/hearth/app` and enable autostart.
-- **Updating**: `docker run --rm -v /mnt/user/appdata/hearth:/work alpine/git -C /work/app pull`
-  then `sh scripts/docker-up.sh` again. Migrations apply automatically on boot.
+- **Updating**: `sh update-hearth.sh` from the install directory. Migrations apply
+  automatically on boot.
 - **Backups**: the Appdata Backup plugin covers `/mnt/user/appdata`. For a
   restorable logical dump, prefer
   `docker compose exec -T db pg_dump -U hearth hearth | gzip > hearth-$(date +%F).sql.gz`.

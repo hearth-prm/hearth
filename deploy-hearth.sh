@@ -56,7 +56,6 @@ PROXY_CONF_DIR=""
 PROXY_CONF_NAME=""
 HOST_IP_OVERRIDE=""
 FORCE_PATH="no"
-GIT_IMAGE="alpine/git:latest"
 
 # --- output ---------------------------------------------------------------
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -140,7 +139,8 @@ ok "$COMPOSE"
 
 command -v openssl >/dev/null 2>&1 || die "openssl not found — needed to generate secrets."
 command -v curl >/dev/null 2>&1 || die "curl not found — needed to verify the app started."
-ok "openssl, curl"
+command -v git >/dev/null 2>&1 || die "git not found. Install it (on Unraid: the Nerd Tools plugin), or clone the repo yourself and run this script from inside the checkout."
+ok "openssl, curl, git"
 
 # Verify the storage root is really mounted, not just that the path resolves.
 #
@@ -251,10 +251,8 @@ elif [ -f "$SCRIPT_DIR/docker-compose.yml" ] && [ -f "$SCRIPT_DIR/prisma/schema.
   ok "using $APP_DIR"
 else
   say "Cloning $(redact_url "$REPO_URL") ($BRANCH)"
-  note "git is not installed on Unraid, so this runs in a container"
-  docker run --rm -v "$INSTALL_ROOT:/work" "$GIT_IMAGE" \
-    clone --branch "$BRANCH" --depth 1 "$REPO_URL" /work/app ||
-    die "clone failed. Check the URL, the branch name, and that $INSTALL_ROOT is writable."
+  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR" ||
+    die "clone failed. Check the URL, the branch name, your credentials, and that $INSTALL_ROOT is writable."
   [ -f "$APP_DIR/docker-compose.yml" ] || die "clone appeared to succeed but $APP_DIR/docker-compose.yml is missing"
   ok "cloned to $APP_DIR"
 fi

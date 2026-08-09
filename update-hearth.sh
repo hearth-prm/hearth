@@ -26,7 +26,6 @@ DO_BACKUP=yes
 DO_PRUNE=no
 BRANCH=""
 KEEP=10
-GIT_IMAGE="alpine/git:latest"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok() { printf '    \033[1;32mok\033[0m   %s\n' "$*"; }
@@ -66,6 +65,10 @@ cd "$APP_DIR"
 
 command -v docker >/dev/null 2>&1 || die "docker not found."
 docker info >/dev/null 2>&1 || die "cannot talk to the Docker daemon."
+if [ "$DO_PULL" = yes ] && [ -d .git ]; then
+  command -v git >/dev/null 2>&1 ||
+    die "git not found. Install it, or re-run with --no-pull to rebuild the working tree as-is."
+fi
 
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
@@ -157,53 +160,24 @@ if [ "$DO_PULL" = yes ]; then
   if [ ! -d .git ]; then
     note "not a git checkout; nothing to pull"
   else
-    PARENT=$(dirname "$APP_DIR")
-    BASE=$(basename "$APP_DIR")
-    OLD_SHA=$(sed -n '1s/^\(.\{7\}\).*/\1/p' .git/HEAD 2>/dev/null || true)
-    case "$(cat .git/HEAD 2>/dev/null)" in
-    "ref: "*)
-      REF=$(sed 's/^ref: //' .git/HEAD)
-      if [ -f ".git/$REF" ]; then
-        OLD_SHA=$(cut -c1-7 ".git/$REF")
-      elif [ -f .git/packed-refs ]; then
-        OLD_SHA=$(grep " $REF\$" .git/packed-refs | cut -c1-7)
-      fi
-      ;;
-    esac
+    OLD_SHA=$(git rev-parse --short=7 HEAD)
 
-    # git is not installed on Unraid, so borrow it from a container. The mount
-    # is the parent directory so the container sees a normal repo at /work/<dir>.
     if [ -n "$BRANCH" ]; then
-      docker run --rm -v "$PARENT:/work" -w "/work/$BASE" "$GIT_IMAGE" \
-        fetch --depth 1 origin "$BRANCH" ||
-        die "fetch failed"
-      docker run --rm -v "$PARENT:/work" -w "/work/$BASE" "$GIT_IMAGE" \
-        checkout -B "$BRANCH" "origin/$BRANCH" || die "checkout failed"
+      git fetch origin "$BRANCH" || die "fetch failed"
+      git checkout -B "$BRANCH" "origin/$BRANCH" || die "checkout failed"
       ok "switched to $BRANCH"
     else
-      docker run --rm -v "$PARENT:/work" -w "/work/$BASE" "$GIT_IMAGE" \
-        pull --ff-only ||
+      git pull --ff-only ||
         die "pull failed. If you have local edits, commit or discard them, or use --no-pull."
     fi
 
-    case "$(cat .git/HEAD 2>/dev/null)" in
-    "ref: "*)
-      REF=$(sed 's/^ref: //' .git/HEAD)
-      if [ -f ".git/$REF" ]; then
-        NEW_SHA=$(cut -c1-7 ".git/$REF")
-      elif [ -f .git/packed-refs ]; then
-        NEW_SHA=$(grep " $REF\$" .git/packed-refs | cut -c1-7)
-      fi
-      ;;
-    esac
+    NEW_SHA=$(git rev-parse --short=7 HEAD)
 
-    if [ -n "$OLD_SHA" ] && [ "$OLD_SHA" = "$NEW_SHA" ]; then
+    if [ "$OLD_SHA" = "$NEW_SHA" ]; then
       note "already at $NEW_SHA — no new commits, rebuilding anyway"
-    elif [ -n "$NEW_SHA" ]; then
+    else
       ok "$OLD_SHA -> $NEW_SHA"
-      docker run --rm -v "$PARENT:/work" -w "/work/$BASE" "$GIT_IMAGE" \
-        log --oneline --no-decorate "$OLD_SHA..$NEW_SHA" 2>/dev/null |
-        sed 's/^/         /' || true
+      git log --oneline --no-decorate "$OLD_SHA..$NEW_SHA" | sed 's/^/         /'
     fi
   fi
 else
