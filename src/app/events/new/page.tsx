@@ -5,6 +5,7 @@ import { getUserSettings } from "@/lib/settings";
 import { commonTimeZones, utcToWallClock } from "@/lib/time";
 import { createEvent } from "@/lib/actions/events";
 import { PageHeader } from "@/components/ui";
+import { searchPlaces } from "@/lib/actions/places";
 import { EventForm } from "@/components/event-form";
 
 const PEOPLE_LIMIT = 1000;
@@ -46,6 +47,7 @@ export default async function NewEventPage() {
         peopleTruncated={people.length === PEOPLE_LIMIT}
         // Events are Hearth-only unless explicitly sent: see AddToGoogleToggle.
         addToGoogle={false}
+        searchPlaces={searchPlaces}
         cancelHref="/events"
         submitLabel="Create event"
       />

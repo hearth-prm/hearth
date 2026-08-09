@@ -117,6 +117,15 @@ model UserSettings {
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
+  /// Which service backs place search on the event location field.
+  ///
+  /// "auto" uses Google Places when GOOGLE_PLACES_API_KEY is set and OpenStreetMap
+  /// otherwise. The API key itself lives in the environment, not here: it is
+  /// operator configuration like the OAuth secrets, one key serves every user of an
+  /// install, and a secret in a table ends up in every database backup.
+  /// One of: auto | osm | google | off
+  placesProvider      String  @default("auto")
+
   /// Also push user-defined fields into Google's "userDefined" custom fields.
   /// Off by default: exporting every custom field should be a deliberate choice.
   /// M4 replaces this blunt switch with per-field mapping.

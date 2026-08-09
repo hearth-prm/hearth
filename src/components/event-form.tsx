@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useActionState } from "react";
-import type { FieldDef } from "@/lib/fields/types";
+import { fieldInputName, type FieldDef } from "@/lib/fields/types";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
+import type { PlaceSearchResult } from "@/lib/actions/places";
 import { FieldInput } from "@/components/field-input";
+import { LocationSearch } from "@/components/location-search";
 import { ScheduleFields } from "@/components/schedule-fields";
 import { AttendeePicker, type PickablePerson } from "@/components/attendee-picker";
 import { SubmitButton } from "@/components/submit-button";
@@ -24,6 +26,7 @@ export function EventForm({
   addToGoogle,
   synced,
   cancelHref,
+  searchPlaces,
   submitLabel = "Save event",
 }: {
   action: (state: ActionState, form: FormData) => Promise<ActionState>;
@@ -44,6 +47,8 @@ export function EventForm({
   addToGoogle: boolean;
   synced?: boolean;
   cancelHref: string;
+  /** Place lookup for the location field; it stays a plain text box regardless. */
+  searchPlaces: (query: string) => Promise<PlaceSearchResult>;
   submitLabel?: string;
 }) {
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
@@ -60,15 +65,28 @@ export function EventForm({
       <Card>
         <CardHeader title="Details" />
         <div className="space-y-5 px-5 py-5">
-          {coreDefs.map((def) => (
-            <FieldInput
-              key={def.key}
-              def={def}
-              value={values[def.key]}
-              error={state.errors?.[def.key]}
-              timeZone={schedule.timeZone}
-            />
-          ))}
+          {coreDefs.map((def) =>
+            // Location gets a bespoke input so it can offer place suggestions. The
+            // field name and validation are unchanged, so the registry still owns
+            // parsing it — only the control differs.
+            def.key === "location" ? (
+              <LocationSearch
+                key={def.key}
+                name={fieldInputName(def.key)}
+                defaultValue={String(values[def.key] ?? "")}
+                search={searchPlaces}
+                error={state.errors?.[def.key]}
+              />
+            ) : (
+              <FieldInput
+                key={def.key}
+                def={def}
+                value={values[def.key]}
+                error={state.errors?.[def.key]}
+                timeZone={schedule.timeZone}
+              />
+            ),
+          )}
         </div>
       </Card>
 

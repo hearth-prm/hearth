@@ -470,6 +470,29 @@ Hearth owns the event's title, description, location, timing and guest list.
 Changing the target calendar moves existing events — the old copy is deleted and
 recreated on the new one.
 
+### Finding a location
+
+The event location field offers place suggestions, from a provider you choose in
+Settings:
+
+| Provider | Needs | Good at |
+|---|---|---|
+| **OpenStreetMap** (default) | nothing | addresses, known venues |
+| **Google Places** | `GOOGLE_PLACES_API_KEY` + billing on the Cloud project | small businesses |
+| **Off** | — | plain text only |
+
+`auto` uses Google when a key is present and OpenStreetMap otherwise, so an install
+works immediately and improves by adding a key — no setting to change.
+
+The field is a plain text box underneath: suggestions only ever write into it, so
+typing an address by hand, pasting one, or the provider being unreachable all leave
+it fully usable. The resolved address is stored as text in the same `location`
+column regardless of provider, so switching or disabling search never migrates data.
+
+Lookups run server-side. The API key never reaches the browser, and the rate limit
+OpenStreetMap asks for is enforced per install rather than per browser tab — client
+debouncing alone cannot promise that when two tabs are open.
+
 ### Guests
 
 Attendees with a primary email are added as Google guests, marked **optional** when

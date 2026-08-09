@@ -12,6 +12,7 @@ import {
   syncEventsNow,
 } from "@/lib/actions/sync";
 import { listUserCalendars } from "@/lib/google/calendars";
+import { describeActiveProvider, googlePlacesConfigured } from "@/lib/places";
 import { SyncPanel } from "@/components/sync-panel";
 import { Badge, btnSecondary, Card, CardHeader, DetailRow } from "@/components/ui";
 import { SettingsForm } from "@/components/settings-form";
@@ -151,10 +152,13 @@ export default async function SettingsPage() {
           inviteAttendees: settings.inviteAttendees,
           importRsvps: settings.importRsvps,
           googleCalendarId: settings.googleCalendarId,
+          placesProvider: settings.placesProvider,
           timeZone: settings.timeZone,
         }}
         timeZones={commonTimeZones()}
         calendars={calendars}
+        activePlacesProvider={describeActiveProvider(settings.placesProvider)}
+        googlePlacesConfigured={googlePlacesConfigured()}
         canSyncContacts={google.canSyncContacts}
         canSyncCalendar={google.canSyncCalendar}
       />

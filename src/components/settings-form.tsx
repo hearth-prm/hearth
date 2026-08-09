@@ -28,6 +28,7 @@ export interface SettingsValues {
   inviteAttendees: boolean;
   importRsvps: boolean;
   googleCalendarId: string;
+  placesProvider: string;
   timeZone: string;
 }
 
@@ -36,6 +37,8 @@ export function SettingsForm({
   values,
   timeZones,
   calendars,
+  activePlacesProvider,
+  googlePlacesConfigured,
   canSyncContacts,
   canSyncCalendar,
 }: {
@@ -44,6 +47,8 @@ export function SettingsForm({
   timeZones: string[];
   /** Null when Google could not be asked; the field falls back to free text. */
   calendars: CalendarOption[] | null;
+  activePlacesProvider: string;
+  googlePlacesConfigured: boolean;
   canSyncContacts: boolean;
   canSyncCalendar: boolean;
 }) {
@@ -170,6 +175,40 @@ export function SettingsForm({
                 </p>
               </>
             )}
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Place search"
+          description="Backs the location field when creating or editing an event."
+        />
+        <div className="space-y-4 px-5 py-5">
+          <div>
+            <label htmlFor="placesProvider" className={labelClass}>
+              Provider
+            </label>
+            <select
+              id="placesProvider"
+              name="placesProvider"
+              defaultValue={values.placesProvider}
+              className={`${inputClass} mt-1.5`}
+            >
+              <option value="auto">Automatic</option>
+              <option value="osm">OpenStreetMap</option>
+              <option value="google" disabled={!googlePlacesConfigured}>
+                Google Places{googlePlacesConfigured ? "" : " (no API key set)"}
+              </option>
+              <option value="off">Off — plain text only</option>
+            </select>
+            <p className={helpClass}>
+              Currently using: <strong>{activePlacesProvider}</strong>. OpenStreetMap
+              needs nothing at all. Google Places gives better suggestions for small
+              venues but needs <code>GOOGLE_PLACES_API_KEY</code> in your{" "}
+              <code>.env</code> and billing enabled on the Google Cloud project — the
+              key stays server-side and is never sent to the browser.
+            </p>
           </div>
         </div>
       </Card>

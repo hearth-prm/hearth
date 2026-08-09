@@ -6,6 +6,7 @@ import { readFieldValue } from "@/lib/fields/values";
 import { commonTimeZones, utcToWallClock } from "@/lib/time";
 import { updateEvent } from "@/lib/actions/events";
 import { PageHeader } from "@/components/ui";
+import { searchPlaces } from "@/lib/actions/places";
 import { EventForm } from "@/components/event-form";
 
 const PEOPLE_LIMIT = 1000;
@@ -59,6 +60,7 @@ export default async function EditEventPage({
         peopleTruncated={people.length === PEOPLE_LIMIT}
         addToGoogle={event.addToGoogle}
         synced={Boolean(event.googleEventId)}
+        searchPlaces={searchPlaces}
         cancelHref={`/events/${event.id}`}
       />
     </div>

@@ -65,6 +65,7 @@ services:
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:?set AUTH_GOOGLE_SECRET in .env}"
       # Background sync. SYNC_ENABLED=false leaves the app running but stops the
       # in-process scheduler, for anyone driving sync from outside.
+      GOOGLE_PLACES_API_KEY: "${GOOGLE_PLACES_API_KEY:-}"
       SYNC_ENABLED: "${SYNC_ENABLED:-true}"
       SYNC_INTERVAL_SECONDS: "${SYNC_INTERVAL_SECONDS:-300}"
       NODE_ENV: production

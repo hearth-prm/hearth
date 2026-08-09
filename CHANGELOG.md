@@ -39,6 +39,16 @@ that formally marks its milestone.
 - **Location appeared twice on the event page.** It had a row of its own and was also
   picked up by the loop over registry fields, whose exclusion list had missed it.
 
+### Added
+
+- **Place search on the event location field**, behind a provider interface.
+  OpenStreetMap is the default and needs no key or billing; setting
+  `GOOGLE_PLACES_API_KEY` switches to Google Places, which is better for small
+  venues. Selectable in Settings, with `auto` preferring Google when a key exists.
+  The key stays server-side, lookups are cached and rate-limited per install rather
+  than per browser tab, and the field remains a plain text box so an unreachable
+  provider cannot stop you entering an address.
+
 ### Changed
 
 - Adding a guest to an event is now a type-to-search field rather than a dropdown of

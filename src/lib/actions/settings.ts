@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireUserForAction } from "@/lib/access";
 import { isValidTimeZone } from "@/lib/time";
+import { isProviderChoice } from "@/lib/places";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
 
@@ -23,6 +24,9 @@ export async function updateSettings(
 
     const googleCalendarId = readString(form, "googleCalendarId") || "primary";
 
+    const providerRaw = readString(form, "placesProvider");
+    const placesProvider = isProviderChoice(providerRaw) ? providerRaw : "auto";
+
     const values = {
       syncContactsEnabled: readCheckbox(form, "syncContactsEnabled"),
       syncCalendarEnabled: readCheckbox(form, "syncCalendarEnabled"),
@@ -32,6 +36,7 @@ export async function updateSettings(
       syncCustomFields: readCheckbox(form, "syncCustomFields"),
       sendInvites: readCheckbox(form, "sendInvites"),
       googleCalendarId,
+      placesProvider,
       timeZone,
     };
 
