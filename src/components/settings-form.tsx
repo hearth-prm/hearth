@@ -15,6 +15,7 @@ import {
 
 export interface SettingsValues {
   syncContactsEnabled: boolean;
+  syncCustomFields: boolean;
   syncCalendarEnabled: boolean;
   defaultAddToGoogle: boolean;
   inviteAttendees: boolean;
@@ -57,6 +58,13 @@ export function SettingsForm({
                 : "Reconnect your Google account to grant contacts permission first."
             }
             defaultChecked={values.syncContactsEnabled}
+            disabled={!canSyncContacts}
+          />
+          <Toggle
+            name="syncCustomFields"
+            label="Also push your custom fields"
+            help="Sent as Google's own custom fields, labelled as you named them. Off by default, because exporting everything you record should be deliberate."
+            defaultChecked={values.syncCustomFields}
             disabled={!canSyncContacts}
           />
           <Toggle

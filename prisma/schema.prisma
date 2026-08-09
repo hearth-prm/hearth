@@ -108,6 +108,28 @@ model UserSettings {
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
+  /// Also push user-defined fields into Google's "userDefined" custom fields.
+  /// Off by default: exporting every custom field should be a deliberate choice.
+  /// M4 replaces this blunt switch with per-field mapping.
+  syncCustomFields Boolean @default(false)
+
+  /// Set when Google refuses the stored refresh token (revoked access, changed
+  /// password, expired consent). Sync stops rather than retrying forever, and the
+  /// UI prompts a reconnect. Cleared on the next successful authorisation.
+  googleAuthError   String?
+  googleAuthErrorAt DateTime?
+
+  /// Outcome of the last contacts push, for the settings page.
+  lastContactSyncAt      DateTime?
+  lastContactSyncSummary String?
+
+  /// Lease preventing two sync runs for this user at once — the scheduled loop
+  /// and a manual "Sync now" can otherwise overlap. A lease rather than a
+  /// Postgres advisory lock because those are per-connection and Prisma pools
+  /// connections, so a lock taken on one and released on another would leak.
+  /// Expiry also means a crashed run cannot block sync forever.
+  syncLockedUntil DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -209,6 +231,10 @@ model Person {
   googleSyncedAt       DateTime?
   googleSyncStatus     SyncStatus @default(PENDING)
   googleSyncError      String?    @db.Text
+  /// Consecutive failed pushes, driving exponential backoff.
+  googleSyncAttempts   Int        @default(0)
+  /// Earliest time this record should be tried again. Null means "now".
+  googleSyncNextAttemptAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -221,6 +247,8 @@ model Person {
 
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
+  /// Drives the sync queue: pending/errored records whose backoff has elapsed.
+  @@index([ownerId, addToGoogle, googleSyncStatus, googleSyncNextAttemptAt])
   @@unique([ownerId, googleResourceName])
   @@index([custom(ops: JsonbOps)], type: Gin)
 }
@@ -411,10 +439,11 @@ model SyncTombstone {
   /// Why the delete was queued, for audit: "deleted" | "opted_out".
   reason     String
 
-  attempts    Int       @default(0)
-  processedAt DateTime?
-  lastError   String?   @db.Text
-  createdAt   DateTime  @default(now())
+  attempts      Int       @default(0)
+  processedAt   DateTime?
+  nextAttemptAt DateTime?
+  lastError     String?   @db.Text
+  createdAt     DateTime  @default(now())
 
   owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 

@@ -24,17 +24,14 @@ you opt into, is pulling event RSVPs from calendar guests.)
 | ✅ | Put people at events, with roles and RSVPs | Done |
 | ✅ | Extensible fields on people **and** events | Done |
 | ✅ | Google sign-in, with contacts + calendar consent | Done |
-| ✅ | "Add to Google" toggle on both record types, default on | Stored; acted on in M2 |
-| ✅ | Deletion/opt-out bookkeeping so Google copies can be removed | Recording now |
-| ⏳ | Contacts push worker | M2 |
+| ✅ | "Add to Google" toggle on both record types, default on | Done |
+| ✅ | Deletion/opt-out removes the Google copy | Done |
+| ✅ | One-way contacts push to Google | Done |
 | ⏳ | Calendar push + attendee invites + RSVP writeback | M3 |
 | ⏳ | Field ↔ Google field mapping settings page | M4 |
 | ⏳ | Sharing contacts and events between users | M4 |
 
-Nothing is sent to Google yet — the worker that talks to Google's APIs is M2.
-Everything it will need is already in place: per-record sync state, and a
-tombstone queue that records the Google resource id whenever a synced record is
-deleted or opted out, so the remote copy can still be found and removed.
+Contacts sync. Events do not yet — the calendar push is M3.
 
 ---
 
@@ -394,6 +391,65 @@ a certificate issued.
   already has it.
 
 ---
+
+## Contact sync
+
+Turn it on in Settings once Google is connected. Nothing is sent until you do.
+
+Hearth pushes; it never pulls. Every contact with **Add to Google** ticked is
+created in your Google Contacts and kept up to date. Untick it, or delete the
+person, and the Google copy is removed on the next run.
+
+**Hearth is authoritative for the fields it manages** — names, nickname,
+organisation and job title, birthday, notes, and every email, phone, address and
+link. Editing one of those directly in Google is overwritten on the next push.
+Anything Hearth does not manage is left alone.
+
+Each synced contact carries a `hearth_id` custom field. That is what lets Hearth
+recognise its own contacts, so a create that reached Google but never got recorded
+locally is adopted on the next run instead of becoming a duplicate.
+
+Custom fields are **not** pushed unless you switch that on separately — exporting
+everything you record about people should be a deliberate act. When enabled they
+become Google custom fields labelled as you named them. Per-field mapping arrives
+in M4.
+
+### How it runs
+
+A timer inside the app process, every 5 minutes by default. No extra container:
+each run takes a per-user database lease first, so the scheduled loop and the
+**Sync now** button cannot process the same records twice, and a crashed run
+expires rather than blocking sync forever.
+
+| Variable | Default | |
+|---|---|---|
+| `SYNC_ENABLED` | `true` | `false` stops the timer; "Sync now" still works |
+| `SYNC_INTERVAL_SECONDS` | `300` | Minimum 30 |
+
+Only records that changed are pushed — saving a person marks it pending. **Re-queue
+every contact** in Settings forces a full push, which is what you want after
+enabling custom fields or to overwrite Google-side edits.
+
+### When it goes wrong
+
+Failures are per-record and visible: the contact shows a **Sync error** badge, the
+message is on its detail page, and Settings counts how many are failing. A failing
+record backs off exponentially from 1 minute to a 6-hour ceiling, so it keeps
+retrying without dominating every run.
+
+Errors are classified rather than lumped together, because the right response
+differs sharply:
+
+- **Revoked or insufficient grant** — sync stops and Settings prompts a reconnect.
+  Retrying cannot help until you act, so it waits 15 minutes between attempts
+  instead of burning calls.
+- **Rate limited** — the run stops immediately and resumes next cycle. Records are
+  left pending rather than marked failed, because nothing was wrong with them.
+- **Stale etag** — someone changed the contact in Google. Hearth re-reads and
+  overwrites, which is the source-of-truth contract.
+- **Contact deleted in Google** — the resource id is forgotten and the contact is
+  re-created.
+- **Server or network wobble** — retried with backoff.
 
 ## Using it
 

@@ -1,17 +1,26 @@
+import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/access";
 import { signIn } from "@/lib/auth";
 import { getGoogleConnection, getUserSettings } from "@/lib/settings";
 import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
 import { commonTimeZones } from "@/lib/time";
 import { updateSettings } from "@/lib/actions/settings";
+import { resyncAllContacts, syncContactsNow } from "@/lib/actions/sync";
+import { SyncPanel } from "@/components/sync-panel";
 import { Badge, btnSecondary, Card, CardHeader, DetailRow } from "@/components/ui";
 import { SettingsForm } from "@/components/settings-form";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [settings, google] = await Promise.all([
+  const [settings, google, pendingCount, errorCount] = await Promise.all([
     getUserSettings(user.id),
     getGoogleConnection(user.id),
+    prisma.person.count({
+      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
+    }),
+    prisma.person.count({
+      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+    }),
   ]);
 
   return (
@@ -79,17 +88,29 @@ export default async function SettingsPage() {
         </div>
       </Card>
 
-      <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-        <strong className="font-medium">Sync is not running yet.</strong> These
-        preferences are saved, and every record already tracks its own sync state
-        and queues deletions — but the worker that talks to Google arrives in the
-        next milestone. Nothing is sent to Google today.
-      </p>
+      {settings.googleAuthError ? (
+        <p className="rounded-md bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+          <strong className="font-medium">Sync is paused.</strong>{" "}
+          {settings.googleAuthError} Reconnect above, then press “Sync now”.
+        </p>
+      ) : null}
+
+      <SyncPanel
+        syncNow={syncContactsNow}
+        resyncAll={resyncAllContacts}
+        enabled={settings.syncContactsEnabled}
+        lastSyncAt={settings.lastContactSyncAt}
+        lastSummary={settings.lastContactSyncSummary}
+        pendingCount={pendingCount}
+        errorCount={errorCount}
+        timeZone={settings.timeZone}
+      />
 
       <SettingsForm
         action={updateSettings}
         values={{
           syncContactsEnabled: settings.syncContactsEnabled,
+          syncCustomFields: settings.syncCustomFields,
           syncCalendarEnabled: settings.syncCalendarEnabled,
           defaultAddToGoogle: settings.defaultAddToGoogle,
           inviteAttendees: settings.inviteAttendees,

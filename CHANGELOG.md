@@ -20,6 +20,28 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Added
 
+- **One-way contact sync to Google (milestone 2).** Contacts with "Add to Google"
+  ticked are created and kept up to date in Google Contacts; unticking one, or
+  deleting the person, removes the Google copy. Hearth is authoritative for the
+  fields it manages, so Google-side edits to those are overwritten.
+  - Runs on a timer inside the app process — no extra container — guarded by a
+    per-user database lease so the scheduled loop and the manual "Sync now" cannot
+    double-process records. `SYNC_ENABLED` and `SYNC_INTERVAL_SECONDS` configure it.
+  - Failures are classified rather than uniformly retried: a revoked grant stops
+    sync and prompts a reconnect, a rate limit pauses the run and leaves records
+    pending, a stale etag is re-read and overwritten, and a contact deleted in
+    Google is re-created. Per-record exponential backoff from 1 minute to a
+    6-hour ceiling.
+  - Each contact carries a `hearth_id` custom field, so a create that reached
+    Google but was never recorded locally is adopted rather than duplicated.
+  - Optional push of user-defined fields as Google custom fields, off by default.
+  - Settings shows the last run, its result, the queue depth and the number of
+    failing records, with "Sync now" and "Re-queue every contact".
+- `scripts/check-migrations.sh`, which fails on a migration containing
+  `DROP TABLE`/`DROP SCHEMA`/`TRUNCATE`. Added after `prisma migrate diff
+  --from-migrations` with a shadow in a non-default *schema* generated a migration
+  that dropped every table — the shadow must be a separate database.
+
 - `deploy-hearth.sh`, a one-command first-time install. Checks prerequisites,
   clones through a container (no `git` on the host required), generates `.env`
   with real random secrets, auto-detects and wires up SWAG, builds, starts and

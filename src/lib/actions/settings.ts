@@ -29,6 +29,7 @@ export async function updateSettings(
       defaultAddToGoogle: readCheckbox(form, "defaultAddToGoogle"),
       inviteAttendees: readCheckbox(form, "inviteAttendees"),
       importRsvps: readCheckbox(form, "importRsvps"),
+      syncCustomFields: readCheckbox(form, "syncCustomFields"),
       googleCalendarId,
       timeZone,
     };
