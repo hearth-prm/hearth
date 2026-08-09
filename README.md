@@ -127,7 +127,34 @@ register.
 sh deploy-hearth.sh --help          # all options
 sh deploy-hearth.sh --no-proxy      # skip reverse-proxy setup
 sh deploy-hearth.sh --install-root /mnt/nvme/appdata/hearth
+sh deploy-hearth.sh --port 3080     # if 3000 is already taken
 ```
+
+If you keep your nginx configs somewhere specific, or name them your own way:
+
+```bash
+sh deploy-hearth.sh \
+  --domain hearth.example.com \
+  --port 3080 \
+  --proxy-conf-dir  /mnt/user/appdata/swag/nginx/site-confs \
+  --proxy-conf-name HEARTH.EXAMPLE.COM.conf \
+  --host-ip 192.168.0.2          # override the detected address if needed
+```
+
+`--port` is the **host** port. The container always listens on 3000 internally, so
+in host mode the generated `proxy_pass` gets your port, while in network mode the
+upstream stays `hearth-app:3000` — the proxy connects to the container directly and
+never goes through the published port.
+
+Two safeguards worth knowing about, since both protect your *other* sites:
+
+- The generated config is checked with `nginx -t` **before** SWAG is restarted. If
+  nginx rejects it the file is removed again and SWAG is left running untouched, so
+  a bad config can't take down every other site the proxy serves.
+- If the filename wouldn't be picked up by nginx's include glob for that directory
+  (`*.subdomain.conf` / `*.subfolder.conf` in `proxy-confs/`, `*.conf` in
+  `site-confs/`), you get a warning. That mistake writes the file successfully,
+  never loads it, and logs nothing.
 
 To deploy changes later, from the install directory:
 

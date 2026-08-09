@@ -31,6 +31,13 @@
 #                                   on the LAN. Connects SWAG to that network.
 #                         none    - do not touch the proxy at all.
 #   --no-proxy          Same as --proxy none
+#   --proxy-conf-dir <p>  Directory to write the nginx config into. Default is
+#                         <swag>/nginx/proxy-confs, discovered from the container.
+#                         Use e.g. /mnt/user/appdata/swag/nginx/site-confs for a
+#                         site-confs style config.
+#   --proxy-conf-name <f> Exact filename to write. Default <subdomain>.subdomain.conf
+#   --host-ip <addr>      Address the proxy should connect to, overriding
+#                         auto-detection (useful on a multi-homed server).
 #   --force-path        Allow an install root that is not on a mounted pool
 #   --repo <url>        Source repository
 #   -h, --help          This message
@@ -45,6 +52,9 @@ APP_PORT="3000"
 PROXY_NETWORK="proxynet"
 SWAG_CONTAINER="swag"
 PROXY_MODE="auto" # auto|host|network|none
+PROXY_CONF_DIR=""
+PROXY_CONF_NAME=""
+HOST_IP_OVERRIDE=""
 FORCE_PATH="no"
 GIT_IMAGE="alpine/git:latest"
 
@@ -84,6 +94,12 @@ while [ $# -gt 0 ]; do
   --proxy) need_arg "$1" "${2:-}" && PROXY_MODE="$2" && shift 2 ;;
   --proxy=*) PROXY_MODE="${1#*=}" && shift ;;
   --no-proxy) PROXY_MODE="none" && shift ;;
+  --proxy-conf-dir) need_arg "$1" "${2:-}" && PROXY_CONF_DIR="$2" && shift 2 ;;
+  --proxy-conf-dir=*) PROXY_CONF_DIR="${1#*=}" && shift ;;
+  --proxy-conf-name) need_arg "$1" "${2:-}" && PROXY_CONF_NAME="$2" && shift 2 ;;
+  --proxy-conf-name=*) PROXY_CONF_NAME="${1#*=}" && shift ;;
+  --host-ip) need_arg "$1" "${2:-}" && HOST_IP_OVERRIDE="$2" && shift 2 ;;
+  --host-ip=*) HOST_IP_OVERRIDE="${1#*=}" && shift ;;
   --force-path) FORCE_PATH="yes" && shift ;;
   -h | --help) usage 0 ;;
   *) die "unknown option: $1  (try --help)" ;;
@@ -164,6 +180,12 @@ esac
 SWAG_CONFIG=""
 HOST_IP=""
 
+# Naming a config location is an unambiguous request for proxy setup, so let it
+# resolve "auto" even when the SWAG container cannot be inspected.
+if [ "$PROXY_MODE" = auto ] && [ -n "$PROXY_CONF_DIR" ]; then
+  PROXY_MODE=host
+fi
+
 if [ "$PROXY_MODE" != "none" ]; then
   if docker inspect "$SWAG_CONTAINER" >/dev/null 2>&1; then
     # Ask the container where its /config lives rather than assuming
@@ -188,8 +210,12 @@ if [ "$PROXY_MODE" = host ]; then
   # The address SWAG will proxy to. "ip route get" reports the source address the
   # kernel would actually use, which beats guessing from the interface list on a
   # host with bridges, VLANs and docker0 all present.
-  HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -n 1)
-  [ -n "$HOST_IP" ] || HOST_IP=$(hostname -i 2>/dev/null | awk '{print $1}')
+  if [ -n "$HOST_IP_OVERRIDE" ]; then
+    HOST_IP="$HOST_IP_OVERRIDE"
+  else
+    HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -n 1)
+    [ -n "$HOST_IP" ] || HOST_IP=$(hostname -i 2>/dev/null | awk '{print $1}')
+  fi
   if [ -n "$HOST_IP" ]; then
     ok "host address for the proxy upstream: $HOST_IP:$APP_PORT"
   else
@@ -331,58 +357,130 @@ fi
 
 # --- reverse proxy wiring -------------------------------------------------
 CONF_DST=""
-if [ -n "$SWAG_CONFIG" ] && [ "$PROXY_MODE" != none ]; then
-  say "Configuring the reverse proxy ($PROXY_MODE mode)"
-
-  SUBDOMAIN="hearth"
-  [ -n "$DOMAIN" ] && SUBDOMAIN="${DOMAIN%%.*}"
-  CONF_DST="$SWAG_CONFIG/nginx/proxy-confs/$SUBDOMAIN.subdomain.conf"
-
-  if [ "$PROXY_MODE" = network ]; then
-    if docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1; then
-      ok "network '$PROXY_NETWORK' exists"
-    else
-      docker network create "$PROXY_NETWORK" >/dev/null
-      ok "created network '$PROXY_NETWORK'"
-    fi
-
-    if docker inspect "$SWAG_CONTAINER" \
-      --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null |
-      tr ' ' '\n' | grep -qx "$PROXY_NETWORK"; then
-      ok "$SWAG_CONTAINER already on '$PROXY_NETWORK'"
-    else
-      docker network connect "$PROXY_NETWORK" "$SWAG_CONTAINER"
-      ok "connected $SWAG_CONTAINER to '$PROXY_NETWORK'"
-    fi
-    CONF_SRC="$APP_DIR/deploy/swag/hearth.subdomain.conf"
+if [ "$PROXY_MODE" != none ]; then
+  # Destination directory: an explicit --proxy-conf-dir wins, otherwise derive it
+  # from the container's own /config mount.
+  if [ -n "$PROXY_CONF_DIR" ]; then
+    CONF_DIR="$PROXY_CONF_DIR"
+  elif [ -n "$SWAG_CONFIG" ]; then
+    CONF_DIR="$SWAG_CONFIG/nginx/proxy-confs"
   else
-    CONF_SRC="$APP_DIR/deploy/swag/hearth-hostip.subdomain.conf"
+    CONF_DIR=""
   fi
 
-  if [ ! -f "$CONF_SRC" ]; then
-    note "$CONF_SRC missing; skipping proxy config"
-    CONF_DST=""
-  elif [ -f "$CONF_DST" ]; then
-    # Never clobber a hand-written config. Anyone already running SWAG has
-    # configs they care about, and silently replacing one would be hostile.
-    note "$CONF_DST already exists; leaving your version alone"
-    if [ "$PROXY_MODE" = host ] && [ -n "$HOST_IP" ]; then
-      note "check that it proxies to http://$HOST_IP:$APP_PORT"
+  if [ -n "$CONF_DIR" ]; then
+    say "Configuring the reverse proxy ($PROXY_MODE mode)"
+
+    [ -d "$CONF_DIR" ] || die "proxy config directory does not exist: $CONF_DIR"
+
+    SUBDOMAIN="hearth"
+    [ -n "$DOMAIN" ] && SUBDOMAIN="${DOMAIN%%.*}"
+
+    if [ -n "$PROXY_CONF_NAME" ]; then
+      CONF_FILE="$PROXY_CONF_NAME"
+    else
+      CONF_FILE="$SUBDOMAIN.subdomain.conf"
     fi
-    CONF_DST=""
-  else
-    # SWAG routes on "<subdomain>.*", so the file has to name the subdomain the
-    # user actually chose or nginx will never match the request.
-    sed -e "s/^\( *server_name *\)hearth\.\*;/\1$SUBDOMAIN.*;/" \
-      -e "s|UNRAID_HOST_IP|${HOST_IP:-UNRAID_HOST_IP}|g" \
-      -e "s|:3000;|:$APP_PORT;|" \
-      "$CONF_SRC" >"$CONF_DST"
-    ok "installed $CONF_DST"
-    if [ "$PROXY_MODE" = host ] && [ -z "$HOST_IP" ]; then
-      note "edit it and replace UNRAID_HOST_IP before restarting SWAG"
+    CONF_DST="$CONF_DIR/$CONF_FILE"
+
+    # nginx only includes files matching the glob defined for each directory. A
+    # non-matching name is written successfully, never loaded, and produces a 404
+    # or a fall-through to the default site with nothing in any log to explain it —
+    # so warn rather than let that be discovered the hard way.
+    case "$CONF_DIR" in
+    */proxy-confs)
+      case "$CONF_FILE" in
+      *.subdomain.conf | *.subfolder.conf) ;;
+      *) note "WARNING: SWAG includes only *.subdomain.conf and *.subfolder.conf from proxy-confs/, so '$CONF_FILE' will be written but never loaded" ;;
+      esac
+      ;;
+    */site-confs)
+      case "$CONF_FILE" in
+      *.conf) ;;
+      *) note "WARNING: SWAG includes only *.conf from site-confs/, so '$CONF_FILE' will be written but never loaded" ;;
+      esac
+      ;;
+    esac
+
+    if [ "$PROXY_MODE" = network ]; then
+      if docker network inspect "$PROXY_NETWORK" >/dev/null 2>&1; then
+        ok "network '$PROXY_NETWORK' exists"
+      else
+        docker network create "$PROXY_NETWORK" >/dev/null
+        ok "created network '$PROXY_NETWORK'"
+      fi
+
+      if docker inspect "$SWAG_CONTAINER" \
+        --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null |
+        tr ' ' '\n' | grep -qx "$PROXY_NETWORK"; then
+        ok "$SWAG_CONTAINER already on '$PROXY_NETWORK'"
+      else
+        docker network connect "$PROXY_NETWORK" "$SWAG_CONTAINER"
+        ok "connected $SWAG_CONTAINER to '$PROXY_NETWORK'"
+      fi
+      CONF_SRC="$APP_DIR/deploy/swag/hearth.subdomain.conf"
+    else
+      CONF_SRC="$APP_DIR/deploy/swag/hearth-hostip.subdomain.conf"
     fi
-    docker restart "$SWAG_CONTAINER" >/dev/null
-    ok "restarted $SWAG_CONTAINER"
+
+    # An explicit FQDN when we know it, rather than SWAG's "hearth.*" wildcard:
+    # unambiguous, and it matches how most hand-written configs are written.
+    if [ -n "$DOMAIN" ]; then
+      SERVER_NAME="$DOMAIN"
+    else
+      SERVER_NAME="$SUBDOMAIN.*"
+    fi
+
+    if [ ! -f "$CONF_SRC" ]; then
+      note "$CONF_SRC missing; skipping proxy config"
+      CONF_DST=""
+    elif [ -f "$CONF_DST" ]; then
+      # Never clobber a hand-written config. Anyone already running SWAG has
+      # configs they care about, and silently replacing one would be hostile.
+      note "$CONF_DST already exists; leaving your version alone"
+      if [ "$PROXY_MODE" = host ] && [ -n "$HOST_IP" ]; then
+        note "check that it proxies to http://$HOST_IP:$APP_PORT"
+      fi
+      CONF_DST=""
+    else
+      if [ "$PROXY_MODE" = host ]; then
+        # Only host mode rewrites the port. In network mode the proxy talks to the
+        # container directly, and the container always listens on 3000 whatever
+        # port is published on the host — rewriting it there would break the
+        # upstream.
+        sed -e "s|^\( *server_name *\)hearth\.\*;|\1$SERVER_NAME;|" \
+          -e "s|UNRAID_HOST_IP|${HOST_IP:-UNRAID_HOST_IP}|g" \
+          -e "s|\(proxy_pass http://[^:]*\):3000;|\1:$APP_PORT;|" \
+          "$CONF_SRC" >"$CONF_DST"
+      else
+        sed -e "s|^\( *server_name *\)hearth\.\*;|\1$SERVER_NAME;|" \
+          "$CONF_SRC" >"$CONF_DST"
+      fi
+      ok "installed $CONF_DST"
+      if [ "$PROXY_MODE" = host ] && [ -z "$HOST_IP" ]; then
+        note "edit it and replace UNRAID_HOST_IP before restarting SWAG"
+      fi
+
+      # Validate before restarting. A syntax error, an unsupported directive or a
+      # duplicate server_name would stop nginx from starting — which would take
+      # down every other site this proxy serves, not just Hearth. Roll back rather
+      # than let that happen.
+      if docker inspect -f '{{.State.Running}}' "$SWAG_CONTAINER" 2>/dev/null | grep -q true; then
+        if NGINX_OUT=$(docker exec "$SWAG_CONTAINER" nginx -t 2>&1); then
+          ok "nginx accepted the new config"
+          docker restart "$SWAG_CONTAINER" >/dev/null
+          ok "restarted $SWAG_CONTAINER"
+        else
+          rm -f "$CONF_DST"
+          printf '\033[1;31mERROR\033[0m nginx rejected the generated config, so it was removed again.\n' >&2
+          printf '      %s was NOT restarted and your other sites are unaffected.\n' "$SWAG_CONTAINER" >&2
+          printf '%s\n' "$NGINX_OUT" | sed 's/^/      /' >&2
+          exit 1
+        fi
+      else
+        note "$SWAG_CONTAINER is not running; skipped validation and restart"
+      fi
+    fi
   fi
 fi
 

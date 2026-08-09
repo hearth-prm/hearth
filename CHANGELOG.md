@@ -57,6 +57,17 @@ bump and may include breaking changes; patch releases are fixes only.
   `$connection_upgrade` rather than hardcoding `upgrade` on every request), and no
   resolver, the upstream being a literal address.
 
+- `--proxy-conf-dir` and `--proxy-conf-name` to control exactly where the nginx
+  config is written and what it is called, for people who keep their reverse-proxy
+  configs in `site-confs/` or under their own naming scheme. Warns when the chosen
+  filename would not match nginx's include glob for that directory — a mistake that
+  writes the file successfully, never loads it, and logs nothing.
+- `--host-ip` to override the detected upstream address on a multi-homed server.
+- The generated nginx config is now validated with `nginx -t` inside the proxy
+  container before it is restarted. On rejection the file is removed and the proxy
+  is left running untouched, so a bad config cannot take down the other sites it
+  serves.
+
 ### Changed
 
 - The default install root is now `/mnt/user/appdata/hearth`, the standard Unraid
@@ -72,6 +83,10 @@ bump and may include breaking changes; patch releases are fixes only.
   reverse-proxy container at all — the least surprising thing to do to
   infrastructure someone already set up. `--proxy network` opts into the old
   behaviour, `--no-proxy` skips it entirely.
+
+- Dropped `http2 on;` from the generated config. It requires nginx 1.25+, and on
+  an older proxy the directive is fatal at startup — a large blast radius for a
+  marginal gain.
 
 ### Fixed
 
