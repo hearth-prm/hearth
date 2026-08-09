@@ -6,7 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 Hearth uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 While the version is below `1.0.0`, each planned milestone lands as a **minor**
-bump and may include breaking changes; patch releases are fixes only.
+bump and may include breaking changes.
+
+A milestone's minor version is cut once that milestone has been confirmed working
+against a real Google account — not when the code is written. Patch releases carry
+deployment fixes and milestone work that is complete but not yet verified in
+production, so a feature can ship in a patch release ahead of the minor version
+that formally marks its milestone.
 
 | Version | Milestone |
 |---|---|
