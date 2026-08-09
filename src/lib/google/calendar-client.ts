@@ -13,6 +13,15 @@ export type GoogleEvent = calendar_v3.Schema$Event;
 export interface EventWriteResult {
   id: string;
   etag: string | null;
+  /**
+   * Google's own link to the event.
+   *
+   * Stored rather than constructed. The shareable "eid" is base64 of
+   * "<eventId> <calendar email>", and for the primary calendar that email is the
+   * account's own address rather than the literal string "primary" — so building
+   * the URL by hand yields one Google rejects.
+   */
+  htmlLink: string | null;
 }
 
 /**
@@ -90,7 +99,7 @@ export function createCalendarClient(auth: OAuth2Client): CalendarClient {
       });
       const id = res.data.id;
       if (!id) throw new Error("Google created the event but returned no id");
-      return { id, etag: res.data.etag ?? null };
+      return { id, etag: res.data.etag ?? null, htmlLink: res.data.htmlLink ?? null };
     },
 
     async patchEvent({ calendarId, eventId, event, sendUpdates }) {
@@ -100,7 +109,11 @@ export function createCalendarClient(auth: OAuth2Client): CalendarClient {
         sendUpdates,
         requestBody: event,
       });
-      return { id: res.data.id ?? eventId, etag: res.data.etag ?? null };
+      return {
+        id: res.data.id ?? eventId,
+        etag: res.data.etag ?? null,
+        htmlLink: res.data.htmlLink ?? null,
+      };
     },
 
     async getEvent(calendarId, eventId) {

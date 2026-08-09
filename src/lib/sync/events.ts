@@ -294,6 +294,7 @@ export async function syncEventsForUser(
             googleEventId: written.id,
             googleCalendarId: targetCalendar,
             googleEtag: written.etag,
+            googleHtmlLink: written.htmlLink,
             googleSyncedAt: now(),
             googleSyncStatus: "SYNCED",
             googleSyncError: null,

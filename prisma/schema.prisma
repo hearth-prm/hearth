@@ -383,6 +383,11 @@ model Event {
   googleEventId    String?
   googleCalendarId String?
   googleEtag       String?
+  /// The canonical link Google returns for the event. Stored rather than
+  /// constructed: the shareable "eid" is base64 of "<eventId> <calendar email>",
+  /// and for the primary calendar that email is the account's own address, not the
+  /// literal string "primary" — so building it by hand produced a 500.
+  googleHtmlLink   String?
   googleSyncedAt   DateTime?
   googleSyncStatus SyncStatus @default(PENDING)
   googleSyncError  String?    @db.Text

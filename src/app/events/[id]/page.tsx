@@ -33,6 +33,8 @@ import {
 import { SyncBadge } from "@/components/sync-badge";
 import { DeleteForm } from "@/components/delete-form";
 import { SubmitButton } from "@/components/submit-button";
+import { AttendeeSearch } from "@/components/attendee-search";
+import { searchPeople } from "@/lib/actions/people-search";
 
 export default async function EventPage({
   params,
@@ -65,20 +67,9 @@ export default async function EventPage({
   });
   if (!event) notFound();
 
-  const [defs, settings, addable] = await Promise.all([
+  const [defs, settings] = await Promise.all([
     loadRegistry(user.id, "EVENT"),
     getUserSettings(user.id),
-    prisma.person.findMany({
-      where: {
-        AND: [
-          readablePeopleWhere(user.id),
-          { eventAttendances: { none: { eventId: event.id } } },
-        ],
-      },
-      select: { id: true, displayName: true },
-      orderBy: { displayName: "asc" },
-      take: 1000,
-    }),
   ]);
 
   // Guests Google cannot be told about: it identifies attendees only by email.
@@ -87,7 +78,14 @@ export default async function EventPage({
     .map((a) => a.person.displayName);
 
   const populated = defs
-    .filter((d) => !["title", "startAt", "endAt", "allDay", "timeZone", "description"].includes(d.key))
+    // Every core field with a row of its own above, or the registry loop renders
+    // it a second time — which is how "location" came to appear twice.
+    .filter(
+      (d) =>
+        !["title", "startAt", "endAt", "allDay", "timeZone", "location", "description"].includes(
+          d.key,
+        ),
+    )
     .map((def) => ({ def, value: readFieldValue(event, def) }))
     .filter(({ def, value }) => formatFieldValue(def, value, event.timeZone).length > 0);
 
@@ -273,34 +271,12 @@ export default async function EventPage({
               </ul>
             )}
 
-            {addable.length > 0 ? (
-              <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
-                <form action={addAttendee} className="flex flex-wrap items-end gap-2">
-                  <input type="hidden" name="eventId" value={event.id} />
-                  <label className="flex-1 text-xs text-neutral-500 dark:text-neutral-400">
-                    Add someone
-                    <select
-                      name="personId"
-                      required
-                      defaultValue=""
-                      className={`${inputClass} mt-1`}
-                    >
-                      <option value="" disabled>
-                        Choose a person…
-                      </option>
-                      {addable.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.displayName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <SubmitButton className={btnSecondary} pendingLabel="Adding…">
-                    Add
-                  </SubmitButton>
-                </form>
-              </div>
-            ) : null}
+            <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
+              <form action={addAttendee}>
+                <input type="hidden" name="eventId" value={event.id} />
+                <AttendeeSearch search={searchPeople} eventId={event.id} />
+              </form>
+            </div>
           </Card>
         </div>
 
@@ -316,16 +292,32 @@ export default async function EventPage({
               ) : null}
               {event.addToGoogle && event.googleEventId ? (
                 <DetailRow label="Google event">
-                  <a
-                    href={`https://calendar.google.com/calendar/u/0/r/eventedit/${Buffer.from(
-                      `${event.googleEventId} ${event.googleCalendarId ?? "primary"}`,
-                    ).toString("base64url")}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="text-teal-700 hover:underline dark:text-teal-400"
-                  >
-                    Open in Google Calendar
-                  </a>
+                  {event.googleHtmlLink ? (
+                    <a
+                      href={event.googleHtmlLink}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-teal-700 hover:underline dark:text-teal-400"
+                    >
+                      Open in Google Calendar
+                    </a>
+                  ) : (
+                    <>
+                      {/* Synced before the link was captured; the day view still
+                          gets you there without guessing at an event URL. */}
+                      <a
+                        href={`https://calendar.google.com/calendar/u/0/r/day/${event.startAt.getUTCFullYear()}/${event.startAt.getUTCMonth() + 1}/${event.startAt.getUTCDate()}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="text-teal-700 hover:underline dark:text-teal-400"
+                      >
+                        Open that day in Google Calendar
+                      </a>
+                      <span className="mt-0.5 block text-neutral-500 dark:text-neutral-400">
+                        Re-sync this event to get a direct link.
+                      </span>
+                    </>
+                  )}
                 </DetailRow>
               ) : null}
               {uninvitable.length > 0 ? (

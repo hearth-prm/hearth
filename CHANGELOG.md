@@ -24,6 +24,29 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Guests were added to events but never emailed, so they could never RSVP.**
+  `sendInvites` shipped defaulting to false and the default was later changed to
+  true, but `ALTER COLUMN SET DEFAULT` governs only rows inserted afterwards — so
+  every existing install still had it off. The same gap as `Event.addToGoogle` one
+  migration earlier, missed for this column. Now backfilled.
+- **"Open in Google Calendar" returned a 500.** The link was built by base64-encoding
+  `"<eventId> <calendarId>"`, but Google's shareable id expects the calendar's *email
+  address*, which for the primary calendar is the account's own — not the literal
+  string `primary`. Hearth now stores the `htmlLink` Google returns on write and uses
+  that. Events synced before this fall back to a link to the right day.
+- **Location appeared twice on the event page.** It had a row of its own and was also
+  picked up by the loop over registry fields, whose exclusion list had missed it.
+
+### Changed
+
+- Adding a guest to an event is now a type-to-search field rather than a dropdown of
+  everyone. Matching is wildcarded at both ends and spans name, nickname,
+  organisation and email, so "ell" finds both Ellery and Campbell. People already on
+  the event are excluded, and no longer is the whole contact list shipped to the
+  browser to populate a select.
+
 ## [0.2.0] — 2026-08-09
 
 Marks milestone 2 confirmed working against a real Google account — contacts both
