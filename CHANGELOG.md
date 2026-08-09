@@ -68,7 +68,20 @@ bump and may include breaking changes; patch releases are fixes only.
   is left running untouched, so a bad config cannot take down the other sites it
   serves.
 
+- The installer refuses to generate a new `.env` when the Postgres data directory
+  already holds a database. Postgres only runs `initdb` on an empty directory, so
+  an existing cluster keeps its original credentials while a regenerated `.env`
+  carries new ones — an install that looks fine and cannot authenticate.
+
 ### Changed
+
+- Pinned the Compose project name to `hearth`. It was previously derived from the
+  directory the compose file sits in, so a checkout at `.../hearth/app` produced a
+  project named `app` with containers called `app-1`, liable to collide with any
+  other stack living in a directory named `app`. Existing installs will see their
+  containers recreated under the new names; bind-mounted data (`PGDATA_PATH`) is
+  unaffected, but anyone who used the default named volume will find it orphaned as
+  `app_pgdata`.
 
 - The default install root is now `/mnt/user/appdata/hearth`, the standard Unraid
   appdata location — what official templates use, what the Appdata Backup plugin

@@ -1,3 +1,9 @@
+# Pin the project name. Without this, Compose derives it from the directory the
+# file sits in — which for a checkout at .../hearth/app means the project is
+# called "app", containers are named "app-1", and it collides with any other
+# stack that also happens to live in a directory named "app".
+name: hearth
+
 services:
   db:
     image: postgres:16-alpine

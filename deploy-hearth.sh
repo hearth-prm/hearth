@@ -259,6 +259,21 @@ if [ -f .env ]; then
   say "Keeping existing .env"
   note "not regenerating — the database password in it is baked into $PGDATA_DIR"
 else
+  # Refuse the one combination that produces a working-looking install that cannot
+  # connect: an existing Postgres cluster plus a freshly generated password.
+  # Postgres only runs initdb when its data directory is empty, so an existing
+  # cluster silently keeps its old credentials while .env gets new ones.
+  if [ -f "$PGDATA_DIR/PG_VERSION" ]; then
+    printf '\033[1;31mERROR\033[0m %s already contains a Postgres database, but there is no .env.\n' "$PGDATA_DIR" >&2
+    printf '      Generating a new password now would leave the app unable to log in:\n' >&2
+    printf '      Postgres keeps the credentials it was initialised with and only runs\n' >&2
+    printf '      initdb on an empty directory.\n\n' >&2
+    printf '      Either restore the .env that goes with this database, or discard the\n' >&2
+    printf '      database and start fresh:\n' >&2
+    printf '        rm -rf %s/*\n' "$PGDATA_DIR" >&2
+    exit 1
+  fi
+
   say "Generating .env"
 
   # Hex, not base64: this value gets embedded in the DATABASE_URL, and the
