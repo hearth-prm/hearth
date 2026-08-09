@@ -24,6 +24,13 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Added
+
+- A link to the synced Google contact on each person's page. The SYNCED badge only
+  means Google accepted the write, and changes take a while to surface in the
+  Contacts UI, so being able to open the record settles "did that actually go
+  through?" without guesswork.
+
 ## [0.1.1] — 2026-08-09
 
 ### Added

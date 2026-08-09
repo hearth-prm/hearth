@@ -20,6 +20,7 @@ import {
   PageHeader,
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
+import { GoogleContactLink } from "@/components/google-contact-link";
 import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
 
@@ -259,6 +260,10 @@ export default async function PersonPage({
               <DetailRow label="Updated">
                 {formatInstant(person.updatedAt, settings.timeZone)}
               </DetailRow>
+              <GoogleContactLink
+                resourceName={person.googleResourceName}
+                addToGoogle={person.addToGoogle}
+              />
               {person.googleSyncedAt ? (
                 <DetailRow label="Last synced">
                   {formatInstant(person.googleSyncedAt, settings.timeZone)}
