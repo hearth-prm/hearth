@@ -24,6 +24,8 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-09
+
 Marks milestone 2 confirmed working against a real Google account — contacts both
 create and update in Google Contacts. Milestone 3 (calendar) ships here too but has
 only been tested against a fake Calendar API; the minor version marking it verified
@@ -282,6 +284,7 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.1.1...main
+[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.2.0...main
+[0.2.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.0
 [0.1.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.1.1
 [0.1.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.1.0
