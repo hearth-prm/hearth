@@ -134,7 +134,24 @@ sh deploy-hearth.sh --help          # all options
 sh deploy-hearth.sh --no-proxy      # skip reverse-proxy setup
 sh deploy-hearth.sh --install-root /mnt/nvme/appdata/hearth
 sh deploy-hearth.sh --port 3080     # if 3000 is already taken
+
+# keep the install on /mnt/user but put the database on a pool
+sh deploy-hearth.sh --pgdata-path /mnt/cache/appdata/hearth/postgres
 ```
+
+**If the first start times out, this is almost always why.** Postgres is
+fsync-heavy, and `initdb` on a parity-protected array or through Unraid's FUSE
+layer can take 45+ seconds where a pool does it in three. Check where your data
+actually landed — `/mnt/user` is a union, so the real location is a specific
+disk or pool:
+
+```bash
+ls -d /mnt/*/appdata/hearth/postgres
+```
+
+A `/mnt/diskN/...` result means it's on the array. Move it to the pool with
+`--pgdata-path`, which leaves the app files and backups on `/mnt/user` where the
+Appdata Backup plugin and SMB can still see them.
 
 If you keep your nginx configs somewhere specific, or name them your own way:
 

@@ -193,18 +193,19 @@ sh scripts/docker-up.sh || die "build or start failed: cd $APP_DIR && $COMPOSE l
 say "Waiting for the app to come back"
 AFTER=""
 i=0
-while [ "$i" -lt 90 ]; do
+while [ "$i" -lt 150 ]; do
   AFTER=$(curl -fsS "http://127.0.0.1:$APP_PORT/api/health" 2>/dev/null || true)
   case "$AFTER" in
   *'"status":"ok"'*) break ;;
   esac
   AFTER=""
   i=$((i + 1))
+  [ $((i % 15)) -eq 0 ] && note "still waiting ($((i * 2))s)…"
   sleep 2
 done
 
 if [ -z "$AFTER" ]; then
-  printf '\033[1;31mERROR\033[0m app did not come back within 180s.\n' >&2
+  printf '\033[1;31mERROR\033[0m app did not come back within 300s.\n' >&2
   printf '      cd %s && %s logs --tail 50 app\n' "$APP_DIR" "$COMPOSE" >&2
   if [ "$DO_BACKUP" = yes ] && [ -n "${DEST:-}" ]; then
     printf '      A pre-update backup is at %s\n' "$DEST" >&2

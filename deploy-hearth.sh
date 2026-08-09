@@ -18,6 +18,10 @@
 #                       you set AUTH_URL yourself.
 #   --install-root <p>  Where to install. Default /mnt/user/appdata/hearth
 #   --port <n>          Host port to publish. Default 3000
+#   --pgdata-path <p>   Where Postgres keeps its data. Default <install-root>/postgres.
+#                       Point this at a pool (/mnt/cache/appdata/hearth/postgres)
+#                       when the install root is on /mnt/user: the database is
+#                       fsync-heavy and the FUSE layer and array are slow at it.
 #   --branch <name>     Branch to deploy. Default main
 #   --proxy-network <n> Docker network shared with the reverse proxy.
 #                       Default proxynet
@@ -51,6 +55,7 @@ BRANCH="main"
 INSTALL_ROOT="/mnt/user/appdata/hearth"
 DOMAIN=""
 APP_PORT="3000"
+PGDATA_PATH_OPT=""
 PROXY_NETWORK="proxynet"
 SWAG_CONTAINER="swag"
 PROXY_MODE="auto" # auto|host|network|none
@@ -90,6 +95,8 @@ while [ $# -gt 0 ]; do
   --install-root) need_arg "$1" "${2:-}" && INSTALL_ROOT="$2" && shift 2 ;;
   --install-root=*) INSTALL_ROOT="${1#*=}" && shift ;;
   --port) need_arg "$1" "${2:-}" && APP_PORT="$2" && shift 2 ;;
+  --pgdata-path) need_arg "$1" "${2:-}" && PGDATA_PATH_OPT="$2" && shift 2 ;;
+  --pgdata-path=*) PGDATA_PATH_OPT="${1#*=}" && shift ;;
   --port=*) APP_PORT="${1#*=}" && shift ;;
   --branch) need_arg "$1" "${2:-}" && BRANCH="$2" && shift 2 ;;
   --branch=*) BRANCH="${1#*=}" && shift ;;
@@ -120,7 +127,11 @@ auto | host | network | none) ;;
 esac
 
 APP_DIR="$INSTALL_ROOT/app"
-PGDATA_DIR="$INSTALL_ROOT/postgres"
+if [ -n "$PGDATA_PATH_OPT" ]; then
+  PGDATA_DIR="$PGDATA_PATH_OPT"
+else
+  PGDATA_DIR="$INSTALL_ROOT/postgres"
+fi
 BACKUP_DIR="$INSTALL_ROOT/backups"
 
 # --- preflight ------------------------------------------------------------
@@ -234,6 +245,15 @@ fi
 ok "proxy mode: $PROXY_MODE"
 
 # --- directories ----------------------------------------------------------
+case "$PGDATA_DIR" in
+/mnt/user/*)
+  note "the database will live on /mnt/user, which goes through Unraid's FUSE layer"
+  note "Postgres is fsync-heavy: expect a slow first start, and a slow app overall"
+  note "if the share also spills to the array. To put just the database on a pool:"
+  note "  --pgdata-path /mnt/cache/appdata/hearth/postgres"
+  ;;
+esac
+
 say "Creating $INSTALL_ROOT"
 mkdir -p "$PGDATA_DIR" "$BACKUP_DIR"
 ok "$PGDATA_DIR"
@@ -535,20 +555,23 @@ sh scripts/docker-up.sh || die "build or start failed. Inspect with: cd $APP_DIR
 
 # --- wait for health ------------------------------------------------------
 say "Waiting for the app to come up"
+note "first boot also creates the database schema; on slow storage this takes a while"
 HEALTH=""
 i=0
-while [ "$i" -lt 90 ]; do
+while [ "$i" -lt 150 ]; do
   HEALTH=$(curl -fsS "http://127.0.0.1:$APP_PORT/api/health" 2>/dev/null || true)
   case "$HEALTH" in
   *'"status":"ok"'*) break ;;
   esac
   HEALTH=""
   i=$((i + 1))
+  # A silent five-minute wait is indistinguishable from a hang.
+  [ $((i % 15)) -eq 0 ] && note "still waiting ($((i * 2))s)…"
   sleep 2
 done
 
 if [ -z "$HEALTH" ]; then
-  printf '\033[1;31mERROR\033[0m app did not report healthy within 180s.\n' >&2
+  printf '\033[1;31mERROR\033[0m app did not report healthy within 300s.\n' >&2
   printf '      cd %s && %s logs --tail 50 app\n' "$APP_DIR" "$COMPOSE" >&2
   exit 1
 fi

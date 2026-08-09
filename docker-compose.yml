@@ -24,10 +24,16 @@ services:
       # reports healthy while the app's database is still being created.
       test:
         ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hearth} -d ${POSTGRES_DB:-hearth}"]
-      interval: 5s
+      # Generous, because first boot runs initdb — which is fsync-bound and can
+      # take a minute or more on a parity-protected array or through Unraid's FUSE
+      # layer, then spends more time on a shutdown checkpoint before the real
+      # server starts. A long start_period costs nothing once the database is up:
+      # pg_isready succeeds on the first check and the container is healthy
+      # immediately.
+      interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 10s
+      retries: 12
+      start_period: 150s
     # Not published to the host by default: nothing outside the compose network
     # needs it. Uncomment to connect a local client.
     # ports:
@@ -73,10 +79,10 @@ services:
           "-e",
           "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 40s
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 150s
 
 volumes:
   pgdata:

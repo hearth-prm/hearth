@@ -79,6 +79,10 @@ bump and may include breaking changes; patch releases are fixes only.
 
 ### Changed
 
+- `--pgdata-path` to put the database somewhere other than under the install root,
+  so the app files and backups can stay on `/mnt/user` — visible to SMB and the
+  Appdata Backup plugin — while the fsync-heavy database sits on a pool. The
+  installer warns when the database would land on `/mnt/user` and names the flag.
 - `--proxy-conf-dir` now accepts a path relative to the reverse proxy's `/config`
   mount, so `nginx/site-confs` is correct regardless of whether the host side of
   that mount is `.../appdata/swag` or `.../appdata/swag/config`. An absolute path
@@ -120,6 +124,15 @@ bump and may include breaking changes; patch releases are fixes only.
   marginal gain.
 
 ### Fixed
+
+- **First start failed with `container hearth-db-1 is unhealthy`.** The database
+  healthcheck tolerated only 60 seconds, but `initdb` is fsync-bound and takes 45+
+  seconds on a parity-protected array or through Unraid's FUSE layer, followed by a
+  slow shutdown checkpoint before the real server starts. Both healthchecks now
+  allow around four minutes, which costs nothing on a healthy database because
+  `pg_isready` succeeds on the first check. The scripts' own waits went from 180 to
+  300 seconds and now report progress, so a slow first boot is distinguishable from
+  a hang.
 
 - **The container failed to start: `Cannot find module 'effect'`.** The runtime
   image copied hand-picked directories (`prisma`, `@prisma`, `.prisma`) out of the
