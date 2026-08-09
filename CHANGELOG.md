@@ -24,6 +24,11 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+Marks milestone 2 confirmed working against a real Google account — contacts both
+create and update in Google Contacts. Milestone 3 (calendar) ships here too but has
+only been tested against a fake Calendar API; the minor version marking it verified
+comes once it has run against a real calendar.
+
 ### Added
 
 - **Calendar sync with attendee invites and RSVP writeback (milestone 3).** Events
