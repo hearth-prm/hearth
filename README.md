@@ -12,9 +12,9 @@ you opt into, is pulling event RSVPs from calendar guests.)
 
 ## Status
 
-**v0.1.0 — milestone 1 of 4, complete and running.** See
-[CHANGELOG.md](CHANGELOG.md) for what landed, and
-[Versioning](#versioning) for the scheme.
+**v0.3.0 — milestones 1–3 complete and confirmed working against a real Google
+account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
+[Versioning](#versioning) for what a minor version asserts.
 
 | | Feature | State |
 |---|---|---|

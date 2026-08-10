@@ -24,6 +24,15 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+Marks milestone 3 confirmed working against a real Google account: an event ticked
+"Send to Google Calendar" appears on the calendar, its guests are invited by email,
+and their replies come back into Hearth as RSVPs.
+
+No code changes. Under Hearth's versioning a minor release asserts that a milestone
+has been verified in production rather than that code was written — the code itself
+shipped in `0.2.0` and was fixed in `0.2.1`. The bump exists so a running install
+reports which build is the verified one.
+
 ## [0.2.1] — 2026-08-10
 
 ### Fixed
