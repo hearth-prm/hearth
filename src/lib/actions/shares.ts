@@ -17,14 +17,27 @@ function parsePermission(value: string): SharePermission {
   return value === "EDIT" ? "EDIT" : "VIEW";
 }
 
-async function findRecipient(email: string) {
-  const normalised = email.trim().toLowerCase();
-  if (!normalised) return null;
-  // Case-insensitive: Google hands back whatever casing the user typed at sign-up.
-  return prisma.user.findFirst({
-    where: { email: { equals: normalised, mode: "insensitive" } },
+/**
+ * The users a share is being granted to.
+ *
+ * Ids from a picker rather than typed addresses, so there is no such thing as a
+ * typo'd or non-existent recipient. Still re-checked against the database: the ids
+ * arrive in a form submission, and a form is not a trustworthy source of "this user
+ * exists and is not me".
+ */
+async function resolveRecipients(form: FormData, selfId: string) {
+  const ids = [...new Set(form.getAll("userId").map(String).filter(Boolean))].filter(
+    (id) => id !== selfId,
+  );
+  if (ids.length === 0) return [];
+  return prisma.user.findMany({
+    where: { id: { in: ids } },
     select: { id: true, email: true, name: true },
   });
+}
+
+function describe(recipients: Array<{ email: string | null }>): string {
+  return recipients.map((r) => r.email ?? "someone").join(", ");
 }
 
 /**
@@ -44,31 +57,29 @@ export async function shareEverything(
     const scope: ShareScope = scopeRaw === "ALL_EVENTS" ? "ALL_EVENTS" : "ALL_PEOPLE";
     const permission = parsePermission(readString(form, "permission"));
 
-    const recipient = await findRecipient(readString(form, "email"));
-    if (!recipient) {
-      return actionError(
-        "No Hearth user with that email address. They have to sign in once before anything can be shared with them.",
-      );
-    }
-    if (recipient.id === user.id) {
-      return actionError("That is your own account.");
+    const recipients = await resolveRecipients(form, user.id);
+    if (recipients.length === 0) {
+      return actionError("Choose at least one person to share with.");
     }
 
-    const existing = await prisma.share.findFirst({
-      where: { ownerId: user.id, withUserId: recipient.id, scope },
-      select: { id: true },
-    });
-    if (existing) {
-      await prisma.share.update({ where: { id: existing.id }, data: { permission } });
-    } else {
-      await prisma.share.create({
-        data: { ownerId: user.id, withUserId: recipient.id, scope, permission },
+    for (const recipient of recipients) {
+      const existing = await prisma.share.findFirst({
+        where: { ownerId: user.id, withUserId: recipient.id, scope },
+        select: { id: true },
       });
+      if (existing) {
+        await prisma.share.update({ where: { id: existing.id }, data: { permission } });
+      } else {
+        await prisma.share.create({
+          data: { ownerId: user.id, withUserId: recipient.id, scope, permission },
+        });
+      }
     }
 
     revalidatePath("/settings/sharing");
+    revalidatePath("/people");
     return actionOk(
-      `${scope === "ALL_PEOPLE" ? "Contacts" : "Events"} shared with ${recipient.email} (${permission === "EDIT" ? "can edit" : "view only"}).`,
+      `${scope === "ALL_PEOPLE" ? "Contacts" : "Events"} shared with ${describe(recipients)} (${permission === "EDIT" ? "can edit" : "view only"}).`,
     );
   } catch (err) {
     if (isFrameworkError(err)) throw err;
@@ -91,44 +102,43 @@ export async function shareRecord(
     else if (eventId) await requireOwnedEvent(user.id, eventId);
     else return actionError("Nothing to share.");
 
-    const recipient = await findRecipient(readString(form, "email"));
-    if (!recipient) {
-      return actionError(
-        "No Hearth user with that email address. They have to sign in once first.",
-      );
+    const recipients = await resolveRecipients(form, user.id);
+    if (recipients.length === 0) {
+      return actionError("Choose at least one person to share with.");
     }
-    if (recipient.id === user.id) return actionError("That is your own account.");
 
     const scope: ShareScope = personId ? "PERSON" : "EVENT";
-    const existing = await prisma.share.findFirst({
-      where: {
-        ownerId: user.id,
-        withUserId: recipient.id,
-        scope,
-        personId: personId || null,
-        eventId: eventId || null,
-      },
-      select: { id: true },
-    });
-    if (existing) {
-      await prisma.share.update({ where: { id: existing.id }, data: { permission } });
-    } else {
-      await prisma.share.create({
-        data: {
+    for (const recipient of recipients) {
+      const existing = await prisma.share.findFirst({
+        where: {
           ownerId: user.id,
           withUserId: recipient.id,
           scope,
-          permission,
           personId: personId || null,
           eventId: eventId || null,
         },
+        select: { id: true },
       });
+      if (existing) {
+        await prisma.share.update({ where: { id: existing.id }, data: { permission } });
+      } else {
+        await prisma.share.create({
+          data: {
+            ownerId: user.id,
+            withUserId: recipient.id,
+            scope,
+            permission,
+            personId: personId || null,
+            eventId: eventId || null,
+          },
+        });
+      }
     }
 
     if (personId) revalidatePath(`/people/${personId}`);
     if (eventId) revalidatePath(`/events/${eventId}`);
     revalidatePath("/settings/sharing");
-    return actionOk(`Shared with ${recipient.email}.`);
+    return actionOk(`Shared with ${describe(recipients)}.`);
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);

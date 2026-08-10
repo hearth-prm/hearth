@@ -26,6 +26,7 @@ import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
 import { ShareRecordForm } from "@/components/share-forms";
 import { shareRecord } from "@/lib/actions/shares";
+import { listOtherUsers } from "@/lib/users";
 
 export default async function PersonPage({
   params,
@@ -79,6 +80,8 @@ export default async function PersonPage({
         })
       : Promise.resolve([]),
   ]);
+
+  const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
   // Only render fields that actually hold something — a detail page listing 20
   // empty rows is worse than one showing the six facts you recorded.
@@ -296,7 +299,12 @@ export default async function PersonPage({
                     ))}
                   </ul>
                 ) : null}
-                <ShareRecordForm action={shareRecord} personId={person.id} />
+                <ShareRecordForm
+                  action={shareRecord}
+                  users={shareableUsers}
+                  alreadyShared={myShares.map((sh) => sh.withUserId)}
+                  personId={person.id}
+                />
               </div>
             </Card>
           ) : null}

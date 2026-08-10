@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/access";
+import { listOtherUsers } from "@/lib/users";
 import { revokeShare, shareEverything } from "@/lib/actions/shares";
 import { Badge, Card, CardHeader } from "@/components/ui";
 import { DeleteForm } from "@/components/delete-form";
@@ -16,7 +17,8 @@ const SCOPE_LABELS: Record<string, string> = {
 export default async function SharingPage() {
   const user = await requireUser();
 
-  const [given, received] = await Promise.all([
+  const [users, given, received] = await Promise.all([
+    listOtherUsers(user.id),
     prisma.share.findMany({
       where: { ownerId: user.id },
       include: {
@@ -44,7 +46,16 @@ export default async function SharingPage() {
           title="Share everything"
           description="A standing grant that includes records you add later."
         />
-        <ShareEverythingForm action={shareEverything} />
+        <ShareEverythingForm
+          action={shareEverything}
+          users={users}
+          alreadySharedPeople={given
+            .filter((g) => g.scope === "ALL_PEOPLE")
+            .map((g) => g.withUserId)}
+          alreadySharedEvents={given
+            .filter((g) => g.scope === "ALL_EVENTS")
+            .map((g) => g.withUserId)}
+        />
       </Card>
 
       <Card>

@@ -531,7 +531,13 @@ Two consequences worth knowing:
 
 Anyone else signed in to the same install can be given access to your records, from
 **Settings → Sharing** for everything at once, or from a contact's or event's own
-page for just that one.
+page for just that one. You pick them from a list of the install's users and can tick
+several at once — there is no address to type, since sharing can only ever target
+someone who has already signed in.
+
+Ticking someone grants or updates their access; unticking does **not** revoke it.
+Revoking is a separate control, so an accidental untick cannot quietly withdraw
+access.
 
 | | |
 |---|---|

@@ -24,6 +24,17 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Changed
+
+- Sharing now picks recipients from a **multi-select list of the install's users**
+  rather than asking for a typed email address. Sharing can only ever target someone
+  who has already signed in, so asking for an address invited typos and
+  non-existent recipients to describe a set that was always enumerable — and
+  granting the same thing to two people is one intention, not two visits to the form.
+  Ticking grants or updates access; unticking does not revoke, so an accidental
+  untick cannot silently withdraw it. Ids are still re-checked server-side, since a
+  form submission is not a trustworthy source of "this user exists and is not me".
+
 ### Fixed
 
 - **A shared contact never reached the other person's Google Contacts.** Sync

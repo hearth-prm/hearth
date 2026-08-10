@@ -36,6 +36,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { AttendeeSearch } from "@/components/attendee-search";
 import { ShareRecordForm } from "@/components/share-forms";
 import { shareRecord } from "@/lib/actions/shares";
+import { listOtherUsers } from "@/lib/users";
 import { searchPeople } from "@/lib/actions/people-search";
 
 export default async function EventPage({
@@ -84,6 +85,8 @@ export default async function EventPage({
         })
       : Promise.resolve([]),
   ]);
+
+  const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
   // Guests Google cannot be told about: it identifies attendees only by email.
   const uninvitable = event.attendees
@@ -378,7 +381,12 @@ export default async function EventPage({
                     ))}
                   </ul>
                 ) : null}
-                <ShareRecordForm action={shareRecord} eventId={event.id} />
+                <ShareRecordForm
+                  action={shareRecord}
+                  users={shareableUsers}
+                  alreadyShared={myShares.map((sh) => sh.withUserId)}
+                  eventId={event.id}
+                />
               </div>
             </Card>
           ) : null}
