@@ -24,6 +24,8 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-10
+
 Marks milestone 3 confirmed working against a real Google account: an event ticked
 "Send to Google Calendar" appears on the calendar, its guests are invited by email,
 and their replies come back into Hearth as RSVPs.
@@ -328,7 +330,8 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.2.1...main
+[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.3.0...main
+[0.3.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.3.0
 [0.2.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.1
 [0.2.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.0
 [0.1.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.1.1
