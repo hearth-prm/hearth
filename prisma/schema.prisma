@@ -47,6 +47,7 @@ model User {
   tombstones        SyncTombstone[]
   sharesGiven       Share[]            @relation("SharesGiven")
   sharesReceived    Share[]            @relation("SharesReceived")
+  personSyncs       PersonSync[]
 }
 
 model Account {
@@ -100,6 +101,12 @@ model UserSettings {
   syncContactsEnabled Boolean @default(false)
   /// Master switch for PRM <-> Google Calendar event sync.
   syncCalendarEnabled Boolean @default(false)
+  /// Push contacts other people shared with you into YOUR Google Contacts too.
+  ///
+  /// On by default, because that is the point of sharing a contact: one Hearth
+  /// record, everyone's address book. Off for anyone who would rather not have a
+  /// partner's five hundred contacts land in their own Google account.
+  syncSharedContacts  Boolean @default(true)
   /// Value pre-filled into "Add to Google" on newly created *contacts*.
   /// Events deliberately do not follow this: see Event.addToGoogle.
   defaultAddToGoogle  Boolean @default(true)
@@ -286,17 +293,13 @@ model Person {
   /// User-defined field values, keyed by FieldDefinition.key.
   custom Json @default("{}")
 
-  // --- Google Contacts sync state ---
+  // --- Google Contacts sync ---
+  /// The owner's decision that this contact belongs in Google at all.
+  ///
+  /// Whether it reaches a *particular* Google account is then per user: see
+  /// PersonSync, one row per (contact, account). A shared contact lands in every
+  /// recipient's address book, which is why the resource id cannot live here.
   addToGoogle          Boolean    @default(true)
-  googleResourceName   String?
-  googleEtag           String?
-  googleSyncedAt       DateTime?
-  googleSyncStatus     SyncStatus @default(PENDING)
-  googleSyncError      String?    @db.Text
-  /// Consecutive failed pushes, driving exponential backoff.
-  googleSyncAttempts   Int        @default(0)
-  /// Earliest time this record should be tried again. Null means "now".
-  googleSyncNextAttemptAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,13 +310,47 @@ model Person {
   relationshipsTo   Relationship[]  @relation("RelationshipTo")
   eventAttendances  EventAttendee[]
   shares            Share[]
+  googleSyncs       PersonSync[]
 
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
-  /// Drives the sync queue: pending/errored records whose backoff has elapsed.
-  @@index([ownerId, addToGoogle, googleSyncStatus, googleSyncNextAttemptAt])
-  @@unique([ownerId, googleResourceName])
+  @@index([ownerId, addToGoogle])
   @@index([custom(ops: JsonbOps)], type: Gin)
+}
+
+/// One contact's copy in one Google account.
+///
+/// Sync state has to be per (contact, account) rather than per contact, because a
+/// shared contact exists in every recipient's Google Contacts: each copy has its
+/// own resource id, its own etag, and can fail or fall behind independently of the
+/// others. Keeping it on the Person row allowed exactly one copy — the owner's —
+/// which made sharing invisible to Google.
+model PersonSync {
+  id       String @id @default(cuid())
+  personId String
+  /// Whose Google account this copy lives in. Not necessarily the contact's owner.
+  userId   String
+
+  googleResourceName      String?
+  googleEtag              String?
+  googleSyncedAt          DateTime?
+  googleSyncStatus        SyncStatus @default(PENDING)
+  googleSyncError         String?    @db.Text
+  /// Consecutive failed pushes for THIS account, driving its own backoff.
+  googleSyncAttempts      Int        @default(0)
+  googleSyncNextAttemptAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, userId])
+  /// One Hearth contact per Google resource, per account.
+  @@unique([userId, googleResourceName])
+  /// Drives the sync queue for one account.
+  @@index([userId, googleSyncStatus, googleSyncNextAttemptAt])
 }
 
 enum ContactKind {

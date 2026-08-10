@@ -62,8 +62,10 @@ export async function resyncAllContacts(
 ): Promise<ActionState> {
   try {
     const user = await requireUserForAction();
-    const { count } = await prisma.person.updateMany({
-      where: { ownerId: user.id, addToGoogle: true },
+    // Requeues this account's copies. Contacts never yet pushed here have no row
+    // and are picked up regardless, so they need no touching.
+    const { count } = await prisma.personSync.updateMany({
+      where: { userId: user.id, person: { addToGoogle: true } },
       data: {
         googleSyncStatus: "PENDING",
         googleSyncAttempts: 0,

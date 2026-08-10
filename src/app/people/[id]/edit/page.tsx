@@ -17,11 +17,16 @@ export default async function EditPersonPage({
 
   const person = await prisma.person.findFirst({
     where: { id, ...readablePeopleWhere(user.id) },
-    include: { contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] } },
+    include: {
+      contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] },
+      googleSyncs: { where: { userId: user.id }, select: { googleResourceName: true } },
+    },
   });
   if (!person) notFound();
 
-  const defs = await loadRegistry(user.id, "PERSON");
+  // The owner's registry: for a shared contact the custom values are keyed by their
+  // field definitions, not the editor's.
+  const defs = await loadRegistry(person.ownerId, "PERSON");
   const values = Object.fromEntries(
     defs.map((def) => [def.key, readFieldValue(person, def)]),
   );
@@ -40,7 +45,7 @@ export default async function EditPersonPage({
           value: c.value,
         }))}
         addToGoogle={person.addToGoogle}
-        synced={Boolean(person.googleResourceName)}
+        synced={Boolean(person.googleSyncs[0]?.googleResourceName)}
         cancelHref={`/people/${person.id}`}
       />
     </div>

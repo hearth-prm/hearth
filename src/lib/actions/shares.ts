@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import type { ShareScope, SharePermission } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { requireOwnedEvent, requireOwnedPerson, requireUserForAction } from "@/lib/access";
+import {
+  readablePeopleWhere,
+  requireOwnedEvent,
+  requireOwnedPerson,
+  requireUserForAction,
+} from "@/lib/access";
+import { prisma as db } from "@/lib/db";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
 
@@ -136,17 +142,65 @@ export async function shareRecord(
  * are legitimate, and requiring the owner to act would leave someone unable to
  * remove clutter from their own lists.
  */
+/**
+ * Remove Google copies the user can no longer reach.
+ *
+ * Called after any share change rather than being derived from which share was
+ * revoked, because the two are not the same question: a recipient may hold both a
+ * blanket grant and a per-record one, so losing the blanket does not necessarily
+ * cost them a given contact. Asking "what can they still read?" answers it exactly,
+ * and is equally correct for one revocation or a hundred.
+ */
+async function reapUnreachableCopies(userId: string): Promise<number> {
+  const orphaned = await db.personSync.findMany({
+    where: {
+      userId,
+      googleResourceName: { not: null },
+      person: { NOT: readablePeopleWhere(userId) },
+    },
+    select: { id: true, googleResourceName: true, googleEtag: true },
+  });
+  if (orphaned.length === 0) return 0;
+
+  await db.$transaction(async (tx) => {
+    for (const link of orphaned) {
+      await tx.syncTombstone.create({
+        data: {
+          ownerId: userId,
+          target: "GOOGLE_CONTACT",
+          resourceId: link.googleResourceName!,
+          etag: link.googleEtag,
+          reason: "opted_out",
+        },
+      });
+    }
+    // Drop the links in the same transaction: the contact is no longer theirs to
+    // hold, and a stale link would let a later run try to update a contact queued
+    // for deletion.
+    await tx.personSync.deleteMany({ where: { id: { in: orphaned.map((o) => o.id) } } });
+  });
+
+  return orphaned.length;
+}
+
 export async function revokeShare(form: FormData): Promise<void> {
   const id = readString(form, "id");
   const user = await requireUserForAction();
 
   const share = await prisma.share.findFirst({
     where: { id, OR: [{ ownerId: user.id }, { withUserId: user.id }] },
-    select: { id: true, personId: true, eventId: true },
+    select: { id: true, personId: true, eventId: true, withUserId: true },
   });
   if (!share) return;
 
+  const recipientId = share.withUserId;
   await prisma.share.delete({ where: { id: share.id } });
+
+  // Withdrawing access withdraws it from their Google too: Hearth stops managing the
+  // contact, so it stops existing there rather than rotting as a copy nothing
+  // updates.
+  await reapUnreachableCopies(recipientId);
+
   if (share.personId) revalidatePath(`/people/${share.personId}`);
   if (share.eventId) revalidatePath(`/events/${share.eventId}`);
   revalidatePath("/settings/sharing");

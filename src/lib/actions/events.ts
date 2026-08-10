@@ -107,6 +107,7 @@ export async function updateEvent(
       select: {
         custom: true,
         addToGoogle: true,
+        ownerId: true,
         googleEventId: true,
         googleCalendarId: true,
         googleEtag: true,
@@ -115,7 +116,9 @@ export async function updateEvent(
     });
 
     const settings = await getUserSettings(user.id);
-    const registry = await loadRegistry(user.id, "EVENT");
+    // The OWNER's registry: a shared event's custom values are keyed by the owner's
+    // field definitions, so an editor's registry would write foreign keys into them.
+    const registry = await loadRegistry(existing.ownerId, "EVENT");
 
     const parsed = parseFields(genericFields(registry), form);
     if (!parsed.ok) {

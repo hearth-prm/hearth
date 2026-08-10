@@ -39,6 +39,7 @@ export default async function PersonPage({
     where: { id, ...readablePeopleWhere(user.id) },
     include: {
       owner: { select: { id: true, email: true, name: true } },
+      googleSyncs: { include: { user: { select: { email: true } } } },
       contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] },
       eventAttendances: {
         include: { event: true },
@@ -50,6 +51,11 @@ export default async function PersonPage({
   if (!person) notFound();
 
   const isOwner = person.ownerId === user.id;
+  // This account's copy, and every other account holding one.
+  const mySync = person.googleSyncs.find((g) => g.userId === user.id);
+  const otherSyncs = person.googleSyncs.filter(
+    (g) => g.userId !== user.id && g.googleResourceName,
+  );
 
   // Registry and relationships belong to the record's OWNER, not the viewer. A
   // shared contact's custom values are keyed by the owner's field definitions, so
@@ -107,8 +113,8 @@ export default async function PersonPage({
                 label="Delete"
                 className={btnDanger}
                 confirmMessage={`Delete ${person.displayName}? ${
-                  person.googleResourceName
-                    ? "Their Google contact will be removed on the next sync."
+                  person.googleSyncs.some((g) => g.googleResourceName)
+                    ? "The Google contact will be removed from every account it reached, on the next sync."
                     : ""
                 }`}
               />
@@ -125,7 +131,7 @@ export default async function PersonPage({
               action={
                 <SyncBadge
                   addToGoogle={person.addToGoogle}
-                  status={person.googleSyncStatus}
+                  status={mySync?.googleSyncStatus ?? "PENDING"}
                 />
               }
             />
@@ -305,19 +311,24 @@ export default async function PersonPage({
                 {formatInstant(person.updatedAt, settings.timeZone)}
               </DetailRow>
               <GoogleContactLink
-                resourceName={person.googleResourceName}
+                resourceName={mySync?.googleResourceName ?? null}
                 addToGoogle={person.addToGoogle}
               />
-              {person.googleSyncedAt ? (
+              {mySync?.googleSyncedAt ? (
                 <DetailRow label="Last synced">
-                  {formatInstant(person.googleSyncedAt, settings.timeZone)}
+                  {formatInstant(mySync.googleSyncedAt, settings.timeZone)}
                 </DetailRow>
               ) : null}
-              {person.googleSyncError ? (
+              {mySync?.googleSyncError ? (
                 <DetailRow label="Sync error">
                   <span className="text-rose-600 dark:text-rose-400">
-                    {person.googleSyncError}
+                    {mySync.googleSyncError}
                   </span>
+                </DetailRow>
+              ) : null}
+              {otherSyncs.length > 0 ? (
+                <DetailRow label="Also in Google for">
+                  {otherSyncs.map((g) => g.user.email).join(", ")}
                 </DetailRow>
               ) : null}
             </dl>

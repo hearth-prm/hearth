@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/access";
+import { readablePeopleWhere, requireUser } from "@/lib/access";
 import { signIn } from "@/lib/auth";
 import { getGoogleConnection, getUserSettings } from "@/lib/settings";
 import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
@@ -23,11 +23,23 @@ export default async function SettingsPage() {
     await Promise.all([
       getUserSettings(user.id),
       getGoogleConnection(user.id),
+      // Counts for THIS account's copies, including shared contacts it must push.
       prisma.person.count({
-        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
+        where: {
+          AND: [
+            readablePeopleWhere(user.id),
+            { addToGoogle: true },
+            {
+              OR: [
+                { googleSyncs: { none: { userId: user.id } } },
+                { googleSyncs: { some: { userId: user.id, googleSyncStatus: "PENDING" } } },
+              ],
+            },
+          ],
+        },
       }),
-      prisma.person.count({
-        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+      prisma.personSync.count({
+        where: { userId: user.id, googleSyncStatus: "ERROR" },
       }),
       prisma.event.count({
         where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },

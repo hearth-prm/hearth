@@ -16,7 +16,7 @@ import { computeDisplayName, parseContactPoints, type PersonNameParts } from "@/
 import { getUserSettings } from "@/lib/settings";
 import { actionError, type ActionState } from "@/lib/actions/types";
 import { asColumnData, isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
-import { cancelPendingDeletion, queueContactDeletion } from "@/lib/sync/tombstones";
+import { queueContactDeletionEverywhere } from "@/lib/sync/tombstones";
 
 export async function createPerson(
   _prev: ActionState,
@@ -50,7 +50,9 @@ export async function createPerson(
         displayName: computeDisplayName(columns as PersonNameParts),
         custom: custom as Prisma.InputJsonValue,
         addToGoogle,
-        googleSyncStatus: addToGoogle ? "PENDING" : "DISABLED",
+        // No PersonSync rows yet: the engine creates one per Google account the
+        // first time it pushes there, which is also when it learns which accounts
+        // those are.
         contactPoints: contacts.items.length
           ? { create: contacts.items }
           : undefined,
@@ -78,15 +80,13 @@ export async function updatePerson(
 
     const existing = await prisma.person.findUniqueOrThrow({
       where: { id },
-      select: {
-        custom: true,
-        addToGoogle: true,
-        googleResourceName: true,
-        googleEtag: true,
-      },
+      select: { custom: true, addToGoogle: true, ownerId: true },
     });
 
-    const registry = await loadRegistry(user.id, "PERSON");
+    // The OWNER's registry, not the editor's. A shared contact's custom values are
+    // keyed by the owner's field definitions, so parsing an edit through the
+    // editor's registry would write foreign keys into the owner's record.
+    const registry = await loadRegistry(existing.ownerId, "PERSON");
     const parsed = parseFields(registry, form);
     if (!parsed.ok) {
       return actionError("Please fix the highlighted fields.", parsed.errors);
@@ -107,16 +107,23 @@ export async function updatePerson(
     );
 
     await prisma.$transaction(async (tx) => {
-      if (optedOut && existing.googleResourceName) {
-        await queueContactDeletion(tx, {
-          ownerId: user.id,
-          resourceId: existing.googleResourceName,
-          etag: existing.googleEtag,
-          reason: "opted_out",
-        });
+      if (optedOut) {
+        // Every account holding a copy, not just the owner's.
+        await queueContactDeletionEverywhere(tx, { personId: id, reason: "opted_out" });
       }
-      if (optedIn && existing.googleResourceName) {
-        await cancelPendingDeletion(tx, "GOOGLE_CONTACT", existing.googleResourceName);
+      if (optedIn) {
+        // Changed their mind before the deletions were processed: drop them so the
+        // existing copies are updated rather than deleted and recreated.
+        const links = await tx.personSync.findMany({
+          where: { personId: id, googleResourceName: { not: null } },
+          select: { googleResourceName: true },
+        });
+        const ids = links.map((l) => l.googleResourceName!).filter(Boolean);
+        if (ids.length) {
+          await tx.syncTombstone.deleteMany({
+            where: { target: "GOOGLE_CONTACT", resourceId: { in: ids }, processedAt: null },
+          });
+        }
       }
 
       await tx.person.update({
@@ -126,9 +133,18 @@ export async function updatePerson(
           displayName: computeDisplayName(columns as PersonNameParts),
           custom: custom as Prisma.InputJsonValue,
           addToGoogle,
-          // Any local edit makes the remote copy stale.
+        },
+      });
+
+      // An edit makes EVERY copy stale, whoever made it. This is what carries a
+      // change your wife makes into your Google account as well as hers.
+      await tx.personSync.updateMany({
+        where: { personId: id },
+        data: {
           googleSyncStatus: addToGoogle ? "PENDING" : "DISABLED",
           googleSyncError: null,
+          googleSyncAttempts: 0,
+          googleSyncNextAttemptAt: null,
         },
       });
 
@@ -159,20 +175,10 @@ export async function deletePerson(form: FormData): Promise<void> {
   // record, not to destroy someone else's.
   await requireOwnedPerson(user.id, id);
 
-  const existing = await prisma.person.findUnique({
-    where: { id },
-    select: { googleResourceName: true, googleEtag: true },
-  });
-
   await prisma.$transaction(async (tx) => {
-    if (existing?.googleResourceName) {
-      await queueContactDeletion(tx, {
-        ownerId: user.id,
-        resourceId: existing.googleResourceName,
-        etag: existing.googleEtag,
-        reason: "deleted",
-      });
-    }
+    // Read the links before the cascade takes them: they are the only record of
+    // which Google accounts hold a copy.
+    await queueContactDeletionEverywhere(tx, { personId: id, reason: "deleted" });
     await tx.person.delete({ where: { id } });
   });
 

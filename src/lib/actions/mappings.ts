@@ -85,8 +85,10 @@ export async function updateMappings(
     // Google, but touches no record — so nothing would be re-pushed without this.
     const requeued =
       entity === "PERSON"
-        ? await prisma.person.updateMany({
-            where: { ownerId: user.id, addToGoogle: true },
+        ? // Every account holding a copy: the owner's mappings decide how the
+          // contact looks everywhere, so all copies are now stale.
+          await prisma.personSync.updateMany({
+            where: { person: { ownerId: user.id, addToGoogle: true } },
             data: { googleSyncStatus: "PENDING", googleSyncAttempts: 0, googleSyncNextAttemptAt: null },
           })
         : await prisma.event.updateMany({

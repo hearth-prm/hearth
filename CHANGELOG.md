@@ -24,6 +24,28 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A shared contact never reached the other person's Google Contacts.** Sync
+  scoped to records you own, on the reasoning that someone else's contact was not
+  yours to publish — which is the opposite of what sharing a contact is for. One
+  Hearth record should mean a copy in every shared address book, with an edit by any
+  of them updating all of them.
+  - Per-account sync state moved off the `Person` row into a new `PersonSync` table,
+    one row per (contact, Google account). The old shape permitted exactly one
+    resource id — the owner's — so sharing was structurally invisible to Google.
+    Existing links are migrated, so nothing re-adopts or duplicates.
+  - Copies succeed and fail independently, each with its own etag, error and backoff.
+  - Custom fields render through the **owner's** registry and mappings, so one Hearth
+    record looks the same in every account rather than being reinterpreted per viewer.
+  - Withdrawing a share removes the contact from that account's Google and no other;
+    deleting it removes every copy. Recipients can decline the whole behaviour with
+    *Push contacts shared with me*.
+- **An edit to a shared record was parsed with the editor's field registry.** Custom
+  values are keyed by the owner's field definitions, so a shared editor's save wrote
+  foreign keys into the owner's record. Both edit actions now load the owner's
+  registry, matching what the detail pages already did.
+
 ### Added
 
 - **Sharing contacts and events between users (completes milestone 4).** Grant

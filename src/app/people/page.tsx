@@ -55,6 +55,9 @@ export default async function PeoplePage({
     take: PAGE_SIZE,
     include: {
       owner: { select: { email: true } },
+      // The badge reports THIS account's copy: a shared contact can be synced for
+      // its owner and still pending for you.
+      googleSyncs: { where: { userId: user.id } },
       contactPoints: {
         where: { kind: "EMAIL" },
         orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
@@ -170,7 +173,7 @@ export default async function PeoplePage({
                     <td className="px-5 py-3">
                       <SyncBadge
                         addToGoogle={person.addToGoogle}
-                        status={person.googleSyncStatus}
+                        status={person.googleSyncs[0]?.googleSyncStatus ?? "PENDING"}
                       />
                     </td>
                   </tr>

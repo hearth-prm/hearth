@@ -7,7 +7,9 @@ import {
   type PeopleClient,
 } from "@/lib/google/people-client";
 import { hearthIdOf, serializePerson } from "@/lib/google/serialize-person";
-import { loadMappings } from "@/lib/google/mappings";
+import { loadMappings, type ResolvedMappings } from "@/lib/google/mappings";
+import { readablePeopleWhere } from "@/lib/access";
+import type { FieldDef } from "@/lib/fields/types";
 
 /**
  * One-way push of Hearth contacts into Google Contacts.
@@ -15,6 +17,17 @@ import { loadMappings } from "@/lib/google/mappings";
  * Hearth is authoritative: this only ever writes. Nothing is read back into
  * Person rows, so a change made directly in Google inside a field Hearth manages
  * is overwritten on the next push (see MANAGED_PERSON_FIELDS).
+ *
+ * A run pushes every contact this user can *read*, not merely own. That is the
+ * point of sharing a contact: one Hearth record, a copy in every shared user's
+ * address book, and an edit by any of them updating all of them. Each copy has its
+ * own PersonSync row carrying its resource id, etag and retry state, because the
+ * copies succeed and fail independently.
+ *
+ * Custom fields are rendered through the OWNER's registry and the OWNER's mappings,
+ * so a shared contact looks the same in everybody's Google. Using each viewer's
+ * mappings would make one Hearth record appear differently per account, which is
+ * the opposite of a single source of truth.
  *
  * The engine takes its PeopleClient as an argument rather than constructing one,
  * so the tests can drive etag conflicts, 404s and rate limits deterministically.
@@ -161,41 +174,86 @@ export async function syncContactsForUser(
   if (result.rateLimited) return result;
 
   // --- 2. pushes ---------------------------------------------------------
-  // Which fields go where is now per-field, so the whole registry is loaded and the
-  // mapping decides. An unmapped custom field simply produces nothing.
-  const registry = await loadRegistry(userId, "PERSON");
-  const customFields = registry.filter((f) => !f.core);
-  const mappings = await loadMappings(userId, "PERSON");
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { syncSharedContacts: true },
+  });
+
+  // The owner's field definitions and mappings decide what a contact looks like in
+  // Google, so they are fetched per owner and memoised for the run — a batch can
+  // span several owners once contacts are shared.
+  const perOwner = new Map<
+    string,
+    { customFields: FieldDef[]; mappings: ResolvedMappings }
+  >();
+  const contextFor = async (ownerId: string) => {
+    let ctx = perOwner.get(ownerId);
+    if (!ctx) {
+      const [registry, mappings] = await Promise.all([
+        loadRegistry(ownerId, "PERSON"),
+        loadMappings(ownerId, "PERSON"),
+      ]);
+      ctx = { customFields: registry.filter((f) => !f.core), mappings };
+      perOwner.set(ownerId, ctx);
+    }
+    return ctx;
+  };
 
   const queue = await prisma.person.findMany({
     where: {
-      ownerId: userId,
-      addToGoogle: true,
-      googleSyncStatus: { in: ["PENDING", "ERROR"] },
-      OR: [
-        { googleSyncNextAttemptAt: null },
-        { googleSyncNextAttemptAt: { lte: now() } },
+      AND: [
+        // Readable, not owned: a shared contact belongs in this account's Google
+        // too. Sync is the one place that used to scope by owner and now must not.
+        readablePeopleWhere(userId),
+        { addToGoogle: true },
+        // Someone who would rather not have a partner's address book in their own
+        // Google keeps only what they own.
+        settings?.syncSharedContacts === false ? { ownerId: userId } : {},
+        {
+          OR: [
+            // Never pushed to this account.
+            { googleSyncs: { none: { userId } } },
+            {
+              googleSyncs: {
+                some: {
+                  userId,
+                  googleSyncStatus: { in: ["PENDING", "ERROR"] },
+                  OR: [
+                    { googleSyncNextAttemptAt: null },
+                    { googleSyncNextAttemptAt: { lte: now() } },
+                  ],
+                },
+              },
+            },
+          ],
+        },
       ],
     },
-    include: { contactPoints: true },
+    include: {
+      contactPoints: true,
+      googleSyncs: { where: { userId } },
+    },
     orderBy: { updatedAt: "asc" },
     take: batchSize,
   });
 
   for (const person of queue) {
+    const link = person.googleSyncs[0];
+    const { customFields, mappings } = await contextFor(person.ownerId);
     const { person: payload, updateFields } = serializePerson(person, {
       customFields,
       mappings,
     });
 
     try {
-      let resourceName = person.googleResourceName;
-      let etag = person.googleEtag;
+      let resourceName = link?.googleResourceName ?? null;
+      let etag = link?.googleEtag ?? null;
+      const attemptsSoFar = link?.googleSyncAttempts ?? 0;
 
-      // A record that failed before may already have a contact in Google from a
-      // create that succeeded remotely but never got recorded locally. Adopt it
-      // instead of creating a duplicate in the user's real address book.
-      if (!resourceName && person.googleSyncAttempts > 0) {
+      // A record that failed before may already have a contact in this account from
+      // a create that succeeded remotely but was never recorded. Adopt it rather
+      // than adding a duplicate to a real address book.
+      if (!resourceName && attemptsSoFar > 0) {
         const existing = (await adoptionIndex()).get(person.id);
         if (existing) {
           resourceName = existing.resourceName;
@@ -213,40 +271,37 @@ export async function syncContactsForUser(
         });
 
         if (written === "gone") {
-          // Deleted in Google since we last wrote. Forget the resource name and
-          // create afresh, so the contact reappears rather than erroring forever.
+          // Deleted in Google since the last write. Create afresh so the contact
+          // reappears rather than erroring forever.
           const created = await deps.people.createContact(payload);
-          await markSynced(person.id, created.resourceName, created.etag, now());
+          await markSynced(person.id, userId, created.resourceName, created.etag, now());
           result.created += 1;
         } else {
-          await markSynced(person.id, written.resourceName, written.etag, now());
+          await markSynced(person.id, userId, written.resourceName, written.etag, now());
           result.updated += 1;
         }
       } else {
         const created = await deps.people.createContact(payload);
-        await markSynced(person.id, created.resourceName, created.etag, now());
+        await markSynced(person.id, userId, created.resourceName, created.etag, now());
         result.created += 1;
       }
     } catch (err) {
       const classified = classifyGoogleError(err);
 
       if (classified.kind === "auth") throw new GoogleAuthError(classified.message);
-
       if (classified.kind === "rate_limit") {
         result.rateLimited = true;
         break;
       }
 
-      const attempts = person.googleSyncAttempts + 1;
-      await prisma.person.update({
-        where: { id: person.id },
-        data: {
-          googleSyncStatus: "ERROR",
-          googleSyncError: short(classified.message),
-          googleSyncAttempts: attempts,
-          googleSyncNextAttemptAt: new Date(now().getTime() + backoffMs(attempts)),
-        },
-      });
+      const attempts = (link?.googleSyncAttempts ?? 0) + 1;
+      await markFailed(
+        person.id,
+        userId,
+        short(classified.message),
+        attempts,
+        new Date(now().getTime() + backoffMs(attempts)),
+      );
       result.failed += 1;
       result.errors.push(`${person.displayName}: ${classified.message}`);
     }
@@ -297,29 +352,54 @@ async function updateWithEtagRecovery(
 
 async function markSynced(
   personId: string,
+  userId: string,
   resourceName: string,
   etag: string | null,
   at: Date,
 ): Promise<void> {
-  await prisma.person.update({
-    where: { id: personId },
-    data: {
-      googleResourceName: resourceName,
-      googleEtag: etag,
-      googleSyncedAt: at,
-      googleSyncStatus: "SYNCED",
-      googleSyncError: null,
-      googleSyncAttempts: 0,
-      googleSyncNextAttemptAt: null,
-    },
+  const state = {
+    googleResourceName: resourceName,
+    googleEtag: etag,
+    googleSyncedAt: at,
+    googleSyncStatus: "SYNCED" as const,
+    googleSyncError: null,
+    googleSyncAttempts: 0,
+    googleSyncNextAttemptAt: null,
+  };
+  // Upsert rather than update: the first push to a given account has no row yet.
+  await prisma.personSync.upsert({
+    where: { personId_userId: { personId, userId } },
+    create: { personId, userId, ...state },
+    update: state,
+  });
+}
+
+async function markFailed(
+  personId: string,
+  userId: string,
+  message: string,
+  attempts: number,
+  nextAttemptAt: Date,
+): Promise<void> {
+  const state = {
+    googleSyncStatus: "ERROR" as const,
+    googleSyncError: message,
+    googleSyncAttempts: attempts,
+    googleSyncNextAttemptAt: nextAttemptAt,
+  };
+  await prisma.personSync.upsert({
+    where: { personId_userId: { personId, userId } },
+    create: { personId, userId, ...state },
+    update: state,
   });
 }
 
 /**
- * Mark a tombstone done and detach the resource name from any record still
- * carrying it — the opt-out case, where the Person row survives the deletion.
- * Without this, re-ticking "Add to Google" would try to update a contact that no
- * longer exists.
+ * Mark a tombstone done and forget this account's link to the contact — the opt-out
+ * case, where the Person row survives the deletion. Without it, re-ticking "Add to
+ * Google" would try to update a contact that no longer exists.
+ *
+ * Scoped to the one account: a shared contact's other copies are unaffected.
  */
 async function settleTombstone(
   tombstoneId: string,
@@ -331,9 +411,13 @@ async function settleTombstone(
       where: { id: tombstoneId },
       data: { processedAt: new Date(), lastError: null },
     }),
-    prisma.person.updateMany({
-      where: { ownerId: userId, googleResourceName: resourceId },
-      data: { googleResourceName: null, googleEtag: null },
+    prisma.personSync.updateMany({
+      where: { userId, googleResourceName: resourceId },
+      data: {
+        googleResourceName: null,
+        googleEtag: null,
+        googleSyncStatus: "DISABLED",
+      },
     }),
   ]);
 }

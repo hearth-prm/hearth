@@ -546,11 +546,27 @@ Shared records appear in the recipient's lists marked *shared*, and their detail
 says who it came from. Either side can withdraw a share — the owner revoking it, or
 the recipient removing it from their own lists.
 
-**Sharing never crosses into Google.** Sync only ever pushes records you own, so a
-contact shared with you is not copied into your Google account; it is not yours to
-publish. A shared record is also read through its owner's field definitions, so their
-custom fields display as they defined them rather than being reinterpreted through
-yours.
+### Shared contacts reach everyone's Google
+
+A shared contact lands in **every** shared user's Google Contacts, and an edit by any
+of them updates all the copies. One Hearth record, one source of truth, N address
+books.
+
+Each copy has its own resource id, etag and retry state, so they succeed and fail
+independently — a permissions problem in one account never stalls another. Custom
+fields render through the **owner's** field definitions and mappings, so the contact
+looks the same everywhere rather than being reinterpreted per viewer.
+
+Withdrawing a share removes the contact from that person's Google, and only theirs.
+Deleting the contact removes it from all of them. Anyone who would rather not have a
+partner's whole address book in their own Google can turn *Push contacts shared with
+me* off in Settings.
+
+Events work differently, and deliberately: a shared event stays on the owner's
+calendar only. Guests reach their own calendars by being invited and accepting, which
+is the mechanism Google already has for it. A shared editor can still add attendees
+and change the event in Hearth, and their additions are invited from the owner's copy
+— so nobody receives two invitations to the same thing.
 
 ## Using it
 
