@@ -21,6 +21,7 @@ export interface CalendarOption {
 
 export interface SettingsValues {
   syncContactsEnabled: boolean;
+  syncSharedContacts: boolean;
   sendInvites: boolean;
   syncCalendarEnabled: boolean;
   defaultAddToGoogle: boolean;
@@ -72,6 +73,17 @@ export function SettingsForm({
                 : "Reconnect your Google account to grant contacts permission first."
             }
             defaultChecked={values.syncContactsEnabled}
+            disabled={!canSyncContacts}
+          />
+          <Toggle
+            name="syncSharedContacts"
+            label="Also push contacts shared with me"
+            help={
+              canSyncContacts
+                ? "Contacts other people share with you land in your Google Contacts too, so one Hearth record means one entry in every address book. Turning this off removes the ones already there — you keep them in Hearth, they just stop being copied to Google."
+                : "Reconnect your Google account to grant contacts permission first."
+            }
+            defaultChecked={values.syncSharedContacts}
             disabled={!canSyncContacts}
           />
           <Toggle

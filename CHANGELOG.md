@@ -68,8 +68,10 @@ that formally marks its milestone.
     permission to help maintain a record, not to destroy someone else's.
   - Either side can withdraw a share, so a recipient is never stuck with someone
     else's records cluttering their lists.
-  - Sync is deliberately unaffected: it queries by owner, so a contact shared with
-    you is never pushed into your Google account.
+  - A shared **contact** reaches every recipient's Google Contacts, so one Hearth
+    record means one entry in each address book — see the sync fix above. A shared
+    **event** does not go on their calendar; it reaches them only if they are invited
+    as a guest and accept, which is Google's own model for who owns an event.
   - A shared record is read through its **owner's** field definitions — custom values
     are keyed by the owner's field keys, so using the viewer's registry would render
     nothing, or worse, whatever happened to share a key name.
@@ -77,7 +79,12 @@ that formally marks its milestone.
     what routing every query through `readable*Where` / `writable*Where` in M1 was
     for.
 
-### Added
+- **A *Push contacts shared with me* setting**, so a recipient can keep shared
+  contacts in Hearth without having them copied into their Google Contacts. On by
+  default, because landing in everyone's address book is the point of sharing a
+  contact. Turning it off **removes the copies already there** rather than only
+  halting future pushes: a copy nothing will ever update again is worse than no copy,
+  since it still looks current. Re-enabling pushes fresh copies.
 
 - **Field → Google mapping pages (part of milestone 4).** Each user-defined field
   now chooses its own destination in Google, replacing the all-or-nothing
