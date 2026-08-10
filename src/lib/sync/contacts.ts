@@ -7,6 +7,7 @@ import {
   type PeopleClient,
 } from "@/lib/google/people-client";
 import { hearthIdOf, serializePerson } from "@/lib/google/serialize-person";
+import { loadMappings } from "@/lib/google/mappings";
 
 /**
  * One-way push of Hearth contacts into Google Contacts.
@@ -160,13 +161,11 @@ export async function syncContactsForUser(
   if (result.rateLimited) return result;
 
   // --- 2. pushes ---------------------------------------------------------
-  const settings = await prisma.userSettings.findUnique({
-    where: { userId },
-    select: { syncCustomFields: true },
-  });
-  const customFields = settings?.syncCustomFields
-    ? (await loadRegistry(userId, "PERSON")).filter((f) => !f.core)
-    : [];
+  // Which fields go where is now per-field, so the whole registry is loaded and the
+  // mapping decides. An unmapped custom field simply produces nothing.
+  const registry = await loadRegistry(userId, "PERSON");
+  const customFields = registry.filter((f) => !f.core);
+  const mappings = await loadMappings(userId, "PERSON");
 
   const queue = await prisma.person.findMany({
     where: {
@@ -186,6 +185,7 @@ export async function syncContactsForUser(
   for (const person of queue) {
     const { person: payload, updateFields } = serializePerson(person, {
       customFields,
+      mappings,
     });
 
     try {

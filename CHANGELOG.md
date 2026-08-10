@@ -24,6 +24,25 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Added
+
+- **Field → Google mapping pages (part of milestone 4).** Each user-defined field
+  now chooses its own destination in Google, replacing the all-or-nothing
+  `syncCustomFields` switch. Contacts can send a field to a Google custom field, the
+  notes, a nickname, an occupation, a link, an email, a phone or an address; events
+  to the description or to private metadata invisible to guests.
+  - Every destination is **append-only**. Google's `organizations` and `birthdays`
+    are single-valued, so offering them would raise a precedence question against
+    the core columns that own them — and every answer surprises someone. Excluding
+    them means the page needs no rules: a mapped field adds, never replaces.
+  - Core fields cannot be re-pointed, only switched off. `givenName →
+    names.givenName` is structural, but being able to keep private notes out of
+    Google matters.
+  - Saving queues every record for a fresh push, since changing a destination
+    changes what the Google copy should look like without touching any record.
+  - Upgrading carries the old switch forward: anyone who had it on gets a
+    `userDefined` mapping per custom contact field.
+
 ## [0.3.0] — 2026-08-10
 
 Marks milestone 3 confirmed working against a real Google account: an event ticked

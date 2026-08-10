@@ -3,6 +3,7 @@ import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
 import type { FieldDef } from "@/lib/fields/types";
 import type { GooglePerson } from "./people-client";
+import { noMappings, type ResolvedMappings } from "./mappings";
 
 /**
  * Turn a Hearth person into a Google People API resource.
@@ -35,14 +36,17 @@ export const MANAGED_PERSON_FIELDS = [
   "phoneNumbers",
   "addresses",
   "urls",
+  "occupations",
   "userDefined",
 ] as const;
 
 export type PersonWithContacts = Person & { contactPoints: ContactPoint[] };
 
 export interface SerializeOptions {
-  /** Registry entries for user-defined fields; omit or empty to not push them. */
+  /** Registry entries for user-defined fields. */
   customFields?: readonly FieldDef[];
+  /** Per-field destinations; defaults to core-only with nothing custom synced. */
+  mappings?: ResolvedMappings;
 }
 
 function clean(value: string | null | undefined): string | undefined {
@@ -67,28 +71,37 @@ export function serializePerson(
   person: PersonWithContacts,
   options: SerializeOptions = {},
 ): { person: GooglePerson; updateFields: string[] } {
+  const mappings = options.mappings ?? noMappings();
   const points = sortPoints(person.contactPoints);
   const byKind = (kind: ContactPoint["kind"]) => points.filter((p) => p.kind === kind);
+  const core = (key: string) => mappings.coreEnabled(key);
 
   const given = clean(person.givenName);
   const family = clean(person.familyName);
 
   // Google renders a contact with no name at all as a blank row, so fall back to
   // the display name Hearth already computes (which itself falls back to
-  // nickname, then organisation).
+  // nickname, then organisation). Names are never disableable.
   const names: GooglePerson["names"] =
     given || family
       ? [{ givenName: given, familyName: family }]
       : [{ givenName: clean(person.displayName) ?? "Unnamed contact" }];
 
-  const nickname = clean(person.nickname);
-  const organization = clean(person.organization);
-  const jobTitle = clean(person.jobTitle);
-  const notes = clean(person.notes);
-
+  // --- accumulators for mapped custom fields ---------------------------
+  //
+  // Every target is append-only, so these only ever grow. No mapped value can
+  // displace something a core field owns, which is why the mapping page needs no
+  // precedence rules.
   const userDefined: NonNullable<GooglePerson["userDefined"]> = [
     { key: HEARTH_ID_KEY, value: person.id },
   ];
+  const extraNicknames: string[] = [];
+  const extraOccupations: string[] = [];
+  const extraUrls: Array<{ value: string; type?: string }> = [];
+  const extraEmails: Array<{ value: string; type?: string }> = [];
+  const extraPhones: Array<{ value: string; type?: string }> = [];
+  const extraAddresses: Array<{ formattedValue: string; type?: string }> = [];
+  const noteLines: string[] = [];
 
   // Social handles have no home in the People API schema — they are not URLs and
   // there is no "social" group — so they become custom fields rather than being
@@ -99,42 +112,102 @@ export function serializePerson(
   }
 
   for (const def of options.customFields ?? []) {
-    const raw = readFieldValue(person as unknown as Record<string, unknown>, def);
-    const text = formatFieldValue(def, raw);
-    if (text) userDefined.push({ key: def.label || def.key, value: text });
+    const mapping = mappings.customTarget(def.key);
+    if (!mapping) continue;
+
+    const text = formatFieldValue(def, readFieldValue(person, def));
+    if (!text) continue;
+
+    const label = def.label || def.key;
+    const key = clean(mapping.targetKey) ?? label;
+
+    switch (mapping.target) {
+      case "userDefined":
+        userDefined.push({ key, value: text });
+        break;
+      case "biographies":
+        noteLines.push(`${label}: ${text}`);
+        break;
+      case "nicknames":
+        extraNicknames.push(text);
+        break;
+      case "occupations":
+        extraOccupations.push(text);
+        break;
+      case "urls":
+        extraUrls.push({ value: text, type: label });
+        break;
+      case "emailAddresses":
+        extraEmails.push({ value: text, type: label });
+        break;
+      case "phoneNumbers":
+        extraPhones.push({ value: text, type: label });
+        break;
+      case "addresses":
+        extraAddresses.push({ formattedValue: text, type: label });
+        break;
+      default:
+        break;
+    }
   }
+
+  const nickname = core("nickname") ? clean(person.nickname) : undefined;
+  const organization = core("organization") ? clean(person.organization) : undefined;
+  const jobTitle = core("jobTitle") ? clean(person.jobTitle) : undefined;
+  const notes = core("notes") ? clean(person.notes) : undefined;
+  const birthday = core("birthday") ? person.birthday : null;
+
+  // One biographies entry rather than several: Google's UI surfaces a single notes
+  // block, so extra array members would be written but never seen.
+  const biography = [notes, ...noteLines].filter(Boolean).join("\n");
 
   const google: GooglePerson = {
     names,
-    nicknames: nickname ? [{ value: nickname }] : [],
+    nicknames: [
+      ...(nickname ? [{ value: nickname }] : []),
+      ...extraNicknames.map((value) => ({ value })),
+    ],
     organizations:
       organization || jobTitle ? [{ name: organization, title: jobTitle }] : [],
     // @db.Date columns come back as an instant at UTC midnight, so the components
     // must be read in UTC or the date shifts a day west of Greenwich.
-    birthdays: person.birthday
+    birthdays: birthday
       ? [
           {
             date: {
-              year: person.birthday.getUTCFullYear(),
-              month: person.birthday.getUTCMonth() + 1,
-              day: person.birthday.getUTCDate(),
+              year: birthday.getUTCFullYear(),
+              month: birthday.getUTCMonth() + 1,
+              day: birthday.getUTCDate(),
             },
           },
         ]
       : [],
-    biographies: notes ? [{ value: notes, contentType: "TEXT_PLAIN" }] : [],
-    emailAddresses: byKind("EMAIL")
-      .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
-      .filter((e) => e.value !== undefined),
-    phoneNumbers: byKind("PHONE")
-      .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
-      .filter((e) => e.value !== undefined),
-    addresses: byKind("ADDRESS")
-      .map((cp) => ({ formattedValue: clean(cp.value), type: typeOf(cp) }))
-      .filter((e) => e.formattedValue !== undefined),
-    urls: byKind("URL")
-      .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
-      .filter((e) => e.value !== undefined),
+    biographies: biography ? [{ value: biography, contentType: "TEXT_PLAIN" }] : [],
+    emailAddresses: [
+      ...byKind("EMAIL")
+        .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
+        .filter((e) => e.value !== undefined),
+      ...extraEmails,
+    ],
+    phoneNumbers: [
+      ...byKind("PHONE")
+        .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
+        .filter((e) => e.value !== undefined),
+      ...extraPhones,
+    ],
+    addresses: [
+      ...byKind("ADDRESS")
+        .map((cp) => ({ formattedValue: clean(cp.value), type: typeOf(cp) }))
+        .filter((e) => e.formattedValue !== undefined),
+      ...extraAddresses,
+    ],
+    urls: [
+      ...byKind("URL")
+        .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
+        .filter((e) => e.value !== undefined),
+      ...extraUrls,
+    ],
+    occupations: extraOccupations.map((value) => ({ value })),
     userDefined,
   };
 

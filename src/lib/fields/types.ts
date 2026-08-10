@@ -32,6 +32,8 @@ export interface FieldDef {
   core: boolean;
   /** FieldDefinition row id; null for core fields, which live in code. */
   definitionId: string | null;
+  /** Archived custom fields keep their values but leave forms. Always false for core. */
+  archived: boolean;
   /**
    * False when bespoke UI renders this field (e.g. an event's start/end pair,
    * which needs all-day and timezone awareness). Such fields are still

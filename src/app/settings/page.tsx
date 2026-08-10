@@ -145,7 +145,6 @@ export default async function SettingsPage() {
         action={updateSettings}
         values={{
           syncContactsEnabled: settings.syncContactsEnabled,
-          syncCustomFields: settings.syncCustomFields,
           sendInvites: settings.sendInvites,
           syncCalendarEnabled: settings.syncCalendarEnabled,
           defaultAddToGoogle: settings.defaultAddToGoogle,

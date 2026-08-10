@@ -8,6 +8,8 @@ import {
   serializeEvent,
   type AttendeeWithPerson,
 } from "@/lib/google/serialize-event";
+import { loadMappings } from "@/lib/google/mappings";
+import { loadRegistry } from "@/lib/fields/registry";
 import { queueEventDeletion } from "./tombstones";
 
 /**
@@ -134,6 +136,8 @@ export async function syncEventsForUser(
   if (!settings) return result;
 
   const targetCalendar = settings.googleCalendarId || "primary";
+  const eventCustomFields = (await loadRegistry(userId, "EVENT")).filter((f) => !f.core);
+  const mappings = await loadMappings(userId, "EVENT");
 
   // --- 1. deletions ------------------------------------------------------
   const tombstones = await prisma.syncTombstone.findMany({
@@ -270,6 +274,8 @@ export async function syncEventsForUser(
         {
           includeAttendees: settings.inviteAttendees,
           existingResponses,
+          customFields: eventCustomFields,
+          mappings,
         },
       );
       result.attendeesSkipped += skipped.length;

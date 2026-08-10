@@ -43,6 +43,7 @@ export async function loadRegistry(
     order: row.order,
     core: false,
     definitionId: row.id,
+    archived: row.archived,
     generic: true,
   }));
 

@@ -43,6 +43,7 @@ model User {
   relationships     Relationship[]
   relationshipTypes RelationshipType[]
   fieldDefinitions  FieldDefinition[]
+  fieldMappings     FieldMapping[]
   tombstones        SyncTombstone[]
 }
 
@@ -125,11 +126,6 @@ model UserSettings {
   /// install, and a secret in a table ends up in every database backup.
   /// One of: auto | osm | google | off
   placesProvider      String  @default("auto")
-
-  /// Also push user-defined fields into Google's "userDefined" custom fields.
-  /// Off by default: exporting every custom field should be a deliberate choice.
-  /// M4 replaces this blunt switch with per-field mapping.
-  syncCustomFields Boolean @default(false)
 
   /// Set when Google refuses the stored refresh token (revoked access, changed
   /// password, expired consent). Sync stops rather than retrying forever, and the
@@ -215,6 +211,43 @@ model FieldDefinition {
 
   @@unique([ownerId, entity, key])
   @@index([ownerId, entity, archived])
+}
+
+/// Where one Hearth field is written in Google.
+///
+/// Replaces the all-or-nothing `UserSettings.syncCustomFields`: each user-defined
+/// field now chooses its own destination, or none at all.
+///
+/// The absence of a row means different things by design:
+///   * a CUSTOM field with no row is not synced — "off" is the safe default for
+///     anything newly added, so a new field never silently exports itself;
+///   * a CORE field with no row keeps its canonical mapping from
+///     src/lib/google/serialize-*.ts.
+///
+/// Core fields therefore cannot be re-targeted: givenName -> names.givenName is
+/// structural, and allowing it to be pointed elsewhere would let someone produce a
+/// nameless Google contact. They can only be switched OFF, with a row whose target
+/// is "none" — which is worth having, since notes in particular are often something
+/// people would rather not copy into Google.
+model FieldMapping {
+  id      String      @id @default(cuid())
+  ownerId String
+  entity  FieldEntity
+  /// Registry key, core or custom. Not a foreign key: core fields live in code.
+  fieldKey String
+  /// Target id from src/lib/google/mapping-targets.ts.
+  target  String
+  /// The Google-side name, for targets that need one (a custom field's key).
+  /// Defaults to the field's label when blank.
+  targetKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, entity, fieldKey])
+  @@index([ownerId, entity])
 }
 
 // ---------------------------------------------------------------------------

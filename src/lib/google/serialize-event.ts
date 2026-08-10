@@ -1,7 +1,11 @@
 import type { ContactPoint, Event, EventAttendee, Person } from "@prisma/client";
 import { primaryEmail } from "@/lib/people";
 import { utcToDateInZone } from "@/lib/time";
+import { formatFieldValue } from "@/lib/fields/format";
+import { readFieldValue } from "@/lib/fields/values";
+import type { FieldDef } from "@/lib/fields/types";
 import type { GoogleEvent } from "./calendar-client";
+import { noMappings, type ResolvedMappings } from "./mappings";
 
 /**
  * Turn a Hearth event into a Google Calendar event.
@@ -32,6 +36,10 @@ export interface SerializeEventOptions {
    * responseStatus comes back as "needsAction".
    */
   existingResponses?: ReadonlyMap<string, string>;
+  /** Registry entries for user-defined fields. */
+  customFields?: readonly FieldDef[];
+  /** Per-field destinations; defaults to core-only with nothing custom synced. */
+  mappings?: ResolvedMappings;
 }
 
 export interface SerializedEvent {
@@ -53,7 +61,28 @@ export function serializeEvent(
   attendees: readonly AttendeeWithPerson[],
   options: SerializeEventOptions,
 ): SerializedEvent {
+  const mappings = options.mappings ?? noMappings();
   const timeZone = event.timeZone || "UTC";
+
+  // Mapped custom fields, all append-only like the contact side.
+  const extendedPrivate: Record<string, string> = {
+    [HEARTH_EVENT_KEY]: event.id,
+  };
+  const descriptionLines: string[] = [];
+
+  for (const def of options.customFields ?? []) {
+    const mapping = mappings.customTarget(def.key);
+    if (!mapping) continue;
+    const text = formatFieldValue(def, readFieldValue(event as unknown as Record<string, unknown>, def), timeZone);
+    if (!text) continue;
+    const label = def.label || def.key;
+
+    if (mapping.target === "extendedProperty") {
+      extendedPrivate[(mapping.targetKey || label).trim()] = text;
+    } else if (mapping.target === "description") {
+      descriptionLines.push(`${label}: ${text}`);
+    }
+  }
 
   let start: GoogleEvent["start"];
   let end: GoogleEvent["end"];
@@ -121,14 +150,20 @@ export function serializeEvent(
   return {
     event: {
       summary: event.title,
-      description: event.description ?? "",
-      location: event.location ?? "",
+      description: [
+        mappings.coreEnabled("description") ? (event.description ?? "") : "",
+        ...descriptionLines,
+      ]
+        .filter((part) => part.length > 0)
+        .join("\n"),
+      location: mappings.coreEnabled("location") ? (event.location ?? "") : "",
       start,
       end,
       attendees: googleAttendees,
-      // Private to the calendar owner: guests never see it. Lets Hearth recognise
-      // its own events, the same trick as hearth_id on contacts.
-      extendedProperties: { private: { [HEARTH_EVENT_KEY]: event.id } },
+      // Private to the calendar owner: guests never see it. Carries hearth_id — the
+      // same recognition trick as on contacts — plus any field mapped to hidden
+      // metadata.
+      extendedProperties: { private: extendedPrivate },
     },
     invited,
     skipped,

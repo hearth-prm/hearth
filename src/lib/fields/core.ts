@@ -51,7 +51,7 @@ export type EventCoreKey = (typeof EVENT_CORE_KEYS)[number];
 
 type CoreFieldSpec<K extends string> = Omit<
   FieldDef,
-  "key" | "storage" | "core" | "definitionId" | "generic"
+  "key" | "storage" | "core" | "definitionId" | "generic" | "archived"
 > & { key: K; generic?: boolean };
 
 function coreField<K extends string>(spec: CoreFieldSpec<K>): FieldDef {
@@ -61,6 +61,7 @@ function coreField<K extends string>(spec: CoreFieldSpec<K>): FieldDef {
     storage: "column",
     core: true,
     definitionId: null,
+    archived: false,
     generic: generic ?? true,
   };
 }

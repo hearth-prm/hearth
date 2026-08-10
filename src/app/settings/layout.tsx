@@ -5,6 +5,8 @@ const tabs = [
   { href: "/settings", label: "Google & sync" },
   { href: "/settings/fields/people", label: "Contact fields" },
   { href: "/settings/fields/events", label: "Event fields" },
+  { href: "/settings/mappings/people", label: "Contact → Google" },
+  { href: "/settings/mappings/events", label: "Event → Google" },
   { href: "/settings/relationships", label: "Relationship types" },
 ];
 
