@@ -34,6 +34,8 @@ import { SyncBadge } from "@/components/sync-badge";
 import { DeleteForm } from "@/components/delete-form";
 import { SubmitButton } from "@/components/submit-button";
 import { AttendeeSearch } from "@/components/attendee-search";
+import { ShareRecordForm } from "@/components/share-forms";
+import { shareRecord } from "@/lib/actions/shares";
 import { searchPeople } from "@/lib/actions/people-search";
 
 export default async function EventPage({
@@ -47,6 +49,7 @@ export default async function EventPage({
   const event = await prisma.event.findFirst({
     where: { id, ...readableEventsWhere(user.id) },
     include: {
+      owner: { select: { id: true, email: true } },
       attendees: {
         include: {
           person: {
@@ -67,9 +70,19 @@ export default async function EventPage({
   });
   if (!event) notFound();
 
-  const [defs, settings] = await Promise.all([
-    loadRegistry(user.id, "EVENT"),
+  const isOwner = event.ownerId === user.id;
+
+  // The registry belongs to the event's owner: a shared event's custom values are
+  // keyed by the owner's field definitions, not the viewer's.
+  const [defs, settings, myShares] = await Promise.all([
+    loadRegistry(event.ownerId, "EVENT"),
     getUserSettings(user.id),
+    isOwner
+      ? prisma.share.findMany({
+          where: { ownerId: user.id, scope: "EVENT", eventId: event.id },
+          include: { withUser: { select: { email: true } } },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Guests Google cannot be told about: it identifies attendees only by email.
@@ -98,20 +111,25 @@ export default async function EventPage({
         })}
         action={
           <div className="flex items-center gap-2">
+            {!isOwner ? (
+              <Badge tone="amber">shared by {event.owner.email}</Badge>
+            ) : null}
             <Link href={`/events/${event.id}/edit`} className={btnSecondary}>
               Edit
             </Link>
-            <DeleteForm
-              action={deleteEvent}
-              id={event.id}
-              label="Delete"
-              className={btnDanger}
-              confirmMessage={`Delete "${event.title}"? ${
-                event.googleEventId
-                  ? "The Google Calendar event will be removed on the next sync."
-                  : ""
-              }`}
-            />
+            {isOwner ? (
+              <DeleteForm
+                action={deleteEvent}
+                id={event.id}
+                label="Delete"
+                className={btnDanger}
+                confirmMessage={`Delete "${event.title}"? ${
+                  event.googleEventId
+                    ? "The Google Calendar event will be removed on the next sync."
+                    : ""
+                }`}
+              />
+            ) : null}
           </div>
         }
       />
@@ -345,6 +363,25 @@ export default async function EventPage({
               ) : null}
             </dl>
           </Card>
+
+          {isOwner ? (
+            <Card>
+              <CardHeader title="Sharing" description="Give someone else access." />
+              <div className="space-y-3 px-5 py-4">
+                {myShares.length > 0 ? (
+                  <ul className="space-y-1 text-xs">
+                    {myShares.map((sh) => (
+                      <li key={sh.id} className="text-neutral-600 dark:text-neutral-400">
+                        {sh.withUser.email} —{" "}
+                        {sh.permission === "EDIT" ? "can edit" : "view only"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <ShareRecordForm action={shareRecord} eventId={event.id} />
+              </div>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader title="Record" />

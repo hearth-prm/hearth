@@ -26,6 +26,26 @@ that formally marks its milestone.
 
 ### Added
 
+- **Sharing contacts and events between users (completes milestone 4).** Grant
+  another user of the same install access to one record, or to everything of a kind,
+  as view-only or editable.
+  - Blanket grants cover records added later, which is why they exist rather than
+    being expanded into one share per record.
+  - **Deleting always stays with the owner**, whatever is granted: an edit share is
+    permission to help maintain a record, not to destroy someone else's.
+  - Either side can withdraw a share, so a recipient is never stuck with someone
+    else's records cluttering their lists.
+  - Sync is deliberately unaffected: it queries by owner, so a contact shared with
+    you is never pushed into your Google account.
+  - A shared record is read through its **owner's** field definitions — custom values
+    are keyed by the owner's field keys, so using the viewer's registry would render
+    nothing, or worse, whatever happened to share a key name.
+  - The whole change is confined to `src/lib/access.ts` plus the new model, which is
+    what routing every query through `readable*Where` / `writable*Where` in M1 was
+    for.
+
+### Added
+
 - **Field → Google mapping pages (part of milestone 4).** Each user-defined field
   now chooses its own destination in Google, replacing the all-or-nothing
   `syncCustomFields` switch. Contacts can send a field to a Google custom field, the

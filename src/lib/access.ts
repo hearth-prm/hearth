@@ -6,12 +6,19 @@ import { prisma } from "@/lib/db";
 /**
  * Authorisation boundary.
  *
- * Every query that reads or writes user data goes through a `*Where` helper or
- * a `require*` guard from this module — none of them inline `{ ownerId }`
- * themselves. Today the rules are pure ownership; when record sharing lands
- * (M4) the read clauses become `OR: [{ ownerId }, { shares: { some: ... } }]`
- * and the write clauses gain a permission check, and nothing outside this file
- * has to change.
+ * Every query that reads or writes user data goes through a `*Where` helper or a
+ * `require*` guard from this module — none of them inline `{ ownerId }`
+ * themselves. That was the bet made in M1, and sharing is where it paid: making
+ * records shareable meant rewriting the clauses below and nothing else.
+ *
+ * A record is readable if you own it, if it was shared with you directly, or if its
+ * owner shared their whole collection with you. Writable narrows that to EDIT
+ * grants. Deleting is deliberately absent from both: it stays with the owner, since
+ * an EDIT grant is permission to help maintain a record, not to destroy it.
+ *
+ * Sync is the one thing that does NOT use these clauses. It queries `ownerId`
+ * directly, so a contact shared with you is never pushed into your Google account —
+ * it is not yours to publish.
  */
 
 export interface CurrentUser {
@@ -57,19 +64,104 @@ export async function requireUserForAction(): Promise<CurrentUser> {
 // --- scope clauses ---------------------------------------------------------
 
 export function readablePeopleWhere(userId: string): Prisma.PersonWhereInput {
-  return { ownerId: userId };
+  return {
+    OR: [
+      { ownerId: userId },
+      // Shared as a single record.
+      { shares: { some: { withUserId: userId } } },
+      // The owner shared their whole address book, which covers contacts added
+      // after the grant — the reason blanket scopes exist rather than expanding to
+      // one row per record.
+      {
+        owner: {
+          sharesGiven: { some: { withUserId: userId, scope: "ALL_PEOPLE" } },
+        },
+      },
+    ],
+  };
 }
 
 export function writablePeopleWhere(userId: string): Prisma.PersonWhereInput {
-  return { ownerId: userId };
+  return {
+    OR: [
+      { ownerId: userId },
+      { shares: { some: { withUserId: userId, permission: "EDIT" } } },
+      {
+        owner: {
+          sharesGiven: {
+            some: { withUserId: userId, scope: "ALL_PEOPLE", permission: "EDIT" },
+          },
+        },
+      },
+    ],
+  };
 }
 
 export function readableEventsWhere(userId: string): Prisma.EventWhereInput {
-  return { ownerId: userId };
+  return {
+    OR: [
+      { ownerId: userId },
+      { shares: { some: { withUserId: userId } } },
+      {
+        owner: {
+          sharesGiven: { some: { withUserId: userId, scope: "ALL_EVENTS" } },
+        },
+      },
+    ],
+  };
 }
 
 export function writableEventsWhere(userId: string): Prisma.EventWhereInput {
+  return {
+    OR: [
+      { ownerId: userId },
+      { shares: { some: { withUserId: userId, permission: "EDIT" } } },
+      {
+        owner: {
+          sharesGiven: {
+            some: { withUserId: userId, scope: "ALL_EVENTS", permission: "EDIT" },
+          },
+        },
+      },
+    ],
+  };
+}
+
+/** Deleting is the owner's alone, whatever has been shared. */
+export function ownedPeopleWhere(userId: string): Prisma.PersonWhereInput {
   return { ownerId: userId };
+}
+
+export function ownedEventsWhere(userId: string): Prisma.EventWhereInput {
+  return { ownerId: userId };
+}
+
+export async function requireOwnedPerson(
+  userId: string,
+  personId: string,
+): Promise<string> {
+  const found = await prisma.person.findFirst({
+    where: { id: personId, ...ownedPeopleWhere(userId) },
+    select: { id: true },
+  });
+  if (!found) {
+    throw new AccessDeniedError("Only the owner of a contact can delete it");
+  }
+  return found.id;
+}
+
+export async function requireOwnedEvent(
+  userId: string,
+  eventId: string,
+): Promise<string> {
+  const found = await prisma.event.findFirst({
+    where: { id: eventId, ...ownedEventsWhere(userId) },
+    select: { id: true },
+  });
+  if (!found) {
+    throw new AccessDeniedError("Only the owner of an event can delete it");
+  }
+  return found.id;
 }
 
 // --- guards ---------------------------------------------------------------

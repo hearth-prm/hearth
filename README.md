@@ -31,8 +31,8 @@ account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
 | ⏳ | Field ↔ Google field mapping settings page | M4 |
 | ⏳ | Sharing contacts and events between users | M4 |
 
-Contacts and events both sync. What remains is the field↔Google mapping page and
-sharing records between users (M4).
+All four milestones are built. Contacts and events sync, every field chooses where
+it lands in Google, and records can be shared with other users on the same install.
 
 ---
 
@@ -526,6 +526,31 @@ Two consequences worth knowing:
   email changes who gets invited but touches only the Person row, so the events
   they are on are not re-pushed automatically. **Re-queue every event** in Settings
   after changing addresses.
+
+## Sharing
+
+Anyone else signed in to the same install can be given access to your records, from
+**Settings → Sharing** for everything at once, or from a contact's or event's own
+page for just that one.
+
+| | |
+|---|---|
+| **View** | They can see it. |
+| **View and edit** | They can change it too. |
+| **Delete** | Always yours alone, whatever you grant. |
+
+Sharing everything is a standing grant: it covers records you add later, which is
+why it exists rather than being expressed as one share per record.
+
+Shared records appear in the recipient's lists marked *shared*, and their detail page
+says who it came from. Either side can withdraw a share — the owner revoking it, or
+the recipient removing it from their own lists.
+
+**Sharing never crosses into Google.** Sync only ever pushes records you own, so a
+contact shared with you is not copied into your Google account; it is not yours to
+publish. A shared record is also read through its owner's field definitions, so their
+custom fields display as they defined them rather than being reinterpreted through
+yours.
 
 ## Using it
 

@@ -45,6 +45,8 @@ model User {
   fieldDefinitions  FieldDefinition[]
   fieldMappings     FieldMapping[]
   tombstones        SyncTombstone[]
+  sharesGiven       Share[]            @relation("SharesGiven")
+  sharesReceived    Share[]            @relation("SharesReceived")
 }
 
 model Account {
@@ -304,6 +306,7 @@ model Person {
   relationshipsFrom Relationship[]  @relation("RelationshipFrom")
   relationshipsTo   Relationship[]  @relation("RelationshipTo")
   eventAttendances  EventAttendee[]
+  shares            Share[]
 
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
@@ -443,6 +446,7 @@ model Event {
 
   owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   attendees EventAttendee[]
+  shares    Share[]
 
   @@index([ownerId, startAt])
   /// Drives the sync queue: pending/errored events whose backoff has elapsed.
@@ -488,6 +492,63 @@ model EventAttendee {
 
   @@unique([eventId, personId])
   @@index([personId])
+}
+
+// ---------------------------------------------------------------------------
+// Sharing
+// ---------------------------------------------------------------------------
+
+enum SharePermission {
+  /// See the record. Cannot change it.
+  VIEW
+  /// See and change it. Deleting stays with the owner.
+  EDIT
+}
+
+enum ShareScope {
+  /// Every contact this owner has, including ones added later.
+  ALL_PEOPLE
+  /// Every event this owner has, including ones added later.
+  ALL_EVENTS
+  /// One named contact.
+  PERSON
+  /// One named event.
+  EVENT
+}
+
+/// A grant from one user to another.
+///
+/// Blanket scopes exist as well as per-record ones because "share my whole address
+/// book with my partner" is a different intention from "show them this one
+/// contact", and expressing the first as thousands of rows would mean every newly
+/// added contact needed remembering.
+///
+/// Deliberately not a unique constraint across the scope columns: Postgres treats
+/// NULLs as distinct, so a constraint spanning personId/eventId would not actually
+/// prevent duplicates. The action checks instead.
+model Share {
+  id         String          @id @default(cuid())
+  ownerId    String
+  withUserId String
+  scope      ShareScope
+  permission SharePermission @default(VIEW)
+
+  /// Set for scope PERSON.
+  personId String?
+  /// Set for scope EVENT.
+  eventId  String?
+
+  createdAt DateTime @default(now())
+
+  owner    User    @relation("SharesGiven", fields: [ownerId], references: [id], onDelete: Cascade)
+  withUser User    @relation("SharesReceived", fields: [withUserId], references: [id], onDelete: Cascade)
+  person   Person? @relation(fields: [personId], references: [id], onDelete: Cascade)
+  event    Event?  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([withUserId, scope])
+  @@index([ownerId])
+  @@index([personId])
+  @@index([eventId])
 }
 
 // ---------------------------------------------------------------------------

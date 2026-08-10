@@ -6,6 +6,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   filterReadablePeopleIds,
+  requireOwnedEvent,
   requireUserForAction,
   requireWritableEvent,
 } from "@/lib/access";
@@ -206,7 +207,8 @@ export async function updateEvent(
 export async function deleteEvent(form: FormData): Promise<void> {
   const id = readString(form, "id");
   const user = await requireUserForAction();
-  await requireWritableEvent(user.id, id);
+  // Owner-only, as with contacts.
+  await requireOwnedEvent(user.id, id);
 
   const existing = await prisma.event.findUnique({
     where: { id },

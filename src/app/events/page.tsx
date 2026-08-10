@@ -58,13 +58,13 @@ export default async function EventsPage({
     prisma.event.findMany({
       where: { AND: [...where.AND, { startAt: { gte: now } }] },
       orderBy: { startAt: "asc" },
-      include: { _count: { select: { attendees: true } } },
+      include: { _count: { select: { attendees: true } }, owner: { select: { email: true } } },
       take: 100,
     }),
     prisma.event.findMany({
       where: { AND: [...where.AND, { startAt: { lt: now } }] },
       orderBy: { startAt: "desc" },
-      include: { _count: { select: { attendees: true } } },
+      include: { _count: { select: { attendees: true } }, owner: { select: { email: true } } },
       take: 100,
     }),
   ]);
@@ -112,8 +112,8 @@ export default async function EventsPage({
         </Card>
       ) : (
         <div className="space-y-6">
-          <EventGroup title="Upcoming" events={upcoming} columns={columns} />
-          <EventGroup title="Past" events={past} columns={columns} />
+          <EventGroup title="Upcoming" events={upcoming} columns={columns} viewerId={user.id} />
+          <EventGroup title="Past" events={past} columns={columns} viewerId={user.id} />
         </div>
       )}
     </div>
@@ -121,17 +121,22 @@ export default async function EventsPage({
 }
 
 type EventRow = Prisma.EventGetPayload<{
-  include: { _count: { select: { attendees: true } } };
+  include: {
+    _count: { select: { attendees: true } };
+    owner: { select: { email: true } };
+  };
 }>;
 
 function EventGroup({
   title,
   events,
   columns,
+  viewerId,
 }: {
   title: string;
   events: EventRow[];
   columns: ReturnType<typeof listFields>;
+  viewerId: string;
 }) {
   if (events.length === 0) return null;
 
@@ -151,6 +156,14 @@ function EventGroup({
               >
                 {event.title}
               </Link>
+              {event.ownerId !== viewerId ? (
+                <span
+                  className="ml-2 text-xs text-amber-700 dark:text-amber-400"
+                  title={`Shared by ${event.owner.email}`}
+                >
+                  shared
+                </span>
+              ) : null}
               <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                 {formatInstant(event.startAt, event.timeZone, {
                   withTime: !event.allDay,

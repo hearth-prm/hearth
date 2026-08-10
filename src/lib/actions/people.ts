@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { requireUserForAction, requireWritablePerson } from "@/lib/access";
+import {
+  requireOwnedPerson,
+  requireUserForAction,
+  requireWritablePerson,
+} from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { parseFields } from "@/lib/fields/validation";
 import { partitionFieldValues, readCustomBag } from "@/lib/fields/values";
@@ -151,7 +155,9 @@ export async function updatePerson(
 export async function deletePerson(form: FormData): Promise<void> {
   const id = readString(form, "id");
   const user = await requireUserForAction();
-  await requireWritablePerson(user.id, id);
+  // Deleting is the owner's alone: an EDIT share is permission to help maintain a
+  // record, not to destroy someone else's.
+  await requireOwnedPerson(user.id, id);
 
   const existing = await prisma.person.findUnique({
     where: { id },

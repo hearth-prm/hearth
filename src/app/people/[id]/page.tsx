@@ -12,6 +12,7 @@ import { formatDateOnly, formatInstant } from "@/lib/time";
 import { addRelationship, removeRelationship } from "@/lib/actions/relationships";
 import { deletePerson } from "@/lib/actions/people";
 import {
+  Badge,
   btnDanger,
   btnSecondary,
   Card,
@@ -23,6 +24,8 @@ import { SyncBadge } from "@/components/sync-badge";
 import { GoogleContactLink } from "@/components/google-contact-link";
 import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
+import { ShareRecordForm } from "@/components/share-forms";
+import { shareRecord } from "@/lib/actions/shares";
 
 export default async function PersonPage({
   params,
@@ -35,6 +38,7 @@ export default async function PersonPage({
   const person = await prisma.person.findFirst({
     where: { id, ...readablePeopleWhere(user.id) },
     include: {
+      owner: { select: { id: true, email: true, name: true } },
       contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] },
       eventAttendances: {
         include: { event: true },
@@ -45,17 +49,29 @@ export default async function PersonPage({
   });
   if (!person) notFound();
 
-  const [defs, relationships, types, settings, others] = await Promise.all([
-    loadRegistry(user.id, "PERSON"),
-    loadRelationshipsFor(user.id, person.id),
-    loadRelationshipTypes(user.id),
+  const isOwner = person.ownerId === user.id;
+
+  // Registry and relationships belong to the record's OWNER, not the viewer. A
+  // shared contact's custom values are keyed by the owner's field definitions, so
+  // reading them through the viewer's registry would render nothing — or, worse,
+  // whatever happened to share a key name.
+  const [defs, relationships, types, settings, others, myShares] = await Promise.all([
+    loadRegistry(person.ownerId, "PERSON"),
+    loadRelationshipsFor(person.ownerId, person.id),
+    loadRelationshipTypes(person.ownerId),
     getUserSettings(user.id),
     prisma.person.findMany({
-      where: { AND: [readablePeopleWhere(user.id), { id: { not: person.id } }] },
+      where: { AND: [{ ownerId: person.ownerId }, { id: { not: person.id } }] },
       select: { id: true, displayName: true },
       orderBy: { displayName: "asc" },
       take: 1000,
     }),
+    isOwner
+      ? prisma.share.findMany({
+          where: { ownerId: user.id, scope: "PERSON", personId: person.id },
+          include: { withUser: { select: { email: true } } },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Only render fields that actually hold something — a detail page listing 20
@@ -77,20 +93,26 @@ export default async function PersonPage({
         }
         action={
           <div className="flex items-center gap-2">
+            {!isOwner ? (
+              <Badge tone="amber">shared by {person.owner.email}</Badge>
+            ) : null}
             <Link href={`/people/${person.id}/edit`} className={btnSecondary}>
               Edit
             </Link>
-            <DeleteForm
-              action={deletePerson}
-              id={person.id}
-              label="Delete"
-              className={btnDanger}
-              confirmMessage={`Delete ${person.displayName}? ${
-                person.googleResourceName
-                  ? "Their Google contact will be removed on the next sync."
-                  : ""
-              }`}
-            />
+            {/* Deleting stays with the owner even under an EDIT share. */}
+            {isOwner ? (
+              <DeleteForm
+                action={deletePerson}
+                id={person.id}
+                label="Delete"
+                className={btnDanger}
+                confirmMessage={`Delete ${person.displayName}? ${
+                  person.googleResourceName
+                    ? "Their Google contact will be removed on the next sync."
+                    : ""
+                }`}
+              />
+            ) : null}
           </div>
         }
       />
@@ -250,6 +272,28 @@ export default async function PersonPage({
               </ul>
             )}
           </Card>
+
+          {isOwner ? (
+            <Card>
+              <CardHeader
+                title="Sharing"
+                description="Give someone else access to this contact."
+              />
+              <div className="space-y-3 px-5 py-4">
+                {myShares.length > 0 ? (
+                  <ul className="space-y-1 text-xs">
+                    {myShares.map((sh) => (
+                      <li key={sh.id} className="text-neutral-600 dark:text-neutral-400">
+                        {sh.withUser.email} —{" "}
+                        {sh.permission === "EDIT" ? "can edit" : "view only"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <ShareRecordForm action={shareRecord} personId={person.id} />
+              </div>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader title="Record" />

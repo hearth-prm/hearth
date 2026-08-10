@@ -54,6 +54,7 @@ export default async function PeoplePage({
     orderBy: { displayName: "asc" },
     take: PAGE_SIZE,
     include: {
+      owner: { select: { email: true } },
       contactPoints: {
         where: { kind: "EMAIL" },
         orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
@@ -146,6 +147,14 @@ export default async function PeoplePage({
                       >
                         {person.displayName}
                       </Link>
+                      {person.ownerId !== user.id ? (
+                        <span
+                          className="ml-2 text-xs text-amber-700 dark:text-amber-400"
+                          title={`Shared by ${person.owner.email}`}
+                        >
+                          shared
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-5 py-3 text-neutral-600 dark:text-neutral-400">
                       {primaryEmail(person.contactPoints) ?? "—"}

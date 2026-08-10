@@ -8,6 +8,7 @@ const tabs = [
   { href: "/settings/mappings/people", label: "Contact → Google" },
   { href: "/settings/mappings/events", label: "Event → Google" },
   { href: "/settings/relationships", label: "Relationship types" },
+  { href: "/settings/sharing", label: "Sharing" },
 ];
 
 export default function SettingsLayout({
