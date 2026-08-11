@@ -127,9 +127,16 @@ export function parseCsv(text: string): ParsedCsv {
  * Strips a single leading apostrophe, which is how spreadsheets escape a value that
  * would otherwise be read as a formula or renumbered — the user sees "+441234" in
  * the cell but the file holds "'+441234".
+ *
+ * Line endings inside a cell are normalised to LF. A browser uploading a file as
+ * multipart/form-data rewrites bare LFs to CRLF, so a multi-line notes field exported
+ * by Hearth comes back with carriage returns it never had — which made re-importing
+ * an untouched export a change rather than a no-op. LF is also what the textarea that
+ * edits these fields produces, so this converges on one representation rather than
+ * inventing a third.
  */
 export function cleanCell(value: string | undefined): string {
-  const s = (value ?? "").trim();
+  const s = (value ?? "").replace(/\r\n?/g, "\n").trim();
   return s.startsWith("'") ? s.slice(1) : s;
 }
 

@@ -103,7 +103,7 @@ export async function start(): Promise<Harness> {
     AUTH_TRUST_HOST: "true",
     // The whole point: no background reach for Google with credentials that cannot work.
     SYNC_ENABLED: "false",
-    NODE_ENV: "production",
+    NODE_ENV: "production" as const,
     PORT: String(appPort),
   };
 

@@ -40,7 +40,12 @@ export default async function ImportPage() {
                 match is a guess, so it never reaches into a contact someone shared
                 with you.
               </li>
-              <li>No match means a new contact.</li>
+              <li>An id Hearth has never seen means a new contact.</li>
+              <li>
+                An id you have no edit access to is <strong>skipped</strong>, not
+                copied — so re-importing an export that included contacts shared with
+                you cannot duplicate them.
+              </li>
               <li>
                 Two rows pointing at one contact: the second is skipped rather than
                 silently overwriting the first.

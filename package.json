@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p scripts/e2e --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -16,7 +16,7 @@
     "docker:up": "sh scripts/docker-up.sh",
     "preversion": "npm run typecheck",
     "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
-    "e2e": "tsx scripts/e2e/verify.mts"
+    "e2e": "next build && tsx scripts/e2e/verify.mts"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"

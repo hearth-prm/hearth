@@ -20,5 +20,9 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", ".next"]
+  // scripts/ is excluded deliberately. The E2E suite imports playwright-core and
+  // drives Postgres; pulling that graph into the app's TS program made the Next
+  // build worker run out of heap. It has its own tsconfig, run by `npm run
+  // typecheck` alongside this one.
+  "exclude": ["node_modules", ".next", "scripts"]
 }

@@ -102,6 +102,23 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **Re-importing an export duplicated every contact shared with you.** A row carrying
+  a `Hearth ID` is a request to update *that* record, but when the record existed and
+  the importer had no write access the planner fell through to creating a new
+  contact — so exporting everything and importing it back produced a second copy of
+  each shared contact. Such rows are now **skipped** with a plain reason. An id
+  Hearth has never seen still creates, which keeps a stale-id restore working; the
+  two cases are told apart by asking whether the record exists at all, selecting
+  nothing but its id.
+
+- **A multi-line note gained carriage returns on every import.** Browsers rewrite bare
+  LFs to CRLF when uploading a file as multipart form data, so a notes field exported
+  by Hearth came back with line endings it never had, and re-importing an untouched
+  export was a change rather than a no-op. Cells are now normalised to LF on read,
+  which is also what the textarea that edits them produces — one representation
+  rather than three. Hearth's own CSV parser was never at fault, which is why only a
+  test driving a real browser could find this.
+
 - **A view-only recipient was shown controls they could not use.** Both detail pages
   gated on ownership alone, so someone with a VIEW share saw Edit, the relationship
   add and remove controls, the label editor, and on an event the add-attendee, RSVP
@@ -115,12 +132,17 @@ that formally marks its milestone.
 
 ### Added
 
-- **An end-to-end test suite** (`npm run e2e`): a real Postgres 16 matching
-  production, the real built app, and a real browser driving it. Sign-in is bypassed
+- **An end-to-end test suite** (`npm run e2e`): 140 checks against a real Postgres 16
+  matching production, the real built app, and a real browser driving it. Sign-in is bypassed
   by inserting a session row and its cookie, which is what a real Google sign-in
   would have produced — everything the suite tests sits downstream of authentication,
   and driving Google's consent screen would mean holding someone's password. Covers
-  the parts of `docs/verify-0.5.0.md` that do not need a real Google account.
+  §1, §2, §4–§8 and the non-Google half of §9 of `docs/verify-0.5.0.md`, leaving 26
+  rows that genuinely need a live install or a Google account.
+
+  The suite has its own `tsconfig.json` rather than joining the app's: pulling
+  playwright-core and the Postgres driver into the Next build's TS program exhausted
+  the build worker's heap. `npm run typecheck` runs both.
 
 ### Changed
 

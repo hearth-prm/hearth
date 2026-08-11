@@ -147,11 +147,22 @@ export async function planImport(
     ...new Set(rows.flatMap((r) => parseShares(read.get(r, COLUMNS.sharedWith)).map((s) => s.email))),
   ];
 
-  const [byId, byEmail, recipients, existingLabels] = await Promise.all([
+  const [byId, idsThatExist, byEmail, recipients, existingLabels] = await Promise.all([
     idsInFile.length
       ? prisma.person.findMany({
           where: { id: { in: [...new Set(idsInFile)] }, ...writablePeopleWhere(userId) },
           select: { id: true, ownerId: true, displayName: true },
+        })
+      : Promise.resolve([]),
+    // Which of those ids exist at all, regardless of access. Needed to tell "a
+    // record you may not edit" from "an id from somewhere else": the first must be
+    // skipped, because a row naming a record is a request to update THAT record and
+    // turning it into a new contact silently duplicates someone else's. Only the id
+    // is selected, so this answers the question without revealing anything.
+    idsInFile.length
+      ? prisma.person.findMany({
+          where: { id: { in: [...new Set(idsInFile)] } },
+          select: { id: true },
         })
       : Promise.resolve([]),
     // Email matching is restricted to the user's OWN contacts. Matching by id is an
@@ -181,6 +192,7 @@ export async function planImport(
   ]);
 
   const idIndex = new Map(byId.map((p) => [p.id, p]));
+  const existsAnywhere = new Set(idsThatExist.map((p) => p.id));
   const emailIndex = new Map<string, (typeof byEmail)[number]>();
   for (const p of byEmail) {
     for (const cp of p.contactPoints) {
@@ -212,8 +224,27 @@ export async function planImport(
 
     let match = rawId ? idIndex.get(rawId) : undefined;
     if (rawId && !match) {
+      if (existsAnywhere.has(rawId)) {
+        // A real record this user cannot write. Skipping rather than creating: the
+        // row asked to update that contact, and an export of contacts shared with
+        // you would otherwise duplicate every one of them on re-import.
+        planned.push({
+          line,
+          action: "skip",
+          personId: null,
+          // The name from the file, not from the record — the row is theirs, the
+          // record may not be.
+          displayName: [read.get(row, COLUMNS.givenName), read.get(row, COLUMNS.familyName)]
+            .filter(Boolean)
+            .join(" "),
+          changes: [],
+          warnings: ["You do not have edit access to that contact, so this row is skipped."],
+          write: null,
+        });
+        return;
+      }
       warnings.push(
-        `Hearth ID “${rawId}” is not a contact you can edit — treated as a new contact.`,
+        `Hearth ID “${rawId}” is not a contact in this Hearth — treated as a new contact.`,
       );
     }
     if (!match) {
