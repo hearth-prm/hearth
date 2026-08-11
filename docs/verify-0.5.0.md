@@ -275,7 +275,7 @@ Everything below needs either your live install or a real Google account.
 | 9.6 | The invite email actually arriving |
 | 9.7, 9.8, 9.9 | Repeat sync cycles, container restart, logs over an hour |
 
-That is **5 + 15 + 6 = 26 rows** by hand, against 140 automated checks.
+That is **5 + 15 + 8 = 28 rows** by hand, against 140 automated checks.
 
 Run the automated suite first. If it fails, the manual pass is not worth starting.
 

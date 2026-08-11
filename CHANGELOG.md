@@ -137,7 +137,7 @@ that formally marks its milestone.
   by inserting a session row and its cookie, which is what a real Google sign-in
   would have produced — everything the suite tests sits downstream of authentication,
   and driving Google's consent screen would mean holding someone's password. Covers
-  §1, §2, §4–§8 and the non-Google half of §9 of `docs/verify-0.5.0.md`, leaving 26
+  §1, §2, §4–§8 and the non-Google half of §9 of `docs/verify-0.5.0.md`, leaving 28
   rows that genuinely need a live install or a Google account.
 
   The suite has its own `tsconfig.json` rather than joining the app's: pulling
