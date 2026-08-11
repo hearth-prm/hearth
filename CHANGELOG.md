@@ -20,9 +20,85 @@ that formally marks its milestone.
 | `0.2.0` | M2 — one-way contacts push to Google |
 | `0.3.0` | M3 — calendar push, attendee invites, RSVP writeback |
 | `0.4.0` | M4 — field↔Google mapping settings, record sharing |
-| `1.0.0` | All four milestones shipped and stable |
+| `0.5.0` | M5 — labels, CSV import/export, contact filtering |
+| `1.0.0` | All milestones shipped and stable |
 
 ## [Unreleased]
+
+### Added
+
+- **Labels for contacts (milestone 5).** Group contacts however you like, then
+  filter by them.
+  - Labels belong to a user rather than the install, because two people's "Family"
+    mean different things. A shared contact carries its **owner's** labels, matching
+    how the owner's field definitions and Google mappings already render it — one
+    record reads the same for everyone who can see it, and an EDIT recipient picks
+    from the owner's list.
+  - Names are unique per owner, case-insensitively: "family" typed after "Family"
+    means the one you already have, and a second Google group of the same name would
+    look like a duplicate on your phone.
+  - Deleting a label in use is allowed. Refusing until it is cleared off every
+    contact would make a 200-contact label undeletable in practice; the contacts
+    themselves are untouched.
+
+- **Labels become labels in Google Contacts.** Google contact groups are
+  per-account resources, so one Hearth label becomes one group in *each* Google
+  account the contact reaches — the same fan-out `PersonSync` does for the contacts
+  themselves, which is why `LabelGroup` is keyed on (label, account).
+  - Membership is changed through `contactGroups.members.modify`, not by writing
+    `memberships` on the contact. A person update replaces the membership list
+    wholesale, which would drop the contact out of My Contacts and out of any group
+    made by hand in Google. Hearth only ever touches groups it created.
+  - Reconciled once per sync run, batched to one call per group rather than per
+    contact, and after the contacts — a contact has to exist before it can join a
+    group. A group failure is reported but never fails the contact push that already
+    succeeded.
+  - An existing Google label of the same name is **adopted** rather than duplicated,
+    which is also what makes this safe to re-run after a database restore.
+  - Deleting a Hearth label deletes its Google groups, through a tombstone recorded
+    before the rows cascade away. Without it the label survived on every phone it
+    had reached, with no handle left to remove it by.
+
+- **Contact filtering.** Beyond search: by label (any or all), by who can see it
+  (mine, private, shared by me, shared with me), by Google state, and by whether
+  there is an email or phone.
+  - Every control is a link carrying the whole filter state, so filters compose
+    without client-side coordination, Back undoes one at a time, and a filtered list
+    is a URL worth keeping. A label chip anywhere in the app links straight to its
+    members.
+  - "Shared by me" has to consider blanket grants as well as per-record shares,
+    since a blanket grant is deliberately not recorded per record.
+  - Every clause is ANDed with the access filter: filters narrow, access decides.
+
+- **CSV export of contacts**, including labels, per-record shares, blanket-share
+  recipients, contact details and your own custom fields. Follows the current
+  filters, so exporting one label needs no separate selection UI — filter the list,
+  then export what you are looking at.
+
+- **CSV import of contacts**, with a preview before anything is written.
+  - Preview and apply call the **same planner**; the apply step only executes what
+    it produced. A separate "what would happen" implementation drifts from the real
+    one, and the screen that says "3 updates" is exactly where that must not happen.
+    Applying re-plans rather than trusting the browser's copy, which also re-checks
+    access — the gap between preview and confirmation is long enough for a share to
+    be revoked.
+  - Rows match on `Hearth ID` first, then on the first email **among your own
+    contacts only**. An id is an explicit instruction; an email is a guess, and a
+    guess should not reach into someone else's record even where sharing would
+    permit the write.
+  - **Sharing grants only.** A recipient the file omits never loses access, matching
+    the user picker — a spreadsheet round-trip that silently revoked your wife's
+    access is exactly the destructive slip that decision guarded against.
+  - A column the file omits is left alone, so a narrow CSV cannot blank out fields
+    it never mentions. Two rows pointing at one contact: the second is skipped rather
+    than silently overwriting the first.
+  - Labels and custom fields are refused on a contact shared with you, since both
+    are keyed by the owner's definitions.
+  - Values validate through the **same schemas as the edit form**, so a file cannot
+    store what the UI would reject. Ambiguous dates like `03/04/1990` are reported
+    rather than guessed at — a wrong guess silently misdates a birthday.
+  - Rows apply one at a time rather than in one transaction: a failure on row 2,999
+    must not discard 2,998 good ones, and the report says what landed.
 
 ### Changed
 

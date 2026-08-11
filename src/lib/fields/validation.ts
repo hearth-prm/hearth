@@ -130,24 +130,33 @@ export function parseFields(
   const errors: FieldErrors = {};
 
   for (const def of defs) {
-    const raw = rawValue(def, form);
-
-    if (isEmpty(raw)) {
-      if (def.required) {
-        errors[def.key] = `${def.label} is required`;
-      } else {
-        values[def.key] = null;
-      }
-      continue;
-    }
-
-    const parsed = valueSchema(def).safeParse(raw);
-    if (!parsed.success) {
-      errors[def.key] = firstMessage(parsed.error, def);
-    } else {
-      values[def.key] = parsed.data;
-    }
+    const result = parseOneField(def, rawValue(def, form));
+    if (result.ok) values[def.key] = result.value;
+    else errors[def.key] = result.error;
   }
 
   return Object.keys(errors).length ? { ok: false, errors } : { ok: true, values };
+}
+
+/**
+ * Validate one already-extracted value.
+ *
+ * Split out from parseFields so CSV import validates against exactly the same
+ * schemas as the form does. A second set of rules for imported data is how a file
+ * ends up able to store values the UI would have rejected.
+ */
+export function parseOneField(
+  def: FieldDef,
+  raw: unknown,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (isEmpty(raw)) {
+    return def.required
+      ? { ok: false, error: `${def.label} is required` }
+      : { ok: true, value: null };
+  }
+
+  const parsed = valueSchema(def).safeParse(raw);
+  return parsed.success
+    ? { ok: true, value: parsed.data }
+    : { ok: false, error: firstMessage(parsed.error, def) };
 }

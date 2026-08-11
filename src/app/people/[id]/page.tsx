@@ -25,6 +25,9 @@ import { GoogleContactLink } from "@/components/google-contact-link";
 import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
 import { ShareRecordForm } from "@/components/share-forms";
+import { LabelChips } from "@/components/label-chip";
+import { PersonLabelsForm } from "@/components/label-forms";
+import { setPersonLabels } from "@/lib/actions/labels";
 import { shareRecord } from "@/lib/actions/shares";
 import { listOtherUsers } from "@/lib/users";
 
@@ -42,6 +45,7 @@ export default async function PersonPage({
       owner: { select: { id: true, email: true, name: true } },
       googleSyncs: { include: { user: { select: { email: true } } } },
       contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] },
+      labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
       eventAttendances: {
         include: { event: true },
         orderBy: { event: { startAt: "desc" } },
@@ -62,24 +66,32 @@ export default async function PersonPage({
   // shared contact's custom values are keyed by the owner's field definitions, so
   // reading them through the viewer's registry would render nothing — or, worse,
   // whatever happened to share a key name.
-  const [defs, relationships, types, settings, others, myShares] = await Promise.all([
-    loadRegistry(person.ownerId, "PERSON"),
-    loadRelationshipsFor(person.ownerId, person.id),
-    loadRelationshipTypes(person.ownerId),
-    getUserSettings(user.id),
-    prisma.person.findMany({
-      where: { AND: [{ ownerId: person.ownerId }, { id: { not: person.id } }] },
-      select: { id: true, displayName: true },
-      orderBy: { displayName: "asc" },
-      take: 1000,
-    }),
-    isOwner
-      ? prisma.share.findMany({
-          where: { ownerId: user.id, scope: "PERSON", personId: person.id },
-          include: { withUser: { select: { email: true } } },
-        })
-      : Promise.resolve([]),
-  ]);
+  const [defs, relationships, types, settings, others, myShares, ownerLabels] =
+    await Promise.all([
+      loadRegistry(person.ownerId, "PERSON"),
+      loadRelationshipsFor(person.ownerId, person.id),
+      loadRelationshipTypes(person.ownerId),
+      getUserSettings(user.id),
+      prisma.person.findMany({
+        where: { AND: [{ ownerId: person.ownerId }, { id: { not: person.id } }] },
+        select: { id: true, displayName: true },
+        orderBy: { displayName: "asc" },
+        take: 1000,
+      }),
+      isOwner
+        ? prisma.share.findMany({
+            where: { ownerId: user.id, scope: "PERSON", personId: person.id },
+            include: { withUser: { select: { email: true } } },
+          })
+        : Promise.resolve([]),
+      // The owner's labels, for the same reason as the registry: one shared contact
+      // carries one set of labels, so an editing recipient picks from the owner's.
+      prisma.label.findMany({
+        where: { ownerId: person.ownerId },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, color: true },
+      }),
+    ]);
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
@@ -280,6 +292,33 @@ export default async function PersonPage({
                 ))}
               </ul>
             )}
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Labels"
+              description={
+                isOwner
+                  ? "Also appear as labels in Google Contacts."
+                  : undefined
+              }
+            />
+            <div className="space-y-3 px-5 py-4">
+              {person.labels.length > 0 ? (
+                <LabelChips labels={person.labels.map((pl) => pl.label)} linked />
+              ) : (
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  No labels on this contact.
+                </p>
+              )}
+              <PersonLabelsForm
+                action={setPersonLabels}
+                personId={person.id}
+                labels={ownerLabels}
+                selected={person.labels.map((pl) => pl.labelId)}
+                ownerName={isOwner ? undefined : (person.owner.name ?? person.owner.email ?? "the owner")}
+              />
+            </div>
           </Card>
 
           {isOwner ? (

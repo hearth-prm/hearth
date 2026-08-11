@@ -527,6 +527,40 @@ Two consequences worth knowing:
   they are on are not re-pushed automatically. **Re-queue every event** in Settings
   after changing addresses.
 
+## Labels, filtering and CSV
+
+### Labels and filtering
+
+Contacts can be labelled — Family, Book club, whatever you like — from any contact's
+page, with the labels themselves managed in **Settings → Labels**. Each one also
+becomes a label in Google Contacts, so the grouping you build here is the one you see
+on your phone.
+
+Google labels belong to an account rather than to a contact, so a label on a shared
+contact is created separately in each person's Google: same name, different
+underlying group. Hearth only ever touches groups it created — labels you make by
+hand in Google are left alone. A shared contact carries its **owner's** labels, so it
+reads the same for everyone who can see it.
+
+The contact list filters by label (any or all of them), by who can see a contact
+(mine, private, shared by me, shared with me), by Google sync state, and by whether
+there is an email or phone. Every filter is a link, so a filtered list is a URL you
+can bookmark and Back out of one step at a time.
+
+### Import and export
+
+**Export** writes a CSV of whatever the contact list is currently showing — filter
+first, and the export follows. It includes labels, sharing, contact details and your
+own custom fields, plus a `Hearth ID` column that makes the file re-importable.
+
+**Import** previews every row before writing anything: what will be created, what
+will be updated, which rows are skipped and why. Rows match on `Hearth ID`, then on
+the first email among your own contacts. Columns the file leaves out are left alone,
+so a narrow CSV cannot blank out fields it never mentions.
+
+Sharing in an import **grants only** — a recipient the file omits never loses access.
+Import never deletes a contact.
+
 ## Sharing
 
 Anyone else signed in to the same install can be given access to your records, from
@@ -755,14 +789,28 @@ User ─┬─ UserSettings          sync toggles, target calendar, default time
       ├─ Account               Google tokens (Auth.js)
       ├─ Person ─┬─ ContactPoint      repeatable emails/phones/addresses/links
       │          ├─ custom JSONB      user-defined field values
-      │          └─ google sync state addToGoogle, resourceName, etag, status
+      │          ├─ PersonLabel ── Label      which labels are on this contact
+      │          ├─ PersonSync           ONE ROW PER GOOGLE ACCOUNT holding a copy
+      │          └─ addToGoogle          the owner's decision that it belongs there
       ├─ Event ──┬─ EventAttendee     role + RSVP + per-person invite flag
       │          ├─ custom JSONB
       │          └─ google sync state
       ├─ Relationship ── RelationshipType   directional or symmetric
+      ├─ Label ── LabelGroup      ONE ROW PER GOOGLE ACCOUNT holding the group
       ├─ FieldDefinition       describes one custom field
+      ├─ FieldMapping          where a field lands in Google
+      ├─ Share                 per-record or blanket, VIEW or EDIT
       └─ SyncTombstone         Google resources awaiting deletion
 ```
+
+The two "one row per Google account" tables are the shape sharing forces. A contact
+shared with three people needs four copies in Google, each with its own resource id,
+etag and retry state — so the resource id cannot live on `Person`. Labels are the
+same story one level up: Google contact groups belong to an account, so one Hearth
+label is N groups.
+
+`Label` and `Person` must agree on their owner for a `PersonLabel` to be valid. That
+spans two rows, so it is enforced in the action layer rather than by a constraint.
 
 Deleting a user cascades to everything they own. The seeded relationship types
 (`ownerId = null`) are shared and survive.

@@ -17,6 +17,7 @@ import { getUserSettings } from "@/lib/settings";
 import { actionError, type ActionState } from "@/lib/actions/types";
 import { asColumnData, isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
 import { queueContactDeletionEverywhere } from "@/lib/sync/tombstones";
+import { requeueEveryCopy } from "@/lib/sync/requeue";
 
 export async function createPerson(
   _prev: ActionState,
@@ -138,15 +139,7 @@ export async function updatePerson(
 
       // An edit makes EVERY copy stale, whoever made it. This is what carries a
       // change your wife makes into your Google account as well as hers.
-      await tx.personSync.updateMany({
-        where: { personId: id },
-        data: {
-          googleSyncStatus: addToGoogle ? "PENDING" : "DISABLED",
-          googleSyncError: null,
-          googleSyncAttempts: 0,
-          googleSyncNextAttemptAt: null,
-        },
-      });
+      await requeueEveryCopy(tx, id, addToGoogle);
 
       // Contact points are replaced wholesale rather than diffed: Google's
       // People API replaces the whole array on update anyway, so preserving

@@ -48,6 +48,8 @@ model User {
   sharesGiven       Share[]            @relation("SharesGiven")
   sharesReceived    Share[]            @relation("SharesReceived")
   personSyncs       PersonSync[]
+  labels            Label[]
+  labelGroups       LabelGroup[]
 }
 
 model Account {
@@ -311,6 +313,7 @@ model Person {
   eventAttendances  EventAttendee[]
   shares            Share[]
   googleSyncs       PersonSync[]
+  labels            PersonLabel[]
 
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
@@ -589,12 +592,90 @@ model Share {
 }
 
 // ---------------------------------------------------------------------------
+// Labels
+// ---------------------------------------------------------------------------
+
+/// A user-defined grouping for contacts: "Family", "Book club", "Work".
+///
+/// Owned by a user rather than global to the install, because two people's
+/// "Family" mean different things. A shared contact carries its **owner's**
+/// labels, matching how the owner's field definitions and mappings already render
+/// it — one Hearth record looks the same to everyone who can see it.
+model Label {
+  id      String @id @default(cuid())
+  ownerId String
+  name    String
+  /// Chip colour token, resolved in the UI. Null means "pick one from the name".
+  color   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  people       PersonLabel[]
+  googleGroups LabelGroup[]
+
+  /// Names are the thing users type, filter by and match on import, so they have
+  /// to be unique per owner or none of those operations has one answer. This also
+  /// serves every lookup by owner, so no separate index is needed.
+  @@unique([ownerId, name])
+}
+
+/// Which labels are on which contact.
+///
+/// The label and the contact must share an owner. That cannot be expressed as a
+/// constraint here — it spans two rows — so it is enforced in the action layer;
+/// see assertLabelsBelongToOwner in src/lib/actions/labels.ts.
+model PersonLabel {
+  personId String
+  labelId  String
+
+  createdAt DateTime @default(now())
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  label  Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([personId, labelId])
+  /// Drives "every contact with this label".
+  @@index([labelId])
+}
+
+/// One label's Google contact group, in one Google account.
+///
+/// Google contact groups are per-account resources: the owner's "Family" and a
+/// recipient's "Family" are different objects with different resource names. Since
+/// a shared contact lands in every recipient's address book, each account needs its
+/// own same-named group — the fan-out PersonSync already does for contacts.
+model LabelGroup {
+  id      String @id @default(cuid())
+  labelId String
+  /// Whose Google account this group lives in. Not necessarily the label's owner.
+  userId  String
+
+  googleResourceName String
+  googleEtag         String?
+  googleSyncedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  label Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([labelId, userId])
+  /// One label per Google group, per account.
+  @@unique([userId, googleResourceName])
+}
+
+// ---------------------------------------------------------------------------
 // Sync bookkeeping
 // ---------------------------------------------------------------------------
 
 enum SyncTarget {
   GOOGLE_CONTACT
   GOOGLE_EVENT
+  /// A Google contact group, queued when the Hearth label behind it is deleted.
+  GOOGLE_CONTACT_GROUP
 }
 
 /// Records a remote resource that must be deleted from Google. Written when a

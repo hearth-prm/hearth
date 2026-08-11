@@ -1,30 +1,38 @@
 import Link from "next/link";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { readablePeopleWhere, requireUser } from "@/lib/access";
+import { requireUser } from "@/lib/access";
 import { listFields, loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
 import { primaryEmail } from "@/lib/people";
 import {
+  isFilterActive,
+  parseFilter,
+  peopleWhere,
+  type RawParams,
+} from "@/lib/people-filter";
+import {
   btnPrimary,
+  btnSecondary,
   Card,
   EmptyState,
-  inputClass,
   PageHeader,
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
+import { LabelChips } from "@/components/label-chip";
+import { PeopleFilters } from "@/components/people-filters";
 
 const PAGE_SIZE = 200;
 
 export default async function PeoplePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<RawParams>;
 }) {
   const user = await requireUser();
-  const { q } = await searchParams;
-  const query = (q ?? "").trim();
+  const params = await searchParams;
+  const filter = parseFilter(params);
+  const where = peopleWhere(filter, user.id);
 
   const defs = await loadRegistry(user.id, "PERSON");
   // displayName already covers the name fields, so don't repeat them as columns.
@@ -32,84 +40,81 @@ export default async function PeoplePage({
     (d) => d.key !== "givenName" && d.key !== "familyName",
   );
 
-  const search: Prisma.PersonWhereInput = query
-    ? {
-        OR: [
-          { displayName: { contains: query, mode: "insensitive" } },
-          { nickname: { contains: query, mode: "insensitive" } },
-          { organization: { contains: query, mode: "insensitive" } },
-          { jobTitle: { contains: query, mode: "insensitive" } },
-          { notes: { contains: query, mode: "insensitive" } },
-          {
-            contactPoints: {
-              some: { value: { contains: query, mode: "insensitive" } },
-            },
-          },
-        ],
-      }
-    : {};
-
-  const people = await prisma.person.findMany({
-    where: { AND: [readablePeopleWhere(user.id), search] },
-    orderBy: { displayName: "asc" },
-    take: PAGE_SIZE,
-    include: {
-      owner: { select: { email: true } },
-      // The badge reports THIS account's copy: a shared contact can be synced for
-      // its owner and still pending for you.
-      googleSyncs: { where: { userId: user.id } },
-      contactPoints: {
-        where: { kind: "EMAIL" },
-        orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
-        take: 1,
+  const [people, total, labelRows] = await Promise.all([
+    prisma.person.findMany({
+      where,
+      orderBy: { displayName: "asc" },
+      take: PAGE_SIZE,
+      include: {
+        owner: { select: { email: true } },
+        // The badge reports THIS account's copy: a shared contact can be synced for
+        // its owner and still pending for you.
+        googleSyncs: { where: { userId: user.id } },
+        labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
+        contactPoints: {
+          where: { kind: "EMAIL" },
+          orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
+          take: 1,
+        },
       },
-    },
-  });
+    }),
+    prisma.person.count({ where }),
+    // The filter bar offers the viewer's OWN labels. A label belonging to someone
+    // who shared a contact with you is theirs to manage, and offering it here would
+    // imply you could.
+    prisma.label.findMany({
+      where: { ownerId: user.id },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        color: true,
+        _count: { select: { people: true } },
+      },
+    }),
+  ]);
 
-  const total = await prisma.person.count({
-    where: { AND: [readablePeopleWhere(user.id), search] },
-  });
+  const labels = labelRows.map(({ _count, ...l }) => ({ ...l, count: _count.people }));
+  const filtered = isFilterActive(filter);
 
   return (
     <div>
       <PageHeader
         title="People"
-        description={
-          total === 1 ? "1 contact" : `${total.toLocaleString()} contacts`
-        }
+        description={total === 1 ? "1 contact" : `${total.toLocaleString()} contacts`}
         action={
-          <Link href="/people/new" className={btnPrimary}>
-            New contact
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/people/import" className={btnSecondary}>
+              Import
+            </Link>
+            <Link href="/people/new" className={btnPrimary}>
+              New contact
+            </Link>
+          </div>
         }
       />
 
-      <form className="mb-4" role="search">
-        <input
-          type="search"
-          name="q"
-          defaultValue={query}
-          placeholder="Search name, organisation, notes or contact details…"
-          aria-label="Search people"
-          className={inputClass}
-        />
-      </form>
+      <PeopleFilters filter={filter} labels={labels} resultCount={total} />
 
       <Card>
         {people.length === 0 ? (
           <EmptyState
-            title={query ? `No one matches “${query}”` : "No contacts yet"}
+            title={filtered ? "Nothing matches those filters" : "No contacts yet"}
             description={
-              query
-                ? "Try a different search term."
+              filtered
+                ? "Try clearing a filter, or widening the search."
                 : "Add the first person you want to keep track of."
             }
             action={
-              !query ? (
+              filtered ? (
+                <Link href="/people" className={btnSecondary}>
+                  Clear filters
+                </Link>
+              ) : (
                 <Link href="/people/new" className={btnPrimary}>
                   New contact
                 </Link>
-              ) : null
+              )
             }
           />
         ) : (
@@ -122,6 +127,9 @@ export default async function PeoplePage({
                   </th>
                   <th scope="col" className="px-5 py-3 font-medium">
                     Email
+                  </th>
+                  <th scope="col" className="px-5 py-3 font-medium">
+                    Labels
                   </th>
                   {columns.map((c) => (
                     <th
@@ -162,6 +170,13 @@ export default async function PeoplePage({
                     <td className="px-5 py-3 text-neutral-600 dark:text-neutral-400">
                       {primaryEmail(person.contactPoints) ?? "—"}
                     </td>
+                    <td className="px-5 py-3">
+                      {person.labels.length ? (
+                        <LabelChips labels={person.labels.map((pl) => pl.label)} linked />
+                      ) : (
+                        <span className="text-neutral-400">—</span>
+                      )}
+                    </td>
                     {columns.map((c) => (
                       <td
                         key={c.key}
@@ -184,12 +199,33 @@ export default async function PeoplePage({
         )}
       </Card>
 
-      {total > people.length ? (
-        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
-          Showing the first {people.length} of {total.toLocaleString()}. Narrow
-          the list with search.
-        </p>
-      ) : null}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+        <span>
+          {total > people.length
+            ? `Showing the first ${people.length} of ${total.toLocaleString()}. Narrow the list with search or a filter.`
+            : ""}
+        </span>
+        {/* Export follows the filters, so "export my Family label" needs no separate
+            selection mechanism — you filter the list, then export what you see. */}
+        <Link
+          href={`/api/people/export${buildExportQuery(params)}`}
+          className="text-teal-700 underline dark:text-teal-400"
+        >
+          Export {filtered ? "these" : "all"} as CSV
+        </Link>
+      </div>
     </div>
   );
+}
+
+/** Pass the current filters straight through to the export endpoint. */
+function buildExportQuery(params: RawParams): string {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    for (const v of Array.isArray(value) ? value : value ? [value] : []) {
+      qs.append(key, v);
+    }
+  }
+  const s = qs.toString();
+  return s ? `?${s}` : "";
 }

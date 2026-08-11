@@ -166,17 +166,25 @@ export async function requireOwnedEvent(
 
 // --- guards ---------------------------------------------------------------
 
-/** Returns the id if the user may edit this person, else throws. */
+/**
+ * Returns the person if the user may edit it, else throws.
+ *
+ * Yields `ownerId` and `addToGoogle` as well as the id, because callers acting on a
+ * shared record almost always need them next — the owner decides which field
+ * definitions and labels apply, and whether the record belongs in Google at all.
+ * The row is already being read for the access check, so returning it saves a
+ * second query rather than costing anything.
+ */
 export async function requireWritablePerson(
   userId: string,
   personId: string,
-): Promise<string> {
+): Promise<{ id: string; ownerId: string; addToGoogle: boolean }> {
   const found = await prisma.person.findFirst({
     where: { id: personId, ...writablePeopleWhere(userId) },
-    select: { id: true },
+    select: { id: true, ownerId: true, addToGoogle: true },
   });
   if (!found) throw new AccessDeniedError();
-  return found.id;
+  return found;
 }
 
 export async function requireWritableEvent(

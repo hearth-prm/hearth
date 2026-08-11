@@ -33,6 +33,16 @@ const nextConfig: NextConfig = {
   // image small and lets us run `node server.js` without the full dep tree.
   output: "standalone",
 
+  experimental: {
+    /**
+     * CSV import previews the file, then applies the text it already read — carried
+     * through the confirmation step in a hidden field so the file that was reviewed
+     * is the file that is applied. The 1 MB default would refuse a few thousand
+     * contacts; import itself caps files at 4 MB and reports anything larger.
+     */
+    serverActions: { bodySizeLimit: "5mb" },
+  },
+
   // Inlined at build time so the running app can report which build it is,
   // without reading any files at runtime.
   env: {

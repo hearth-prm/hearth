@@ -9,6 +9,11 @@ import {
 import { hearthIdOf, serializePerson } from "@/lib/google/serialize-person";
 import { loadMappings, type ResolvedMappings } from "@/lib/google/mappings";
 import { readablePeopleWhere } from "@/lib/access";
+import {
+  applyMemberships,
+  resolveGroups,
+  type LabelledContact,
+} from "@/lib/sync/label-groups";
 import type { FieldDef } from "@/lib/fields/types";
 
 /**
@@ -41,6 +46,8 @@ export interface ContactSyncResult {
   /** Existing Google contacts re-linked to a Hearth record. */
   adopted: number;
   failed: number;
+  /** Google contact groups whose membership was reconciled. */
+  groupsTouched: number;
   /** True when the run stopped early because Google asked us to slow down. */
   rateLimited: boolean;
   errors: string[];
@@ -65,6 +72,7 @@ function emptyResult(): ContactSyncResult {
     deleted: 0,
     adopted: 0,
     failed: 0,
+    groupsTouched: 0,
     rateLimited: false,
     errors: [],
   };
@@ -76,6 +84,7 @@ export function summarise(r: ContactSyncResult): string {
   if (r.updated) parts.push(`${r.updated} updated`);
   if (r.deleted) parts.push(`${r.deleted} removed`);
   if (r.adopted) parts.push(`${r.adopted} re-linked`);
+  if (r.groupsTouched) parts.push(`${r.groupsTouched} label(s) applied`);
   if (r.failed) parts.push(`${r.failed} failed`);
   if (r.rateLimited) parts.push("paused on Google's rate limit");
   return parts.length ? parts.join(", ") : "nothing to do";
@@ -126,7 +135,9 @@ export async function syncContactsForUser(
   const tombstones = await prisma.syncTombstone.findMany({
     where: {
       ownerId: userId,
-      target: "GOOGLE_CONTACT",
+      // Contact groups drain in the same pass: both are "a remote thing Hearth can
+      // no longer find from its own rows", and both need the same retry treatment.
+      target: { in: ["GOOGLE_CONTACT", "GOOGLE_CONTACT_GROUP"] },
       processedAt: null,
       OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now() } }],
     },
@@ -136,6 +147,18 @@ export async function syncContactsForUser(
 
   for (const tombstone of tombstones) {
     try {
+      if (tombstone.target === "GOOGLE_CONTACT_GROUP") {
+        await deps.people.deleteContactGroup(tombstone.resourceId);
+        // Groups have no PersonSync row to clear, so the tombstone is simply marked
+        // done rather than going through settleTombstone.
+        await prisma.syncTombstone.update({
+          where: { id: tombstone.id },
+          data: { processedAt: now() },
+        });
+        result.groupsTouched += 1;
+        continue;
+      }
+
       await deps.people.deleteContact(tombstone.resourceId);
       await settleTombstone(tombstone.id, userId, tombstone.resourceId);
       result.deleted += 1;
@@ -147,8 +170,15 @@ export async function syncContactsForUser(
       if (classified.kind === "not_found") {
         // Already gone — the goal state. Deleting is idempotent, so this counts
         // as success rather than an error to retry forever.
-        await settleTombstone(tombstone.id, userId, tombstone.resourceId);
-        result.deleted += 1;
+        if (tombstone.target === "GOOGLE_CONTACT_GROUP") {
+          await prisma.syncTombstone.update({
+            where: { id: tombstone.id },
+            data: { processedAt: now() },
+          });
+        } else {
+          await settleTombstone(tombstone.id, userId, tombstone.resourceId);
+          result.deleted += 1;
+        }
         continue;
       }
 
@@ -232,13 +262,23 @@ export async function syncContactsForUser(
     include: {
       contactPoints: true,
       googleSyncs: { where: { userId } },
+      labels: { select: { labelId: true } },
     },
     orderBy: { updatedAt: "asc" },
     take: batchSize,
   });
 
+  // Group membership is reconciled after the contacts themselves, because a contact
+  // has to exist in Google before it can join a group. Collected as we go so the
+  // reconciliation is one call per group rather than per contact.
+  const labelled: LabelledContact[] = [];
+  const noteLabels = (personId: string, resourceName: string, labelIds: string[]) => {
+    labelled.push({ personId, resourceName, labelIds });
+  };
+
   for (const person of queue) {
     const link = person.googleSyncs[0];
+    const labelIds = person.labels.map((pl) => pl.labelId);
     const { customFields, mappings } = await contextFor(person.ownerId);
     const { person: payload, updateFields } = serializePerson(person, {
       customFields,
@@ -275,14 +315,17 @@ export async function syncContactsForUser(
           // reappears rather than erroring forever.
           const created = await deps.people.createContact(payload);
           await markSynced(person.id, userId, created.resourceName, created.etag, now());
+          noteLabels(person.id, created.resourceName, labelIds);
           result.created += 1;
         } else {
           await markSynced(person.id, userId, written.resourceName, written.etag, now());
+          noteLabels(person.id, written.resourceName, labelIds);
           result.updated += 1;
         }
       } else {
         const created = await deps.people.createContact(payload);
         await markSynced(person.id, userId, created.resourceName, created.etag, now());
+        noteLabels(person.id, created.resourceName, labelIds);
         result.created += 1;
       }
     } catch (err) {
@@ -304,6 +347,27 @@ export async function syncContactsForUser(
       );
       result.failed += 1;
       result.errors.push(`${person.displayName}: ${classified.message}`);
+    }
+  }
+
+  // --- 3. labels as Google contact groups --------------------------------
+  //
+  // Deliberately after the contacts, and deliberately not fatal: the contacts
+  // themselves are already correct in Google, and marking them failed over a group
+  // problem would roll back a successful push and retry it needlessly. A group
+  // problem is reported and retried on the next run, when the labels are re-read
+  // from the database anyway.
+  if (!result.rateLimited && labelled.length > 0) {
+    try {
+      const labelIds = [...new Set(labelled.flatMap((c) => c.labelIds))];
+      await resolveGroups(userId, labelIds, deps);
+      const memberships = await applyMemberships(userId, labelled, deps);
+      result.groupsTouched = memberships.groupsTouched;
+    } catch (err) {
+      const classified = classifyGoogleError(err);
+      if (classified.kind === "auth") throw new GoogleAuthError(classified.message);
+      if (classified.kind === "rate_limit") result.rateLimited = true;
+      result.errors.push(`labels: ${classified.message}`);
     }
   }
 
