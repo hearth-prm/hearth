@@ -1,9 +1,13 @@
 # Verifying 0.4.0 (M4 — mapping settings + record sharing)
 
-0.4.0 is cut **only after this passes against real Google accounts**. Everything
-below is a manual test, because the parts that can break in production are exactly
-the parts a fake API client cannot prove: consent scopes, Google's wholesale field
-replacement, and two real address books converging on one Hearth record.
+0.4.0 is cut **only after this passes against real Google accounts**. Run this
+checklist **before** [verify-0.5.0.md](verify-0.5.0.md): M5 changes the same sync
+engine, so a failure there is far easier to place against a sharing setup already
+known to work.
+
+Everything below is a manual test, because the parts that can break in production are
+exactly the parts a fake API client cannot prove: consent scopes, Google's wholesale
+field replacement, and two real address books converging on one Hearth record.
 
 ## Setup
 
