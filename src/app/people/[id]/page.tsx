@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { readablePeopleWhere, requireUser } from "@/lib/access";
+import { canWritePerson, readablePeopleWhere, requireUser } from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
@@ -56,6 +56,10 @@ export default async function PersonPage({
   if (!person) notFound();
 
   const isOwner = person.ownerId === user.id;
+  // Owning is not the same question as being allowed to edit: a VIEW share grants
+  // neither. Asked of the access layer rather than derived here, so this cannot
+  // drift from what the actions will actually permit.
+  const canEdit = isOwner || (await canWritePerson(user.id, person.id));
   // This account's copy, and every other account holding one.
   const mySync = person.googleSyncs.find((g) => g.userId === user.id);
   const otherSyncs = person.googleSyncs.filter(
@@ -117,9 +121,11 @@ export default async function PersonPage({
             {!isOwner ? (
               <Badge tone="amber">shared by {person.owner.email}</Badge>
             ) : null}
-            <Link href={`/people/${person.id}/edit`} className={btnSecondary}>
-              Edit
-            </Link>
+            {canEdit ? (
+              <Link href={`/people/${person.id}/edit`} className={btnSecondary}>
+                Edit
+              </Link>
+            ) : null}
             {/* Deleting stays with the owner even under an EDIT share. */}
             {isOwner ? (
               <DeleteForm
@@ -152,14 +158,19 @@ export default async function PersonPage({
             />
             {populated.length === 0 && person.contactPoints.length === 0 ? (
               <p className="px-5 py-6 text-sm text-neutral-500 dark:text-neutral-400">
-                Nothing recorded yet.{" "}
-                <Link
-                  href={`/people/${person.id}/edit`}
-                  className="text-teal-700 hover:underline dark:text-teal-400"
-                >
-                  Add some details
-                </Link>
-                .
+                Nothing recorded yet.
+                {canEdit ? (
+                  <>
+                    {" "}
+                    <Link
+                      href={`/people/${person.id}/edit`}
+                      className="text-teal-700 hover:underline dark:text-teal-400"
+                    >
+                      Add some details
+                    </Link>
+                    .
+                  </>
+                ) : null}
               </p>
             ) : (
               <dl className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
@@ -235,19 +246,22 @@ export default async function PersonPage({
                           </span>
                         ) : null}
                       </span>
-                      <DeleteForm
-                        action={removeRelationship}
-                        id={rel.id}
-                        label="Remove"
-                        pendingLabel="Removing…"
-                        className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                        confirmMessage="Remove this relationship?"
-                      />
+                      {canEdit ? (
+                        <DeleteForm
+                          action={removeRelationship}
+                          id={rel.id}
+                          label="Remove"
+                          pendingLabel="Removing…"
+                          className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                          confirmMessage="Remove this relationship?"
+                        />
+                      ) : null}
                     </li>
                   ))}
                 </ul>
               )}
 
+              {canEdit ? (
               <div className="border-t border-neutral-100 pt-5 dark:border-neutral-800/60">
                 <RelationshipForm
                   action={addRelationship}
@@ -262,6 +276,7 @@ export default async function PersonPage({
                   people={others}
                 />
               </div>
+              ) : null}
             </div>
           </Card>
         </div>
@@ -311,6 +326,7 @@ export default async function PersonPage({
                   No labels on this contact.
                 </p>
               )}
+              {canEdit ? (
               <PersonLabelsForm
                 action={setPersonLabels}
                 personId={person.id}
@@ -318,6 +334,7 @@ export default async function PersonPage({
                 selected={person.labels.map((pl) => pl.labelId)}
                 ownerName={isOwner ? undefined : (person.owner.name ?? person.owner.email ?? "the owner")}
               />
+              ) : null}
             </div>
           </Card>
 

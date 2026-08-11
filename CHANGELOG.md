@@ -100,6 +100,28 @@ that formally marks its milestone.
   - Rows apply one at a time rather than in one transaction: a failure on row 2,999
     must not discard 2,998 good ones, and the report says what landed.
 
+### Fixed
+
+- **A view-only recipient was shown controls they could not use.** Both detail pages
+  gated on ownership alone, so someone with a VIEW share saw Edit, the relationship
+  add and remove controls, the label editor, and on an event the add-attendee, RSVP
+  and remove-attendee controls. The server actions always refused — nothing was ever
+  writable and no data was exposed — but the UI led people into an error page.
+  - The pages now ask `canWritePerson` / `canWriteEvent`, which are thin boolean
+    wrappers over the same `writable*Where` predicate the action guards use. A page
+    cannot offer a control the action behind it will reject, because both read the
+    rule from one place.
+  - Found by the new end-to-end suite on its first full run.
+
+### Added
+
+- **An end-to-end test suite** (`npm run e2e`): a real Postgres 16 matching
+  production, the real built app, and a real browser driving it. Sign-in is bypassed
+  by inserting a session row and its cookie, which is what a real Google sign-in
+  would have produced — everything the suite tests sits downstream of authentication,
+  and driving Google's consent screen would mean holding someone's password. Covers
+  the parts of `docs/verify-0.5.0.md` that do not need a real Google account.
+
 ### Changed
 
 - Sharing now picks recipients from a **multi-select list of the install's users**

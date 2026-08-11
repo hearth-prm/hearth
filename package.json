@@ -15,7 +15,8 @@
     "db:studio": "prisma studio",
     "docker:up": "sh scripts/docker-up.sh",
     "preversion": "npm run typecheck",
-    "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md"
+    "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
+    "e2e": "tsx scripts/e2e/verify.mts"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
@@ -35,8 +36,11 @@
     "@types/node": "22.19.4",
     "@types/react": "19.2.8",
     "@types/react-dom": "19.2.4",
+    "embedded-postgres": "16.14.0-beta.17",
+    "playwright-core": "1.62.1",
     "prisma": "6.19.3",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
     "typescript": "5.9.3"
   }
 }

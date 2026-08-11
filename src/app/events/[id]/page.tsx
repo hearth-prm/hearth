@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { readableEventsWhere, readablePeopleWhere, requireUser } from "@/lib/access";
+import {
+  canWriteEvent,
+  readableEventsWhere,
+  readablePeopleWhere,
+  requireUser,
+} from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
@@ -72,6 +77,9 @@ export default async function EventPage({
   if (!event) notFound();
 
   const isOwner = event.ownerId === user.id;
+  // A VIEW share grants neither ownership nor editing. Asked of the access layer so
+  // the controls offered here match what the actions will accept.
+  const canEdit = isOwner || (await canWriteEvent(user.id, event.id));
 
   // The registry belongs to the event's owner: a shared event's custom values are
   // keyed by the owner's field definitions, not the viewer's.
@@ -117,9 +125,11 @@ export default async function EventPage({
             {!isOwner ? (
               <Badge tone="amber">shared by {event.owner.email}</Badge>
             ) : null}
-            <Link href={`/events/${event.id}/edit`} className={btnSecondary}>
-              Edit
-            </Link>
+            {canEdit ? (
+              <Link href={`/events/${event.id}/edit`} className={btnSecondary}>
+                Edit
+              </Link>
+            ) : null}
             {isOwner ? (
               <DeleteForm
                 action={deleteEvent}
@@ -225,18 +235,21 @@ export default async function EventPage({
                           <Badge tone={a.rsvp === "ACCEPTED" ? "teal" : a.rsvp === "DECLINED" ? "rose" : "neutral"}>
                             {RSVP_LABELS[a.rsvp]}
                           </Badge>
-                          <DeleteForm
-                            action={removeAttendee}
-                            id={a.id}
-                            idName="attendeeId"
-                            label="Remove"
-                            pendingLabel="Removing…"
-                            className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                            confirmMessage={`Remove ${a.person.displayName} from this event?`}
-                          />
+                          {canEdit ? (
+                            <DeleteForm
+                              action={removeAttendee}
+                              id={a.id}
+                              idName="attendeeId"
+                              label="Remove"
+                              pendingLabel="Removing…"
+                              className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                              confirmMessage={`Remove ${a.person.displayName} from this event?`}
+                            />
+                          ) : null}
                         </div>
                       </div>
 
+                      {canEdit ? (
                       <form
                         action={updateAttendee}
                         className="mt-3 flex flex-wrap items-end gap-2"
@@ -286,18 +299,21 @@ export default async function EventPage({
                           Update
                         </SubmitButton>
                       </form>
+                      ) : null}
                     </li>
                   );
                 })}
               </ul>
             )}
 
-            <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
-              <form action={addAttendee}>
-                <input type="hidden" name="eventId" value={event.id} />
-                <AttendeeSearch search={searchPeople} eventId={event.id} />
-              </form>
-            </div>
+            {canEdit ? (
+              <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
+                <form action={addAttendee}>
+                  <input type="hidden" name="eventId" value={event.id} />
+                  <AttendeeSearch search={searchPeople} eventId={event.id} />
+                </form>
+              </div>
+            ) : null}
           </Card>
         </div>
 

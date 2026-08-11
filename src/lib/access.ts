@@ -164,6 +164,28 @@ export async function requireOwnedEvent(
   return found.id;
 }
 
+// --- rendering questions --------------------------------------------------
+//
+// Pages need "may this person edit?" as a boolean, not as a throw. Asked through the
+// same writable*Where predicate the action guards use, so a control can never be
+// offered by a page that the action behind it will refuse — the bug these fix.
+
+export async function canWritePerson(userId: string, personId: string): Promise<boolean> {
+  const found = await prisma.person.findFirst({
+    where: { id: personId, ...writablePeopleWhere(userId) },
+    select: { id: true },
+  });
+  return found !== null;
+}
+
+export async function canWriteEvent(userId: string, eventId: string): Promise<boolean> {
+  const found = await prisma.event.findFirst({
+    where: { id: eventId, ...writableEventsWhere(userId) },
+    select: { id: true },
+  });
+  return found !== null;
+}
+
 // --- guards ---------------------------------------------------------------
 
 /**
