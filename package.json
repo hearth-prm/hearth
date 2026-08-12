@@ -16,7 +16,8 @@
     "docker:up": "sh scripts/docker-up.sh",
     "preversion": "npm run typecheck",
     "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
-    "e2e": "next build && tsx scripts/e2e/verify.mts"
+    "e2e": "next build && tsx scripts/e2e/verify.mts",
+    "token": "tsx scripts/e2e/get-token.mts"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"

@@ -7,6 +7,8 @@ dist/
 .env
 .env.local
 .env.*.local
+# Test-account OAuth credentials. Real refresh tokens live here.
+.env.e2e
 !.env.example
 
 *.log
