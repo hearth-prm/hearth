@@ -17,7 +17,8 @@
     "preversion": "npm run typecheck",
     "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
     "e2e": "next build && tsx scripts/e2e/verify.mts",
-    "token": "tsx scripts/e2e/get-token.mts"
+    "token": "tsx scripts/e2e/get-token.mts",
+    "e2e:google": "tsx scripts/e2e/google.mts"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"

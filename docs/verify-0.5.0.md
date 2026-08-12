@@ -12,13 +12,16 @@ That builds the app, starts a real Postgres 16 and a real browser, and works thr
 **§1, §2, §4–§8 and the non-Google half of §9** — 140 checks. It needs no Google
 account, because sign-in is bypassed by inserting a session row directly.
 
-What is left for you is **§0** (your live install and its data), **§3** (labels in
-Google Contacts), and the handful of Google-touching rows listed under *What stays
-manual* at the end. Those are exactly the parts a test cannot reach: whether Google's
-contact-group API behaves as Hearth assumes, and whether your own data survived the
-upgrade.
+    npm run e2e:google
 
-Rows the suite covers are marked **⚙** below.
+That covers **§3 in full**, plus 6.5, 7.20, 9.3, 9.4 and 9.7 — 43 checks against two
+real Google accounts, driving Hearth's own sync engine and then asking Google what
+happened. It needs `.env.e2e`; see `npm run token`. It is **destructive** to those
+accounts and refuses to run against one holding enough contacts to look real.
+
+Between them, 183 checks. Rows they cover are marked **⚙**. What is left is **§0** —
+whether *your* data survived the upgrade, which nothing can stand in for — and three
+rows needing a mailbox, a container or an hour.
 
 ## Setup
 
@@ -100,31 +103,33 @@ the ones that prove it.
 
 ## 3 — Labels in Google Contacts
 
-The riskiest section, and the reason this release needs a real second account. Google
-contact groups belong to an *account*, so one Hearth label becomes a separate group in
-each Google account the contact reaches.
+Covered by `npm run e2e:google` against two throwaway accounts — **all 15 rows pass**,
+including the three stop conditions (3.2, 3.3, 3.11). Those were the ones that would
+have damaged an address book rather than merely failing, and they confirm the design
+bet: Hearth changes group membership through `contactGroups.members.modify` rather than
+writing `memberships` on the contact, so a labelled contact stays in My Contacts and a
+group you made by hand is left alone.
 
-**3.2 and 3.3 are the two that matter most.** They check that Hearth's group writes
-did not disturb anything else in your address book — the failure mode there looks like
-"Hearth deleted my contacts".
+Re-run it by hand against your own accounts only if you want the reassurance; the
+mechanism is proven.
 
 | # | Test | Expected |
 |---|---|---|
-| 3.1 | Label a contact `Family`, wait for sync, open **A's** Google Contacts | A `Family` label exists, with that contact in it |
-| 3.2 | That contact's presence in **My Contacts** | **Still there.** Applying a label must not move it out |
-| 3.3 | In Google, put a synced contact in a group Hearth has never heard of, then edit the contact in Hearth and re-sync | It is **still in your hand-made group**. Hearth only touches groups it created |
-| 3.4 | B's Google Contacts (contact shared with B) | B has their **own** `Family` label, containing it |
-| 3.5 | Compare the two labels | Same name, different underlying groups — each account has its own |
-| 3.6 | A label with no contacts on it | **No** Google group is created |
-| 3.7 | Remove `Family` from the contact in Hearth, re-sync | Gone from the Google label; the contact itself remains |
-| 3.8 | Rename `Family` → `Household` in Hearth, re-sync | The Google label is **renamed**, not duplicated |
-| 3.9 | Create a Hearth label `Neighbours` — the name you made by hand in B's Google — apply it to a shared contact, sync as B | Hearth **adopts** the existing Google label. Exactly one `Neighbours` in B's Google |
-| 3.10 | Delete the `Household` label in Hearth, re-sync | The Google label is **deleted** in every account it reached |
-| 3.11 | The contacts that were in it | **All still present** in Google. Only the grouping went |
-| 3.12 | Settings → Contact sync, last-sync summary | Mentions labels applied |
-| 3.13 | Revoke B's Google grant, label a shared contact, sync both | A's labels apply; B's account errors alone |
-| 3.14 | As B, untick **Also push contacts shared with me**, then label the shared contact as A | B's Google is untouched; A's still gets the label |
-| 3.15 | Apply five labels to one contact, sync | All five groups created, contact in all five |
+| ⚙ 3.1 | Label a contact `Family`, wait for sync, open **A's** Google Contacts | A `Family` label exists, with that contact in it |
+| ⚙ 3.2 | That contact's presence in **My Contacts** | **Still there.** Applying a label must not move it out |
+| ⚙ 3.3 | In Google, put a synced contact in a group Hearth has never heard of, then edit the contact in Hearth and re-sync | It is **still in your hand-made group**. Hearth only touches groups it created |
+| ⚙ 3.4 | B's Google Contacts (contact shared with B) | B has their **own** `Family` label, containing it |
+| ⚙ 3.5 | Compare the two labels | Same name, different underlying groups — each account has its own |
+| ⚙ 3.6 | A label with no contacts on it | **No** Google group is created |
+| ⚙ 3.7 | Remove `Family` from the contact in Hearth, re-sync | Gone from the Google label; the contact itself remains |
+| ⚙ 3.8 | Rename `Family` → `Household` in Hearth, re-sync | The Google label is **renamed**, not duplicated |
+| ⚙ 3.9 | Create a Hearth label `Neighbours` — the name you made by hand in B's Google — apply it to a shared contact, sync as B | Hearth **adopts** the existing Google label. Exactly one `Neighbours` in B's Google |
+| ⚙ 3.10 | Delete the `Household` label in Hearth, re-sync | The Google label is **deleted** in every account it reached |
+| ⚙ 3.11 | The contacts that were in it | **All still present** in Google. Only the grouping went |
+| ⚙ 3.12 | Settings → Contact sync, last-sync summary | Mentions labels applied |
+| ⚙ 3.13 | Revoke B's Google grant, label a shared contact, sync both | A's labels apply; B's account errors alone |
+| ⚙ 3.14 | As B, untick **Also push contacts shared with me**, then label the shared contact as A | B's Google is untouched; A's still gets the label |
+| ⚙ 3.15 | Apply five labels to one contact, sync | All five groups created, contact in all five |
 
 ---
 
@@ -191,7 +196,7 @@ against an example.
 | ⚙ 6.2 | Confirm the import | Finishes without error |
 | ⚙ 6.3 | Compare a few contacts before and after | **Nothing changed** — no lost phone numbers, labels or shares |
 | ⚙ 6.4 | New labels reported by the preview | **None** — every label already existed |
-| 6.5 | Google Contacts after the next sync | No duplicates created |
+| ⚙ 6.5 | Google Contacts after the next sync | No duplicates created |
 | ⚙ 6.6 | Open the exported file in a spreadsheet, save it from there, re-import | Still a clean round trip |
 
 ---
@@ -220,7 +225,7 @@ against an example.
 | ⚙ 7.17 | Preview, then navigate away and come back | Preview is gone; nothing was written |
 | ⚙ 7.18 | A file over 4 MB, or over 5,000 rows | Refused with a clear message, nothing half-applied |
 | ⚙ 7.19 | A file with a header row and nothing else | Refused, saying so |
-| 7.20 | After import, Google Contacts | Imported contacts and their labels appear on the next sync |
+| ⚙ 7.20 | After import, Google Contacts | Imported contacts and their labels appear on the next sync |
 
 ---
 
@@ -251,11 +256,11 @@ validator. These are the things that could have been broken from a distance.
 |---|---|---|
 | ⚙ 9.1 | Edit a contact through the normal form | Saves; custom fields and dates still correct |
 | ⚙ 9.2 | Edit a contact shared with you as EDIT | Saves, using the owner's field definitions |
-| 9.3 | Untick **Add to Google** on a labelled contact | Removed from Google, from its labels too |
-| 9.4 | Delete a labelled contact | Removed from Google; the label itself survives |
+| ⚙ 9.3 | Untick **Add to Google** on a labelled contact | Removed from Google, from its labels too |
+| ⚙ 9.4 | Delete a labelled contact | Removed from Google; the label itself survives |
 | ⚙ 9.5 | Field mapping pages | Still work; a custom field still lands where mapped |
 | 9.6 | Create and edit an event, with a guest | Unaffected — invite still sent, RSVP still returns |
-| 9.7 | Two sync cycles with nothing changed | No writes to Google, no group churn |
+| ⚙ 9.7 | Two sync cycles with nothing changed | No writes to Google, no group churn |
 | 9.8 | Container restart mid-sync | Resumes; no duplicate contacts or groups |
 | 9.9 | `docker compose logs` after an hour | No repeating errors |
 
@@ -263,25 +268,22 @@ validator. These are the things that could have been broken from a distance.
 
 ## What stays manual
 
-Everything below needs either your live install or a real Google account.
+Everything below needs your live install, a mailbox, a container, or an hour.
 
 | Rows | Why |
 |---|---|
 | **§0** (all 5) | About *your* data surviving the upgrade — no test can stand in for it |
-| **§3** (all 15) | Google contact groups. The whole point is whether Google behaves as assumed |
-| 6.5 | Google Contacts after a sync |
-| 7.20 | Imported contacts reaching Google |
-| 9.3, 9.4 | Removal from Google when opting out or deleting |
-| 9.6 | The invite email actually arriving |
-| 9.7, 9.8, 9.9 | Repeat sync cycles, container restart, logs over an hour |
+| 9.6 | Whether the invite **email** arrives. `e2e:google` can prove Google accepted the invite; an inbox needs Gmail scope or your eyes |
+| 9.8 | Container restart — needs Docker, which the test environment does not have |
+| 9.9 | An hour of logs |
 
-That is **5 + 15 + 8 = 28 rows** by hand, against 140 automated checks.
+That is **8 rows** by hand, against 183 automated checks.
 
-Run the automated suite first. If it fails, the manual pass is not worth starting.
+Run both suites first. If either fails, the manual pass is not worth starting.
 
 ## Recording the result
 
-`v0.5.0` ships when §0–§8 pass and §9 shows no regression. Since M4 is still
+`v0.5.0` ships when both suites pass and the 8 manual rows show no regression. Since M4 is still
 unverified, cut **both** tags once each checklist passes — `v0.4.0` first, so the
 history reads in milestone order.
 

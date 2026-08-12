@@ -11,7 +11,8 @@
     "allowImportingTsExtensions": true
   },
   "include": [
-    "**/*.mts"
+    "**/*.mts",
+    "../../src/types/*.d.ts"
   ],
   "exclude": []
 }

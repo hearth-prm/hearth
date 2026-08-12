@@ -61,17 +61,29 @@ async function waitFor(
   throw new Error(`timed out waiting for ${label}`);
 }
 
-export async function start(): Promise<Harness> {
+export interface Database {
+  prisma: PrismaClient;
+  dbUrl: string;
+  /** Directory holding the cluster; also where the harness keeps its scratch. */
+  dir: string;
+  stop(): Promise<void>;
+}
+
+/**
+ * A throwaway Postgres with Hearth's migrations applied.
+ *
+ * Split out from the browser harness because the Google suite needs a database and
+ * the sync engine but no app server and no browser — it drives the engine directly
+ * and then asks Google what happened.
+ */
+export async function startDatabase(): Promise<Database> {
   const dir = mkdtempSync(path.join(tmpdir(), "hearth-e2e-"));
   const pgPort = freePort(56000);
-  const appPort = freePort(4100);
   const dataDir = path.join(dir, "pg");
   // The database initdb already made, rather than a fresh one: this build of
   // embedded-postgres ships only initdb, pg_ctl and postgres — no psql to CREATE
   // DATABASE with, and no pg_isready to poll.
   const dbUrl = `postgresql://hearth:hearth@127.0.0.1:${pgPort}/postgres?schema=public`;
-
-  console.log(`  harness: postgres :${pgPort}, app :${appPort}`);
 
   await run(path.join(PG_BIN, "initdb"), ["-D", dataDir, "-U", "hearth", "--auth=trust", "-E", "UTF8"]);
   await run(path.join(PG_BIN, "pg_ctl"), [
@@ -93,6 +105,37 @@ export async function start(): Promise<Harness> {
     }
   });
 
+  await run("npx", ["prisma", "migrate", "deploy"], {
+    env: { ...process.env, DATABASE_URL: dbUrl },
+    cwd: REPO,
+  });
+
+  // The app's shared Prisma client (src/lib/db.ts) constructs itself at import time
+  // from DATABASE_URL, so anything importing it must see this set first. Callers that
+  // drive app modules in-process therefore have to import them AFTER calling this.
+  process.env.DATABASE_URL = dbUrl;
+
+  const prisma = new PrismaClient({ datasources: { db: { url: dbUrl } } });
+
+  return {
+    prisma,
+    dbUrl,
+    dir,
+    async stop() {
+      await prisma.$disconnect().catch(() => {});
+      await run(path.join(PG_BIN, "pg_ctl"), ["-D", dataDir, "stop"]).catch(() => {});
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+export async function start(): Promise<Harness> {
+  const db = await startDatabase();
+  const dir = db.dir;
+  const appPort = freePort(4100);
+  const dbUrl = db.dbUrl;
+  console.log(`  harness: app :${appPort}`);
+
   const env = {
     ...process.env,
     DATABASE_URL: dbUrl,
@@ -106,9 +149,6 @@ export async function start(): Promise<Harness> {
     NODE_ENV: "production" as const,
     PORT: String(appPort),
   };
-
-  await run("npx", ["prisma", "migrate", "deploy"], { env, cwd: REPO });
-  console.log("  harness: migrations applied");
 
   const app: ChildProcess = spawn("npx", ["next", "start", "-p", String(appPort), "-H", "127.0.0.1"], {
     env, cwd: REPO, stdio: ["ignore", "pipe", "pipe"],
@@ -127,7 +167,7 @@ export async function start(): Promise<Harness> {
   });
   console.log("  harness: app responding");
 
-  const prisma = new PrismaClient({ datasources: { db: { url: dbUrl } } });
+  const prisma = db.prisma;
   const browser: Browser = await chromium.launch({
     executablePath: CHROMIUM,
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -182,8 +222,7 @@ export async function start(): Promise<Harness> {
     await prisma.$disconnect().catch(() => {});
     app.kill("SIGTERM");
     await new Promise((r) => setTimeout(r, 500));
-    await run(path.join(PG_BIN, "pg_ctl"), ["-D", dataDir, "stop"]).catch(() => {});
-    rmSync(dir, { recursive: true, force: true });
+    await db.stop();
   }
 
   return { prisma, baseUrl, signIn, stop };

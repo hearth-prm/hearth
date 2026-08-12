@@ -140,7 +140,23 @@ that formally marks its milestone.
   §1, §2, §4–§8 and the non-Google half of §9 of `docs/verify-0.5.0.md`, leaving 28
   rows that genuinely need a live install or a Google account.
 
-  The suite has its own `tsconfig.json` rather than joining the app's: pulling
+- **A second suite for the Google half** (`npm run e2e:google`): 43 checks against two
+  throwaway Google accounts, driving the real sync engine and then asking Google what
+  happened. Covers §3 in full plus 6.5, 7.20, 9.3, 9.4 and 9.7, leaving 8 rows that
+  need the user's own install, a mailbox, a container or an hour.
+  - Destructive by design — it empties both accounts so each run starts from a known
+    state — so it refuses outright against an account holding enough contacts or labels
+    to look like a real address book. The cost of getting that wrong is somebody's
+    contacts.
+  - It also refuses if both tokens resolve to the same account. Every §3 assertion is
+    of the form "A has X and B separately has its own X", so one account twice would
+    pass while proving nothing.
+  - Confirms the contact-group design against the real API: a labelled contact stays in
+    My Contacts, a group created by hand in Google survives a sync, and deleting a
+    Hearth label removes the group while keeping its contacts. Those three were the
+    stop conditions, and they were assumptions until now.
+
+  The suites have their own `tsconfig.json` rather than joining the app's: pulling
   playwright-core and the Postgres driver into the Next build's TS program exhausted
   the build worker's heap. `npm run typecheck` runs both.
 
