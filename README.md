@@ -123,13 +123,22 @@ second copy. If the repository is private, put a token in the clone URL —
 `https://oauth2:YOUR_TOKEN@gitlab.com/...` — which also lets `update-hearth.sh`
 pull unattended later.
 
+**It refuses to run where Hearth is already installed**, naming what it found and how
+many contacts are at stake, and points you at `update-hearth.sh` instead. The two
+scripts are one keystroke apart and reaching for the wrong one is easy; every
+individual step in the installer is non-destructive, but the run as a whole rewrites
+the reverse-proxy config from its own defaults. `--force-reinstall` overrides it when
+you really do want the installer again — to redo the proxy wiring, say — and even then
+your `.env` and database are left alone.
+
 [deploy-hearth.sh](deploy-hearth.sh) does the whole first-time install: checks
 prerequisites, verifies your storage root is really mounted, clones the repo if
 you haven't already, generates `.env` with real random secrets, wires up SWAG if
-it finds it, builds, starts, and waits for the health endpoint. It is safe to
-re-run — it never overwrites an existing `.env`, because the generated database
-password is baked into the Postgres data directory and regenerating it would lock
-the app out of its own data.
+it finds it, builds, starts, and waits for the health endpoint.
+
+It never overwrites an existing `.env`, because the generated database password is
+baked into the Postgres data directory and regenerating it would lock the app out of
+its own data.
 
 You still have to create the Google OAuth client yourself; the script writes
 placeholders and prints exactly what to do, including the redirect URI to

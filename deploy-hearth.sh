@@ -8,9 +8,13 @@
 #
 #   sh deploy-hearth.sh --domain hearth.example.com
 #
-# Safe to re-run. It never overwrites an existing .env — the generated database
-# password is baked into the running Postgres volume, so regenerating it would
-# lock the app out of its own data. Use update-hearth.sh to deploy changes.
+# For a FIRST install. It refuses to run where Hearth already lives, because it
+# rewrites the reverse-proxy config from its own defaults — use update-hearth.sh to
+# deploy changes. Pass --force-reinstall to override, e.g. to redo the proxy wiring.
+#
+# Your data is never at risk either way: an existing .env is kept, because the
+# generated database password is baked into the running Postgres volume and
+# regenerating it would lock the app out of its own data.
 #
 # Options
 #   --domain <host>     Public hostname, e.g. hearth.example.com. Without it a
@@ -36,6 +40,8 @@
 #                                   on the LAN. Connects SWAG to that network.
 #                         none    - do not touch the proxy at all.
 #   --no-proxy          Same as --proxy none
+#   --force-reinstall   Run even though Hearth is already installed here. Rewrites
+#                       the proxy config; still keeps your .env and database.
 #   --proxy-conf-dir <p>  Directory to write the nginx config into. Default is
 #                         nginx/proxy-confs under the SWAG container's /config
 #                         mount, discovered from the container itself. A relative
@@ -121,6 +127,7 @@ while [ $# -gt 0 ]; do
   --proxy) need_arg "$1" "${2:-}" && PROXY_MODE="$2" && shift 2 ;;
   --proxy=*) PROXY_MODE="${1#*=}" && shift ;;
   --no-proxy) PROXY_MODE="none" && shift ;;
+  --force-reinstall) FORCE_REINSTALL=yes && shift ;;
   --proxy-conf-dir) need_arg "$1" "${2:-}" && PROXY_CONF_DIR="$2" && shift 2 ;;
   --proxy-conf-dir=*) PROXY_CONF_DIR="${1#*=}" && shift ;;
   --proxy-conf-name) need_arg "$1" "${2:-}" && PROXY_CONF_NAME="$2" && shift 2 ;;
@@ -139,12 +146,17 @@ auto | host | network | none) ;;
 esac
 
 APP_DIR="$INSTALL_ROOT/app"
+# Computed here rather than beside its first use, because the guardrail further down
+# needs it to recognise a checkout that lives somewhere other than $INSTALL_ROOT/app.
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 if [ -n "$PGDATA_PATH_OPT" ]; then
   PGDATA_DIR="$PGDATA_PATH_OPT"
 else
   PGDATA_DIR="$INSTALL_ROOT/postgres"
 fi
 BACKUP_DIR="$INSTALL_ROOT/backups"
+
+FORCE_REINSTALL="${FORCE_REINSTALL:-}"
 
 # --- preflight ------------------------------------------------------------
 say "Checking prerequisites"
@@ -272,14 +284,63 @@ case "$PGDATA_DIR" in
   ;;
 esac
 
+# --- refuse to install over a working install -----------------------------
+#
+# deploy-hearth.sh and update-hearth.sh are one keystroke apart and the wrong one is
+# easy to reach for. Every individual step here is non-destructive by design — an
+# existing .env is kept, an existing checkout is left alone — but the run as a whole
+# still rewrites the reverse-proxy config from its own defaults and rebuilds from
+# whatever the working tree currently holds. On a live install that is at best a
+# surprise and at worst a broken proxy.
+#
+# So: if this looks like somewhere Hearth already lives, stop and say so.
+EXISTING=""
+[ -f "$PGDATA_DIR/PG_VERSION" ] && EXISTING="$EXISTING database"
+for CANDIDATE in "$APP_DIR" "$SCRIPT_DIR"; do
+  if [ -f "$CANDIDATE/.env" ]; then
+    EXISTING="$EXISTING .env"
+    APP_DIR_WITH_ENV="$CANDIDATE"
+    break
+  fi
+done
+if [ -n "$COMPOSE" ] && [ -f "$APP_DIR/docker-compose.yml" ]; then
+  RUNNING=$(cd "$APP_DIR" && $COMPOSE ps --services --filter status=running 2>/dev/null | tr '\n' ' ')
+  [ -n "$RUNNING" ] && EXISTING="$EXISTING containers($RUNNING)"
+fi
+
+if [ -n "$EXISTING" ] && [ -z "$FORCE_REINSTALL" ]; then
+  # Say how much is at stake, when the database can be asked. A count is far more
+  # persuasive than the word "existing", and it is the thing the operator actually
+  # wants to know before doing anything else.
+  COUNTS=""
+  if [ -n "${RUNNING:-}" ]; then
+    COUNTS=$(cd "$APP_DIR" && $COMPOSE exec -T db psql -U "${POSTGRES_USER:-hearth}" \
+      -d "${POSTGRES_DB:-hearth}" -tAc \
+      "select (select count(*) from \"User\") || ' user(s), ' || (select count(*) from \"Person\") || ' contact(s), ' || (select count(*) from \"Event\") || ' event(s)'" \
+      2>/dev/null | tr -d '\r' | head -n 1)
+  fi
+
+  printf '\033[1;31mERROR\033[0m Hearth already appears to be installed here.\n' >&2
+  printf '      Found:%s\n' "$EXISTING" >&2
+  [ -n "$COUNTS" ] && printf '      Holding: %s\n' "$COUNTS" >&2
+  printf '\n      This script is for a FIRST install. To deploy new code, use:\n\n' >&2
+  printf '        cd %s && sh update-hearth.sh\n\n' "${APP_DIR_WITH_ENV:-$APP_DIR}" >&2
+  printf '      update-hearth.sh pulls, backs the database up with a verified pg_dump,\n' >&2
+  printf '      rebuilds and restarts. It will not touch your reverse-proxy config or\n' >&2
+  printf '      your .env, which this script would rewrite from its own defaults.\n\n' >&2
+  printf '      If you really do mean to re-run the installer over this — to redo the\n' >&2
+  printf '      proxy wiring, say — pass --force-reinstall. Your database and .env are\n' >&2
+  printf '      still left alone either way.\n' >&2
+  exit 1
+fi
+[ -n "$EXISTING" ] && note "re-installing over an existing install (--force-reinstall):$EXISTING"
+
 say "Creating $INSTALL_ROOT"
 mkdir -p "$PGDATA_DIR" "$BACKUP_DIR"
 ok "$PGDATA_DIR"
 ok "$BACKUP_DIR"
 
 # --- source ---------------------------------------------------------------
-SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-
 if [ -f "$APP_DIR/docker-compose.yml" ] && [ -f "$APP_DIR/prisma/schema.prisma" ]; then
   say "Source already present at $APP_DIR"
   note "leaving it untouched — use update-hearth.sh to pull changes"
