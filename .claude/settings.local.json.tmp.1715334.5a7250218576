@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -)",
+      "Bash(export DATABASE_URL=\"postgresql://hearth:hearth@127.0.0.1:55460/postgres?schema=public\")",
+      "Bash(npx tsc *)",
+      "Bash(npx tsx *)",
+      "Bash(NEXT_TELEMETRY_DISABLED=1 npm run build)",
+      "Bash(node_modules/@embedded-postgres/linux-x64/native/bin/pg_ctl -D __TRACKED_VAR__/pgm3 stop)",
+      "Bash(rm -rf __TRACKED_VAR__/pgm3)",
+      "Bash(sh scripts/check-migrations.sh)",
+      "Bash(git add *)",
+      "Bash(export DATABASE_URL=\"postgresql://hearth:hearth@127.0.0.1:55470/postgres?schema=public\")",
+      "Bash(sed 's/^/  exclusion list: /')",
+      "Bash(sed -n '/const populated = defs/,/formatFieldValue\\(def, value, event.timeZone\\).length > 0\\)/p' src/app/events/\\\\[id\\\\]/page.tsx)",
+      "Bash(node -e ' *)",
+      "Bash(export DATABASE_URL=\"postgresql://hearth:hearth@127.0.0.1:55480/postgres?schema=public\")",
+      "Bash(export DATABASE_URL=\"postgresql://hearth:hearth@127.0.0.1:55490/postgres?schema=public\")",
+      "Bash(python3 -c \"import yaml; d=yaml.safe_load\\(open\\('docker-compose.yml'\\)\\); print\\('  app env:', list\\(d['services']['app']['environment'].keys\\(\\)\\)\\)\")",
+      "Bash(export DATABASE_URL=\"postgresql://p:p@localhost:5432/p\")",
+      "Bash(grep -rnA14 'MANAGED_PERSON_FIELDS' src/lib/google/serialize-person.ts)",
+      "Bash(grep -nA4 'volumes:' docker-compose.yml)",
+      "Bash(cd /home/user/Scripts/hearth; grep -E '^\\\\s+FAIL|passed,|exit=' /tmp/f1.log 2>/dev/null || echo \"filter run still going\")",
+      "Read(//tmp/**)",
+      "Bash(cd /home/user/Scripts/hearth; sed -n '/§12/,$p' /tmp/g2.log | grep -E '^\\\\s+\\(ok|FAIL\\)')",
+      "Bash(git commit *)",
+      "Bash(git push *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
+    ]
+  }
+}

@@ -52,6 +52,11 @@ that formally marks its milestone.
   - Photos push to Google through `people.updateContactPhoto`, a separate endpoint from
     the field write because `photos` is read-only on a person. Compared against a
     per-account record of what was last sent, so an unchanged photo costs nothing.
+  - Verified against two real Google accounts: the owner's photo reaches a recipient's
+    address book, a recipient's own picture replaces it in theirs alone while the
+    owner's stays put, an unchanged photo is not re-uploaded, clearing an override falls
+    back to the owner's, and removing the last photo removes it from Google while
+    keeping the contact.
 
 - **The signed-in user's own picture in the header.** Google has supplied it since the
   first sign-in; it was simply never displayed.

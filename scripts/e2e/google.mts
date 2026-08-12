@@ -20,6 +20,7 @@ import { google } from "googleapis";
 import { createPeopleClient, type PeopleClient } from "@/lib/google/people-client";
 import { GOOGLE_SCOPES } from "@/lib/google/scopes";
 import { startDatabase, ok, section, report } from "./harness.mts";
+import { makePng } from "./png.mts";
 
 const ENV_FILE = path.join(process.cwd(), ".env.e2e");
 
@@ -338,6 +339,97 @@ try {
   await prisma.userSettings.update({
     where: { userId: userB.id }, data: { syncSharedContacts: true },
   });
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§12 Photos reaching Google");
+
+  /** Whether a contact in this account currently has a photo Google will serve. */
+  const photoUrlOf = async (acct: Account, displayName: string): Promise<string | null> => {
+    const people = await acct.people.listConnections(["names", "photos"]);
+    const person = people.find((p) => p.names?.[0]?.displayName === displayName);
+    // Google always reports a default silhouette; only a real upload is not "default".
+    const real = (person?.photos ?? []).find((ph) => ph.default !== true);
+    return real?.url ?? null;
+  };
+
+  const photoTarget = await prisma.person.create({
+    data: {
+      ownerId: userA.id, displayName: "Photo Pam", givenName: "Photo", familyName: "Pam",
+      addToGoogle: true,
+    },
+  });
+  await prisma.share.create({
+    data: { ownerId: userA.id, withUserId: userB.id, personId: photoTarget.id, scope: "PERSON", permission: "EDIT" },
+  });
+
+  const ownerBytes = makePng(16, [10, 120, 220]);
+  await prisma.personPhoto.create({
+    data: {
+      personId: photoTarget.id, userId: userA.id,
+      data: new Uint8Array(ownerBytes), mimeType: "image/png",
+      width: 16, height: 16, etag: "ownerphoto1",
+    },
+  });
+
+  let r = await syncA();
+  ok("12.1 the push reports no errors", r.errors.length === 0, r.errors);
+  ok("12.1b and counts a photo", r.photosPushed >= 1, r.photosPushed);
+  const pamA = await eventually("A's photo", () => photoUrlOf(A, "Photo Pam"), (u) => Boolean(u));
+  ok("12.1c the contact has a real photo in A's Google", Boolean(pamA), pamA);
+
+  await syncB();
+  const pamB = await eventually("B's inherited photo", () => photoUrlOf(B, "Photo Pam"), (u) => Boolean(u));
+  ok("12.2 the owner's photo flows through to a recipient's Google", Boolean(pamB), pamB);
+
+  // An unchanged photo must not be re-uploaded on every run.
+  const quietPhoto = await syncA();
+  ok("12.3 an unchanged photo is not pushed again", quietPhoto.photosPushed === 0, quietPhoto.photosPushed);
+
+  // B's own picture replaces it for B alone.
+  await prisma.personPhoto.create({
+    data: {
+      personId: photoTarget.id, userId: userB.id,
+      data: new Uint8Array(makePng(16, [230, 200, 20])), mimeType: "image/png",
+      width: 16, height: 16, etag: "bphoto1",
+    },
+  });
+  await prisma.personSync.updateMany({
+    where: { personId: photoTarget.id }, data: { googleSyncStatus: "PENDING" },
+  });
+  const rb = await syncB();
+  ok("12.4 a recipient's own photo is pushed to their account", rb.photosPushed >= 1, rb.photosPushed);
+  const bSync = await prisma.personSync.findFirstOrThrow({
+    where: { personId: photoTarget.id, userId: userB.id },
+  });
+  const aSync = await prisma.personSync.findFirstOrThrow({
+    where: { personId: photoTarget.id, userId: userA.id },
+  });
+  ok("12.4b each account records a different photo etag",
+     bSync.googlePhotoEtag === "bphoto1" && aSync.googlePhotoEtag === "ownerphoto1",
+     { a: aSync.googlePhotoEtag, b: bSync.googlePhotoEtag });
+  ok("12.4c and A's Google still has a photo", Boolean(await photoUrlOf(A, "Photo Pam")));
+
+  // Removing a photo removes it from Google rather than leaving a stale one.
+  await prisma.personPhoto.deleteMany({ where: { personId: photoTarget.id, userId: userB.id } });
+  await prisma.personSync.updateMany({
+    where: { personId: photoTarget.id, userId: userB.id }, data: { googleSyncStatus: "PENDING" },
+  });
+  await syncB();
+  const backToOwner = await prisma.personSync.findFirstOrThrow({
+    where: { personId: photoTarget.id, userId: userB.id },
+  });
+  ok("12.5 clearing an override falls back to the owner's photo in Google",
+     backToOwner.googlePhotoEtag === "ownerphoto1", backToOwner.googlePhotoEtag);
+
+  await prisma.personPhoto.deleteMany({ where: { personId: photoTarget.id } });
+  await prisma.personSync.updateMany({
+    where: { personId: photoTarget.id }, data: { googleSyncStatus: "PENDING" },
+  });
+  await syncA();
+  const cleared = await eventually("A's photo to go", () => photoUrlOf(A, "Photo Pam"), (u) => !u);
+  ok("12.6 removing the last photo removes it from Google", !cleared, cleared);
+  ok("12.6b the contact itself survives",
+     (await A.people.listConnections(["names"])).some((p) => p.names?.[0]?.displayName === "Photo Pam"));
 
   // ════════════════════════════════════════════════════════════════════════
   section("§9 Google-dependent regressions, and 6.5 / 7.20");

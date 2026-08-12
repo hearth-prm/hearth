@@ -14,12 +14,12 @@ account, because sign-in is bypassed by inserting a session row directly.
 
     npm run e2e:google
 
-That covers **§3 in full**, plus 6.5, 7.20, 9.3, 9.4 and 9.7 — 43 checks against two
-real Google accounts, driving Hearth's own sync engine and then asking Google what
+That covers **§3 in full**, plus 6.5, 7.20, 9.3, 9.4, 9.7 and photo sync — 54 checks
+against two real Google accounts, driving Hearth's own sync engine and then asking Google what
 happened. It needs `.env.e2e`; see `npm run token`. It is **destructive** to those
 accounts and refuses to run against one holding enough contacts to look real.
 
-Between them, 183 checks. Rows they cover are marked **⚙**. What is left is **§0** —
+Between them, 235 checks. Rows they cover are marked **⚙**. What is left is **§0** —
 whether *your* data survived the upgrade, which nothing can stand in for — and three
 rows needing a mailbox, a container or an hour.
 
@@ -277,7 +277,7 @@ Everything below needs your live install, a mailbox, a container, or an hour.
 | 9.8 | Container restart — needs Docker, which the test environment does not have |
 | 9.9 | An hour of logs |
 
-That is **8 rows** by hand, against 183 automated checks.
+That is **8 rows** by hand, against 235 automated checks.
 
 Run both suites first. If either fails, the manual pass is not worth starting.
 
