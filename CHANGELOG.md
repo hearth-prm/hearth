@@ -25,173 +25,7 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
-### Added
-
-- **Labels for contacts (milestone 5).** Group contacts however you like, then
-  filter by them.
-  - Labels belong to a user rather than the install, because two people's "Family"
-    mean different things. A shared contact carries its **owner's** labels, matching
-    how the owner's field definitions and Google mappings already render it — one
-    record reads the same for everyone who can see it, and an EDIT recipient picks
-    from the owner's list.
-  - Names are unique per owner, case-insensitively: "family" typed after "Family"
-    means the one you already have, and a second Google group of the same name would
-    look like a duplicate on your phone.
-  - Deleting a label in use is allowed. Refusing until it is cleared off every
-    contact would make a 200-contact label undeletable in practice; the contacts
-    themselves are untouched.
-
-- **Labels become labels in Google Contacts.** Google contact groups are
-  per-account resources, so one Hearth label becomes one group in *each* Google
-  account the contact reaches — the same fan-out `PersonSync` does for the contacts
-  themselves, which is why `LabelGroup` is keyed on (label, account).
-  - Membership is changed through `contactGroups.members.modify`, not by writing
-    `memberships` on the contact. A person update replaces the membership list
-    wholesale, which would drop the contact out of My Contacts and out of any group
-    made by hand in Google. Hearth only ever touches groups it created.
-  - Reconciled once per sync run, batched to one call per group rather than per
-    contact, and after the contacts — a contact has to exist before it can join a
-    group. A group failure is reported but never fails the contact push that already
-    succeeded.
-  - An existing Google label of the same name is **adopted** rather than duplicated,
-    which is also what makes this safe to re-run after a database restore.
-  - Deleting a Hearth label deletes its Google groups, through a tombstone recorded
-    before the rows cascade away. Without it the label survived on every phone it
-    had reached, with no handle left to remove it by.
-
-- **Contact filtering.** Beyond search: by label (any or all), by who can see it
-  (mine, private, shared by me, shared with me), by Google state, and by whether
-  there is an email or phone.
-  - Every control is a link carrying the whole filter state, so filters compose
-    without client-side coordination, Back undoes one at a time, and a filtered list
-    is a URL worth keeping. A label chip anywhere in the app links straight to its
-    members.
-  - "Shared by me" has to consider blanket grants as well as per-record shares,
-    since a blanket grant is deliberately not recorded per record.
-  - Every clause is ANDed with the access filter: filters narrow, access decides.
-
-- **CSV export of contacts**, including labels, per-record shares, blanket-share
-  recipients, contact details and your own custom fields. Follows the current
-  filters, so exporting one label needs no separate selection UI — filter the list,
-  then export what you are looking at.
-
-- **CSV import of contacts**, with a preview before anything is written.
-  - Preview and apply call the **same planner**; the apply step only executes what
-    it produced. A separate "what would happen" implementation drifts from the real
-    one, and the screen that says "3 updates" is exactly where that must not happen.
-    Applying re-plans rather than trusting the browser's copy, which also re-checks
-    access — the gap between preview and confirmation is long enough for a share to
-    be revoked.
-  - Rows match on `Hearth ID` first, then on the first email **among your own
-    contacts only**. An id is an explicit instruction; an email is a guess, and a
-    guess should not reach into someone else's record even where sharing would
-    permit the write.
-  - **Sharing grants only.** A recipient the file omits never loses access, matching
-    the user picker — a spreadsheet round-trip that silently revoked your wife's
-    access is exactly the destructive slip that decision guarded against.
-  - A column the file omits is left alone, so a narrow CSV cannot blank out fields
-    it never mentions. Two rows pointing at one contact: the second is skipped rather
-    than silently overwriting the first.
-  - Labels and custom fields are refused on a contact shared with you, since both
-    are keyed by the owner's definitions.
-  - Values validate through the **same schemas as the edit form**, so a file cannot
-    store what the UI would reject. Ambiguous dates like `03/04/1990` are reported
-    rather than guessed at — a wrong guess silently misdates a birthday.
-  - Rows apply one at a time rather than in one transaction: a failure on row 2,999
-    must not discard 2,998 good ones, and the report says what landed.
-
-### Fixed
-
-- **Re-importing an export duplicated every contact shared with you.** A row carrying
-  a `Hearth ID` is a request to update *that* record, but when the record existed and
-  the importer had no write access the planner fell through to creating a new
-  contact — so exporting everything and importing it back produced a second copy of
-  each shared contact. Such rows are now **skipped** with a plain reason. An id
-  Hearth has never seen still creates, which keeps a stale-id restore working; the
-  two cases are told apart by asking whether the record exists at all, selecting
-  nothing but its id.
-
-- **A multi-line note gained carriage returns on every import.** Browsers rewrite bare
-  LFs to CRLF when uploading a file as multipart form data, so a notes field exported
-  by Hearth came back with line endings it never had, and re-importing an untouched
-  export was a change rather than a no-op. Cells are now normalised to LF on read,
-  which is also what the textarea that edits them produces — one representation
-  rather than three. Hearth's own CSV parser was never at fault, which is why only a
-  test driving a real browser could find this.
-
-- **A view-only recipient was shown controls they could not use.** Both detail pages
-  gated on ownership alone, so someone with a VIEW share saw Edit, the relationship
-  add and remove controls, the label editor, and on an event the add-attendee, RSVP
-  and remove-attendee controls. The server actions always refused — nothing was ever
-  writable and no data was exposed — but the UI led people into an error page.
-  - The pages now ask `canWritePerson` / `canWriteEvent`, which are thin boolean
-    wrappers over the same `writable*Where` predicate the action guards use. A page
-    cannot offer a control the action behind it will reject, because both read the
-    rule from one place.
-  - Found by the new end-to-end suite on its first full run.
-
-### Added
-
-- **An end-to-end test suite** (`npm run e2e`): 140 checks against a real Postgres 16
-  matching production, the real built app, and a real browser driving it. Sign-in is bypassed
-  by inserting a session row and its cookie, which is what a real Google sign-in
-  would have produced — everything the suite tests sits downstream of authentication,
-  and driving Google's consent screen would mean holding someone's password. Covers
-  §1, §2, §4–§8 and the non-Google half of §9 of `docs/verify-0.5.0.md`, leaving 28
-  rows that genuinely need a live install or a Google account.
-
-- **A second suite for the Google half** (`npm run e2e:google`): 43 checks against two
-  throwaway Google accounts, driving the real sync engine and then asking Google what
-  happened. Covers §3 in full plus 6.5, 7.20, 9.3, 9.4 and 9.7, leaving 8 rows that
-  need the user's own install, a mailbox, a container or an hour.
-  - Destructive by design — it empties both accounts so each run starts from a known
-    state — so it refuses outright against an account holding enough contacts or labels
-    to look like a real address book. The cost of getting that wrong is somebody's
-    contacts.
-  - It also refuses if both tokens resolve to the same account. Every §3 assertion is
-    of the form "A has X and B separately has its own X", so one account twice would
-    pass while proving nothing.
-  - Confirms the contact-group design against the real API: a labelled contact stays in
-    My Contacts, a group created by hand in Google survives a sync, and deleting a
-    Hearth label removes the group while keeping its contacts. Those three were the
-    stop conditions, and they were assumptions until now.
-
-  The suites have their own `tsconfig.json` rather than joining the app's: pulling
-  playwright-core and the Postgres driver into the Next build's TS program exhausted
-  the build worker's heap. `npm run typecheck` runs both.
-
-### Changed
-
-- Sharing now picks recipients from a **multi-select list of the install's users**
-  rather than asking for a typed email address. Sharing can only ever target someone
-  who has already signed in, so asking for an address invited typos and
-  non-existent recipients to describe a set that was always enumerable — and
-  granting the same thing to two people is one intention, not two visits to the form.
-  Ticking grants or updates access; unticking does not revoke, so an accidental
-  untick cannot silently withdraw it. Ids are still re-checked server-side, since a
-  form submission is not a trustworthy source of "this user exists and is not me".
-
-### Fixed
-
-- **A shared contact never reached the other person's Google Contacts.** Sync
-  scoped to records you own, on the reasoning that someone else's contact was not
-  yours to publish — which is the opposite of what sharing a contact is for. One
-  Hearth record should mean a copy in every shared address book, with an edit by any
-  of them updating all of them.
-  - Per-account sync state moved off the `Person` row into a new `PersonSync` table,
-    one row per (contact, Google account). The old shape permitted exactly one
-    resource id — the owner's — so sharing was structurally invisible to Google.
-    Existing links are migrated, so nothing re-adopts or duplicates.
-  - Copies succeed and fail independently, each with its own etag, error and backoff.
-  - Custom fields render through the **owner's** registry and mappings, so one Hearth
-    record looks the same in every account rather than being reinterpreted per viewer.
-  - Withdrawing a share removes the contact from that account's Google and no other;
-    deleting it removes every copy. Recipients can decline the whole behaviour with
-    *Push contacts shared with me*.
-- **An edit to a shared record was parsed with the editor's field registry.** Custom
-  values are keyed by the owner's field definitions, so a shared editor's save wrote
-  foreign keys into the owner's record. Both edit actions now load the owner's
-  registry, matching what the detail pages already did.
+## [0.4.0] — 2026-08-12
 
 ### Added
 
@@ -238,6 +72,51 @@ that formally marks its milestone.
     changes what the Google copy should look like without touching any record.
   - Upgrading carries the old switch forward: anyone who had it on gets a
     `userDefined` mapping per custom contact field.
+
+### Changed
+
+- Sharing now picks recipients from a **multi-select list of the install's users**
+  rather than asking for a typed email address. Sharing can only ever target someone
+  who has already signed in, so asking for an address invited typos and
+  non-existent recipients to describe a set that was always enumerable — and
+  granting the same thing to two people is one intention, not two visits to the form.
+  Ticking grants or updates access; unticking does not revoke, so an accidental
+  untick cannot silently withdraw it. Ids are still re-checked server-side, since a
+  form submission is not a trustworthy source of "this user exists and is not me".
+
+### Fixed
+
+- **A view-only recipient was shown controls they could not use.** Both detail pages
+  gated on ownership alone, so someone with a VIEW share saw Edit, the relationship
+  add and remove controls, the label editor, and on an event the add-attendee, RSVP
+  and remove-attendee controls. The server actions always refused — nothing was ever
+  writable and no data was exposed — but the UI led people into an error page.
+  - The pages now ask `canWritePerson` / `canWriteEvent`, which are thin boolean
+    wrappers over the same `writable*Where` predicate the action guards use. A page
+    cannot offer a control the action behind it will reject, because both read the
+    rule from one place.
+  - Found by the new end-to-end suite on its first full run.
+
+- **A shared contact never reached the other person's Google Contacts.** Sync
+  scoped to records you own, on the reasoning that someone else's contact was not
+  yours to publish — which is the opposite of what sharing a contact is for. One
+  Hearth record should mean a copy in every shared address book, with an edit by any
+  of them updating all of them.
+  - Per-account sync state moved off the `Person` row into a new `PersonSync` table,
+    one row per (contact, Google account). The old shape permitted exactly one
+    resource id — the owner's — so sharing was structurally invisible to Google.
+    Existing links are migrated, so nothing re-adopts or duplicates.
+  - Copies succeed and fail independently, each with its own etag, error and backoff.
+  - Custom fields render through the **owner's** registry and mappings, so one Hearth
+    record looks the same in every account rather than being reinterpreted per viewer.
+  - Withdrawing a share removes the contact from that account's Google and no other;
+    deleting it removes every copy. Recipients can decline the whole behaviour with
+    *Push contacts shared with me*.
+
+- **An edit to a shared record was parsed with the editor's field registry.** Custom
+  values are keyed by the owner's field definitions, so a shared editor's save wrote
+  foreign keys into the owner's record. Both edit actions now load the owner's
+  registry, matching what the detail pages already did.
 
 ## [0.3.0] — 2026-08-10
 
@@ -545,7 +424,8 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.3.0...main
+[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.4.0...main
+[0.4.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.4.0
 [0.3.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.3.0
 [0.2.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.1
 [0.2.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.0
