@@ -20,7 +20,7 @@
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { GOOGLE_SCOPES } from "../../src/lib/google/scopes.ts";
+import { GOOGLE_SCOPES, missingScopes } from "../../src/lib/google/scopes.ts";
 
 const ENV_FILE = path.join(process.cwd(), ".env.e2e");
 const PORT = 8765;
@@ -161,9 +161,11 @@ https://myaccount.google.com/permissions for account ${slot}, then run this agai
 }
 
 // Check the grant before declaring success: a token missing the contacts scope would
-// fail deep inside a sync run with a confusing error rather than here.
+// fail deep inside a sync run with a confusing error rather than here. Compared
+// through missingScopes, because Google returns `email` and `profile` expanded to
+// their userinfo.* URLs and a plain string compare calls them missing.
 const granted = new Set((body.scope ?? "").split(/\s+/).filter(Boolean));
-const missing = GOOGLE_SCOPES.filter((s) => !granted.has(s));
+const missing = missingScopes(body.scope, GOOGLE_SCOPES);
 
 setEnvValue(`E2E_REFRESH_TOKEN_${slot}`, body.refresh_token);
 
