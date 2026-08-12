@@ -77,22 +77,28 @@ export function PageHeader({
   title,
   description,
   action,
+  icon,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
+  /** Rendered to the left of the title — a contact's photo, for instance. */
+  icon?: ReactNode;
 }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-          {title}
-        </h1>
-        {description ? (
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            {description}
-          </p>
-        ) : null}
+      <div className="flex items-center gap-3">
+        {icon}
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
+            {title}
+          </h1>
+          {description ? (
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              {description}
+            </p>
+          ) : null}
+        </div>
       </div>
       {action}
     </div>

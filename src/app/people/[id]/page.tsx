@@ -26,9 +26,15 @@ import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
+import { Avatar } from "@/components/avatar";
+import { PhotoForm } from "@/components/photo-form";
+import { effectivePhotoFor } from "@/lib/photos-db";
+import { clearPersonPhoto, setPersonPhoto } from "@/lib/actions/photos";
 import { PersonLabelsForm } from "@/components/label-forms";
 import { setPersonLabels } from "@/lib/actions/labels";
 import { shareRecord } from "@/lib/actions/shares";
+import { TransferForm } from "@/components/transfer-form";
+import { transferOwnership } from "@/lib/actions/transfer";
 import { listOtherUsers } from "@/lib/users";
 
 export default async function PersonPage({
@@ -99,11 +105,29 @@ export default async function PersonPage({
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
+  // Photos are the one field that is per viewer: the owner's is the default and reaches
+  // everyone, but anyone who can see the contact may set their own instead.
+  const [photo, photoRows] = await Promise.all([
+    effectivePhotoFor(person.id, user.id, person.ownerId),
+    prisma.personPhoto.findMany({
+      where: { personId: person.id, userId: { in: [user.id, person.ownerId] } },
+      select: { userId: true },
+    }),
+  ]);
+  const hasOwnPhoto = photoRows.some((r) => r.userId === user.id);
+  const ownerHasPhoto = photoRows.some((r) => r.userId === person.ownerId);
+
   // Only render fields that actually hold something — a detail page listing 20
   // empty rows is worse than one showing the six facts you recorded.
   const populated = defs
     .map((def) => ({ def, value: readFieldValue(person, def) }))
     .filter(({ def, value }) => formatFieldValue(def, value).length > 0 && def.key !== "notes");
+
+  // Named in the transfer warning: only custom fields, and only ones with a value,
+  // since those are what a new owner's registry may not be able to read.
+  const populatedCustomNames = populated
+    .filter(({ def }) => !def.core)
+    .map(({ def }) => def.label);
 
   const notesDef = defs.find((d) => d.key === "notes");
   const notes = notesDef ? formatFieldValue(notesDef, person.notes) : "";
@@ -112,6 +136,14 @@ export default async function PersonPage({
     <div>
       <PageHeader
         title={person.displayName}
+        icon={
+          <Avatar
+            personId={person.id}
+            name={person.displayName}
+            photo={photo}
+            size="md"
+          />
+        }
         description={
           [person.jobTitle, person.organization].filter(Boolean).join(" · ") ||
           undefined
@@ -311,6 +343,31 @@ export default async function PersonPage({
 
           <Card>
             <CardHeader
+              title="Photo"
+              description={isOwner ? undefined : "Yours alone, if you set one."}
+            />
+            <div className="flex flex-wrap items-center gap-4 px-5 py-4">
+              <Avatar
+                personId={person.id}
+                name={person.displayName}
+                photo={photo}
+                size="lg"
+              />
+              <div className="min-w-48 flex-1">
+                <PhotoForm
+                  action={setPersonPhoto}
+                  clear={clearPersonPhoto}
+                  personId={person.id}
+                  hasOwn={hasOwnPhoto}
+                  isOwner={isOwner}
+                  ownerHasPhoto={ownerHasPhoto}
+                />
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
               title="Labels"
               description={
                 isOwner
@@ -395,7 +452,23 @@ export default async function PersonPage({
                   {otherSyncs.map((g) => g.user.email).join(", ")}
                 </DetailRow>
               ) : null}
+              <DetailRow label="Owner">
+                {isOwner ? "You" : (person.owner.name ?? person.owner.email)}
+              </DetailRow>
             </dl>
+            {isOwner ? (
+              <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
+                <TransferForm
+                  action={transferOwnership}
+                  personId={person.id}
+                  personName={person.displayName}
+                  users={shareableUsers}
+                  labelCount={person.labels.length}
+                  customFieldNames={populatedCustomNames}
+                  sharedWithCount={myShares.length}
+                />
+              </div>
+            ) : null}
           </Card>
         </div>
       </div>

@@ -50,6 +50,7 @@ model User {
   personSyncs       PersonSync[]
   labels            Label[]
   labelGroups       LabelGroup[]
+  personPhotos      PersonPhoto[]
 }
 
 model Account {
@@ -314,6 +315,7 @@ model Person {
   shares            Share[]
   googleSyncs       PersonSync[]
   labels            PersonLabel[]
+  photos            PersonPhoto[]
 
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
@@ -338,6 +340,10 @@ model PersonSync {
   googleEtag              String?
   googleSyncedAt          DateTime?
   googleSyncStatus        SyncStatus @default(PENDING)
+  /// etag of the photo last pushed to THIS account, or null if none has been.
+  /// Photos go through a separate People API call from the field update, so a
+  /// separate record of what was sent is what stops every sync re-uploading them.
+  googlePhotoEtag         String?
   googleSyncError         String?    @db.Text
   /// Consecutive failed pushes for THIS account, driving its own backoff.
   googleSyncAttempts      Int        @default(0)
@@ -589,6 +595,52 @@ model Share {
   @@index([ownerId])
   @@index([personId])
   @@index([eventId])
+}
+
+// ---------------------------------------------------------------------------
+// Photos
+// ---------------------------------------------------------------------------
+
+/// A contact's picture.
+///
+/// Deliberately the one piece of contact data that is NOT uniform across viewers. The
+/// owner's photo is the default and flows through to everyone the contact is shared
+/// with, but a recipient may set their own instead: a photo is how you recognise
+/// somebody, and the picture that does that job is personal in a way a job title is
+/// not. Every other field follows the owner precisely because one record should read
+/// the same to everyone — see the labels and field-registry rules, which this breaks
+/// on purpose.
+///
+/// One row per (contact, user). The owner's row is the one whose userId matches the
+/// contact's ownerId; a row for anyone else is that person's override.
+///
+/// Bytes live in Postgres rather than on disk so that the verified pg_dump
+/// update-hearth.sh already takes before every update carries them too. A separate
+/// upload directory would need its own backup story, and the one that gets forgotten
+/// is the one that matters.
+model PersonPhoto {
+  id       String @id @default(cuid())
+  personId String
+  /// Whose view of the contact this photo is. Equals the owner for the default.
+  userId   String
+
+  /// Image bytes, already resized and re-encoded on upload.
+  data      Bytes
+  mimeType  String
+  /// Longest edge in pixels, after resizing. Kept for the img sizing hints.
+  width     Int
+  height    Int
+  /// Cache-busting token for the photo URL; changes whenever the bytes do.
+  etag      String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, userId])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------

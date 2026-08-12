@@ -56,6 +56,21 @@ export interface PeopleClient {
 
   createContactGroup(name: string): Promise<GoogleContactGroup>;
 
+  // --- photos ---------------------------------------------------------------
+  //
+  // A separate endpoint from updateContact: `photos` is read-only on a person, so a
+  // picture cannot ride along with the field update the way names and phones do.
+
+  /** Replace a contact's photo. Returns the etag the contact now carries. */
+  updateContactPhoto(args: {
+    resourceName: string;
+    /** Raw image bytes; the client base64-encodes them. */
+    data: Uint8Array;
+  }): Promise<{ etag: string | null }>;
+
+  /** Remove the photo Hearth put there. */
+  deleteContactPhoto(resourceName: string): Promise<void>;
+
   /** Remove a group. The contacts in it are not deleted, only ungrouped. */
   deleteContactGroup(resourceName: string): Promise<void>;
 
@@ -195,6 +210,24 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
         throw new Error("Google created the group but returned no resourceName");
       }
       return { resourceName, name: res.data.name ?? name, etag: res.data.etag ?? null };
+    },
+
+    async updateContactPhoto({ resourceName, data }) {
+      const res = await people.people.updateContactPhoto({
+        resourceName,
+        requestBody: { photoBytes: Buffer.from(data).toString("base64") },
+      });
+      return { etag: res.data.person?.etag ?? null };
+    },
+
+    async deleteContactPhoto(resourceName) {
+      try {
+        await people.people.deleteContactPhoto({ resourceName });
+      } catch (err) {
+        // Nothing to remove is the goal state, not a failure.
+        if ((err as { code?: number }).code === 404) return;
+        throw err;
+      }
     },
 
     async deleteContactGroup(resourceName) {

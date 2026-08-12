@@ -12,13 +12,13 @@ you opt into, is pulling event RSVPs from calendar guests.)
 
 ## Status
 
-**v0.3.0 — milestones 1–3 complete and confirmed working against a real Google
-account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
+**v0.5.0 — milestones 1–5 complete and confirmed working against real Google
+accounts.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
 [Versioning](#versioning) for what a minor version asserts.
 
 | | Feature | State |
 |---|---|---|
-| ✅ | Add people, with contact details | Done |
+| ✅ | Add people, with contact details and photos | Done |
 | ✅ | Link people by typed relationship | Done |
 | ✅ | Add events | Done |
 | ✅ | Put people at events, with roles and RSVPs | Done |
@@ -28,11 +28,19 @@ account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
 | ✅ | Deletion/opt-out removes the Google copy | Done |
 | ✅ | One-way contacts push to Google | Done |
 | ✅ | Calendar push + attendee invites + RSVP writeback | Done |
-| ⏳ | Field ↔ Google field mapping settings page | M4 |
-| ⏳ | Sharing contacts and events between users | M4 |
+| ✅ | Field ↔ Google field mapping settings | Done |
+| ✅ | Sharing contacts and events between users | Done |
+| ✅ | Labels, reaching Google Contacts as labels | Done |
+| ✅ | CSV import and export, and richer filtering | Done |
+| ✅ | Transferring a contact to another user | Done |
 
-All four milestones are built. Contacts and events sync, every field chooses where
-it lands in Google, and records can be shared with other users on the same install.
+Every original requirement is built and verified. Contacts, events, labels and photos
+sync to Google; each field chooses where it lands; records can be shared with, or handed
+over to, other users on the same install.
+
+Verification is largely automated: `npm run e2e` drives a real browser against the
+built app, and `npm run e2e:google` runs the Google-facing half against throwaway
+accounts. See [docs/](docs/) for the checklists and what is left to do by hand.
 
 ---
 
@@ -561,6 +569,47 @@ so a narrow CSV cannot blank out fields it never mentions.
 Sharing in an import **grants only** — a recipient the file omits never loses access.
 Import never deletes a contact.
 
+## Photos
+
+Each contact can have a picture, shown on their page and beside every row in the list.
+Initials stand in when there is none.
+
+The **owner's photo is the default** and reaches everyone the contact is shared with —
+but a recipient can set their own instead. That is the one place Hearth deliberately
+lets one record look different to two people: a photo answers *is this the person I
+mean?*, and the answer can honestly differ. You might have a picture of someone from a
+work event while your wife has one from her sister's wedding; neither is wrong, and
+Google gets whichever one belongs to that account.
+
+Anyone who can see a contact may set their own photo, whether or not they can edit it.
+Doing so changes nothing for anybody else. Clearing it hands you back the owner's.
+
+Pictures are resized to 512px in your browser before being uploaded, which also strips
+EXIF metadata such as where the photo was taken. They are stored in Postgres, so the
+backup `update-hearth.sh` already takes before every update includes them.
+
+Your own Google profile picture appears in the header.
+
+## Transferring a contact
+
+From a contact's page, under **Record**, an owner can hand it to another user of the
+install. Ownership is not a label: it decides which field definitions read the record,
+whose labels apply to it, and who may delete or share it.
+
+You choose what you keep — nothing, view, or view and edit. **Choosing nothing is what
+takes the contact out of your Google Contacts**; keeping access necessarily keeps it
+there, since you can still read it.
+
+| | |
+|---|---|
+| **Shares you granted** | Move with the record — nobody already sharing it loses access |
+| **Your labels on it** | Removed. A label is your own filing system, not theirs |
+| **Custom field values** | Kept, but hidden unless the new owner has a field of the same name. Transferring back restores them |
+| **Who can transfer** | The owner alone. An edit share is help maintaining a contact, not a say in who owns it |
+
+The confirmation lists whichever of these apply before you commit. The new owner is not
+notified.
+
 ## Sharing
 
 Anyone else signed in to the same install can be given access to your records, from
@@ -790,6 +839,7 @@ User ─┬─ UserSettings          sync toggles, target calendar, default time
       ├─ Person ─┬─ ContactPoint      repeatable emails/phones/addresses/links
       │          ├─ custom JSONB      user-defined field values
       │          ├─ PersonLabel ── Label      which labels are on this contact
+      │          ├─ PersonPhoto          ONE ROW PER VIEWER — the owner's is the default
       │          ├─ PersonSync           ONE ROW PER GOOGLE ACCOUNT holding a copy
       │          └─ addToGoogle          the owner's decision that it belongs there
       ├─ Event ──┬─ EventAttendee     role + RSVP + per-person invite flag
@@ -802,6 +852,12 @@ User ─┬─ UserSettings          sync toggles, target calendar, default time
       ├─ Share                 per-record or blanket, VIEW or EDIT
       └─ SyncTombstone         Google resources awaiting deletion
 ```
+
+`PersonPhoto` is the one table keyed on the *viewer* rather than the owner, and the one
+deliberate exception to "a shared record reads the same to everyone": the owner's photo
+is the default, but a recipient may set their own. Everything else — labels, custom
+fields, mappings — follows the owner, because those describe the record while a photo
+serves the person looking at it.
 
 The two "one row per Google account" tables are the shape sharing forces. A contact
 shared with three people needs four copies in Google, each with its own resource id,

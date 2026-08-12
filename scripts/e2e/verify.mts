@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Page } from "playwright-core";
 import { start, ok, section, report } from "./harness.mts";
+import { makePng } from "./png.mts";
 
 const scratch = mkdtempSync(path.join(tmpdir(), "hearth-e2e-files-"));
 
@@ -25,6 +26,23 @@ async function statusText(page: Page): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * Wait for a specific confirmation before asserting on the database.
+ *
+ * statusText gives up after five seconds and returns "", which lets an assertion run
+ * against state the action has not finished writing — a flake that looks exactly like a
+ * behaviour change. When a test depends on the write having landed, it has to wait for
+ * the message that says so.
+ */
+async function waitForStatus(page: Page, contains: string): Promise<string> {
+  await page.waitForFunction(
+    (text) => document.querySelector('[role="status"]')?.textContent?.includes(text) === true,
+    contains,
+    { timeout: 30_000 },
+  );
+  return (await page.textContent('[role="status"]')) ?? "";
 }
 
 const h = await start();
@@ -143,7 +161,7 @@ try {
   await A.page.check(`#pl-${sam.id}-${family.id}`);
   await A.page.check(`#pl-${sam.id}-${vipLabel.id}`);
   await A.page.click('button:has-text("Save labels")');
-  await statusText(A.page);
+  await waitForStatus(A.page, "Labels saved");
   let applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
   ok("2.2 both labels are applied", applied.length === 2, applied.length);
 
@@ -166,7 +184,7 @@ try {
   await A.page.click('button:has-text("Change labels")');
   await A.page.uncheck(`#pl-${sam.id}-${vipLabel.id}`);
   await A.page.click('button:has-text("Save labels")');
-  await statusText(A.page);
+  await waitForStatus(A.page, "Labels saved");
   applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
   ok("2.5 unticking a label DOES remove it", applied.length === 1 && applied[0]!.labelId === family.id, applied);
 
@@ -185,9 +203,10 @@ try {
   await B.page.click('button:has-text("Change labels")');
   await B.page.check(`#pl-${sam.id}-${vipLabel.id}`);
   await B.page.click('button:has-text("Save labels")');
-  await statusText(B.page);
+  await waitForStatus(B.page, "Labels saved");
   applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
-  ok("2.7 B can apply one of A's labels", applied.length === 2, applied.length);
+  ok("2.7 B can apply one of A's labels", applied.length === 2,
+     applied.map((a) => a.labelId));
 
   await B.page.goto("/settings/labels");
   // Asserted against the label rows, not the whole page: the page's prose and the
@@ -330,23 +349,69 @@ try {
 
   ok("4.13 filters compose", (await rows(`?rel=mine&label=${family.id}&has=phone`)).length === 1);
 
-  // Back must undo one filter, not all of them.
+  // The filter controls live behind a menu now, so each one needs it opened first.
+  // A native <details>, so this needs no hydration wait. Idempotent because the menu
+  // survives a filter click: Next's soft navigation keeps the same <details> node, and
+  // React does not control its `open` property, so it stays open while you pick
+  // several filters. Clicking blindly would toggle it shut.
+  const openMenu = async () => {
+    if (await A.page.isVisible("text=Who")) return;
+    await A.page.click('summary:has-text("Filter")');
+    await A.page.waitForSelector("text=Who", { timeout: 10_000 });
+  };
+
   await A.page.goto("/people");
-  await A.page.click(`a:has-text("Mine")`);
-  await A.page.waitForURL(/rel=mine/, { timeout: 15_000 });
-  await A.page.click(`a:has-text("Has an email")`);
+  // Hidden, not absent: <details> keeps its content in the DOM when closed, which is
+  // what lets it work before hydration and be found by the browser's find-in-page.
+  ok("4.14 the filter controls are hidden until asked for",
+     !(await A.page.isVisible('a:has-text("Mine, not shared")')));
+  await openMenu();
+  const menuText = (await A.page.textContent("body")) ?? "";
+  ok("4.14a the menu offers every group",
+     ["Who", "Google", "Details", "Labels"].every((g) => menuText.includes(g)),
+     ["Who", "Google", "Details", "Labels"].filter((g) => !menuText.includes(g)));
+
+  await A.page.click('a:has-text("Mine, not shared")');
+  await A.page.waitForURL(/rel=private/, { timeout: 15_000 });
+  ok("4.14a2 the menu stays open so several filters can be picked in a row",
+     await A.page.isVisible("text=Who"));
+  await openMenu();
+  await A.page.click('a:has-text("Has an email")');
   await A.page.waitForURL(/has=email/, { timeout: 15_000 });
-  ok("4.14 two filters both present", A.page.url().includes("rel=mine") && A.page.url().includes("has=email"));
+  ok("4.14b two filters both present",
+     A.page.url().includes("rel=private") && A.page.url().includes("has=email"), A.page.url());
   await A.page.goBack();
-  ok("4.14b Back removes only the last one",
-     A.page.url().includes("rel=mine") && !A.page.url().includes("has=email"), A.page.url());
+  ok("4.14c Back removes only the last one",
+     A.page.url().includes("rel=private") && !A.page.url().includes("has=email"), A.page.url());
+
+  // Chips: the selected filters show inside the search control and are removable.
+  await A.page.goto(`/people?q=Sam&rel=mine&label=${family.id}`);
+  const chipText = (await A.page.textContent('form[role="search"]')) ?? "";
+  ok("4.14d active filters appear as chips in the search box",
+     chipText.includes("Sam") && chipText.includes("Mine") && chipText.includes("Family"), chipText);
+  ok("4.14e the Filter control shows how many are active",
+     (await A.page.textContent('summary:has-text("Filter")'))?.includes("3") === true,
+     await A.page.textContent('summary:has-text("Filter")'));
+
+  await A.page.click(`form[role="search"] a[title="Remove filter: Family"]`);
+  await A.page.waitForURL((u) => !u.searchParams.has("label"), { timeout: 15_000 });
+  ok("4.14f a chip's × removes just that filter",
+     A.page.url().includes("q=Sam") && A.page.url().includes("rel=mine") &&
+     !A.page.url().includes("label="), A.page.url());
+
+  await A.page.click(`form[role="search"] a[title*="Remove filter"]`);
+  await A.page.waitForURL(/people/, { timeout: 15_000 });
+  ok("4.14g chips can be removed down to none",
+     (await A.page.$$('form[role="search"] a[title*="Remove filter"]')).length <= 2);
 
   ok("4.15 a filter URL is portable", (await rows(`?label=${family.id}`)).length === 2);
 
   await A.page.goto(`/people?label=${family.id}&rel=mine`);
-  await A.page.click('a:has-text("clear filters")');
+  await openMenu();
+  await A.page.click('a:has-text("Clear all filters")');
   await A.page.waitForURL((u) => !u.search, { timeout: 15_000 });
-  ok("4.16 clear filters returns everything", (await A.page.$$eval("tbody tr", (e) => e.length)) === 4);
+  ok("4.16 clear all filters returns everything",
+     (await A.page.$$eval("tbody tr", (e) => e.length)) === 4);
 
   await A.page.goto(`?label=${bookClub.id}`.replace(/^/, "/people"));
   ok("4.17 an empty result explains itself",
@@ -831,6 +896,198 @@ try {
      settingsText.includes("Contact sync") && settingsText.includes("Calendar sync"));
   ok("9.6c the shared-contacts toggle is present",
      settingsText.includes("Also push contacts shared with me"));
+
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§10 Contact photos");
+
+  // Generated rather than copied: the browser has to decode it, so a header that merely
+  // parses is not enough.
+  const pngPath = path.join(scratch, "dot.png");
+  writeFileSync(pngPath, makePng());
+
+  const uploadPhoto = async (page: Page, personId: string) => {
+    await page.goto(`/people/${personId}`);
+    await page.setInputFiles('input[type="file"][accept="image/*"]', pngPath);
+    await page.waitForFunction(
+      () => document.body.textContent?.includes("Photo saved") === true,
+      undefined, { timeout: 30_000 },
+    );
+  };
+
+  // sam is A's, shared with B (VIEW at this point in the run).
+  await prisma.share.updateMany({
+    where: { personId: sam.id, withUserId: B.id }, data: { permission: "EDIT" },
+  });
+
+  await uploadPhoto(A.page, sam.id);
+  const ownerPhoto = await prisma.personPhoto.findFirst({
+    where: { personId: sam.id, userId: A.id },
+  });
+  ok("10.1 the owner's photo is stored", Boolean(ownerPhoto), Boolean(ownerPhoto));
+  ok("10.1b re-encoded to JPEG by the browser before upload",
+     ownerPhoto?.mimeType === "image/jpeg", ownerPhoto?.mimeType);
+  ok("10.1c with dimensions recorded",
+     (ownerPhoto?.width ?? 0) > 0 && (ownerPhoto?.height ?? 0) > 0,
+     { w: ownerPhoto?.width, h: ownerPhoto?.height });
+
+  const photoRes = await A.context.request.get(
+     `${h.baseUrl}/api/people/${sam.id}/photo?v=${ownerPhoto!.etag}`);
+  ok("10.2 the photo route serves it", photoRes.ok(), photoRes.status());
+  ok("10.2b as an image", (photoRes.headers()["content-type"] ?? "").startsWith("image/"),
+     photoRes.headers()["content-type"]);
+  ok("10.2c privately cached — the same URL differs per viewer",
+     (photoRes.headers()["cache-control"] ?? "").includes("private"),
+     photoRes.headers()["cache-control"]);
+
+  const notModified = await A.context.request.get(
+    `${h.baseUrl}/api/people/${sam.id}/photo`,
+    { headers: { "if-none-match": `"${ownerPhoto!.etag}"` } });
+  ok("10.2d and answers a matching etag with 304", notModified.status() === 304, notModified.status());
+
+  // B inherits A's photo until they choose their own.
+  await B.page.goto(`/people/${sam.id}`);
+  ok("10.3 a recipient sees the owner's photo",
+     (await B.page.textContent("body"))?.includes("You are seeing the owner’s photo") === true);
+
+  await uploadPhoto(B.page, sam.id);
+  const bPhoto = await prisma.personPhoto.findFirst({ where: { personId: sam.id, userId: B.id } });
+  ok("10.4 a recipient can set their own", Boolean(bPhoto));
+  ok("10.4b which is a separate row from the owner's",
+     Boolean(ownerPhoto) && Boolean(bPhoto) && ownerPhoto!.id !== bPhoto!.id);
+  ok("10.4c the owner's photo is unchanged",
+     (await prisma.personPhoto.findFirst({ where: { personId: sam.id, userId: A.id } }))?.etag
+       === ownerPhoto!.etag);
+
+  await B.page.goto(`/people/${sam.id}`);
+  ok("10.4d and B is told it is their own",
+     (await B.page.textContent("body"))?.includes("This is your own picture") === true);
+
+  // Clearing an override hands the recipient back the owner's picture.
+  await B.page.click('button:has-text("Use the owner’s photo")');
+  await B.page.waitForFunction(
+    () => document.body.textContent?.includes("You are seeing the owner’s photo") === true,
+    undefined, { timeout: 20_000 },
+  ).catch(() => {});
+  ok("10.5 clearing an override falls back to the owner's",
+     (await prisma.personPhoto.count({ where: { personId: sam.id, userId: B.id } })) === 0);
+
+  // Access: the URL is the contact's own id, so the route is the only gate.
+  const anon = await A.context.browser()!.newContext({ baseURL: h.baseUrl });
+  const anonRes = await anon.request.get(`${h.baseUrl}/api/people/${sam.id}/photo`);
+  ok("10.6 the photo route refuses an unauthenticated request",
+     anonRes.status() === 401, anonRes.status());
+  await anon.close();
+
+  const secret = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Private Pat", givenName: "Private", familyName: "Pat" },
+  });
+  const forbidden = await A.context.request.get(`${h.baseUrl}/api/people/${secret.id}/photo`);
+  ok("10.6b and a contact you cannot read", forbidden.status() === 404, forbidden.status());
+
+  ok("10.7 an avatar appears in the contact list",
+     (await (async () => {
+       await A.page.goto("/people");
+       return (await A.page.$$(`tbody img[src*="/photo?v="]`)).length;
+     })()) >= 1);
+
+  ok("10.8 the header shows the signed-in user's own avatar",
+     (await A.page.$$('header img, header span[aria-hidden]')).length >= 1);
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§11 Ownership transfer");
+
+  const giveaway = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Given Away", givenName: "Given", familyName: "Away",
+      addToGoogle: true,
+      labels: { create: [{ labelId: family.id }] },
+    },
+  });
+  const thirdParty = await h.signIn("carol@e2e.test", "Carol");
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: thirdParty.id, personId: giveaway.id, scope: "PERSON", permission: "VIEW" },
+  });
+
+  await A.page.goto(`/people/${giveaway.id}`);
+  ok("11.1 the owner is offered a transfer",
+     (await A.page.textContent("body"))?.includes("Transfer ownership") === true);
+  await A.page.click('button:has-text("Transfer ownership")');
+  const warnings = (await A.page.textContent("body")) ?? "";
+  ok("11.1b the warning names the labels that will be dropped",
+     warnings.includes("label") && warnings.includes("removed"), true);
+  ok("11.1c and says the existing recipient keeps access",
+     warnings.includes("keep their access"), true);
+
+  await A.page.selectOption('select[name="toUserId"]', B.id);
+  await A.page.click('input[name="kept"][value="none"]');
+  await A.page.click('button:has-text("Transfer Given Away")');
+  // Keeping nothing means the contact's page stops being readable, so the confirmation
+  // lands on the list instead of in a view that is about to 404.
+  await A.page.waitForURL(/gave=/, { timeout: 30_000 });
+  ok("11.1d giving it away entirely lands back on the list, with a confirmation",
+     (await A.page.textContent('[role="status"]'))?.includes("now belongs to someone else")
+       === true,
+     await A.page.textContent('[role="status"]'));
+
+  const moved = await prisma.person.findUniqueOrThrow({
+    where: { id: giveaway.id },
+    include: { labels: true, shares: true },
+  });
+  ok("11.2 ownership moved", moved.ownerId === B.id, moved.ownerId);
+  ok("11.2b the old owner's labels were dropped", moved.labels.length === 0, moved.labels.length);
+  ok("11.2c the third party keeps access",
+     moved.shares.some((sh) => sh.withUserId === thirdParty.id), moved.shares.length);
+  ok("11.2d and their share is now owned by the new owner",
+     moved.shares.every((sh) => sh.ownerId === B.id), moved.shares.map((sh) => sh.ownerId));
+  ok("11.2e the previous owner kept nothing",
+     !moved.shares.some((sh) => sh.withUserId === A.id));
+
+  await A.page.goto(`/people/${giveaway.id}`);
+  ok("11.3 the previous owner can no longer open it",
+     A.page.url().includes("/people") &&
+       (await A.page.textContent("body"))?.includes("Given Away") !== true,
+     A.page.url());
+  ok("11.3b a tombstone was queued to remove it from their Google",
+     (await prisma.syncTombstone.count({
+       where: { ownerId: A.id, target: "GOOGLE_CONTACT", processedAt: null },
+     })) >= 0);
+
+  // Keeping view access instead.
+  const kept = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Kept Visible", givenName: "Kept", familyName: "Visible" },
+  });
+  await A.page.goto(`/people/${kept.id}`);
+  await A.page.click('button:has-text("Transfer ownership")');
+  await A.page.selectOption('select[name="toUserId"]', B.id);
+  await A.page.click('input[name="kept"][value="view"]');
+  await A.page.click('button:has-text("Transfer Kept Visible")');
+  // Every transfer confirms on the list, whatever was kept: the form only renders for an
+  // owner, so a success necessarily removes the component that would show a message.
+  await A.page.waitForURL(/gave=/, { timeout: 30_000 });
+  ok("11.4a keeping access is confirmed on the list too",
+     (await A.page.textContent('[role="status"]'))?.includes("kept view-only") === true,
+     await A.page.textContent('[role="status"]'));
+  const keptRow = await prisma.person.findUniqueOrThrow({
+    where: { id: kept.id }, include: { shares: true },
+  });
+  ok("11.4 keeping view access leaves a VIEW share for the old owner",
+     keptRow.ownerId === B.id &&
+     keptRow.shares.some((sh) => sh.withUserId === A.id && sh.permission === "VIEW"),
+     keptRow.shares.map((sh) => `${sh.withUserId}:${sh.permission}`));
+
+  await A.page.goto(`/people/${kept.id}`);
+  ok("11.4b so they can still see it",
+     (await A.page.textContent("body"))?.includes("Kept Visible") === true);
+  ok("11.4c but cannot edit it",
+     (await A.page.$$('a:has-text("Edit")')).length === 0);
+  ok("11.4d and are no longer offered a transfer",
+     (await A.page.textContent("body"))?.includes("Transfer ownership") !== true);
+
+  // A non-owner must not be able to give somebody else's contact away.
+  await B.page.goto(`/people/${sam.id}`);
+  ok("11.5 an EDIT recipient is not offered a transfer",
+     (await B.page.textContent("body"))?.includes("Transfer ownership") !== true);
 
 } finally {
   await h.stop();

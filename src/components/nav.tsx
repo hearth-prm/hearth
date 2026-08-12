@@ -2,6 +2,7 @@ import Link from "next/link";
 import { signOut } from "@/lib/auth";
 import type { CurrentUser } from "@/lib/access";
 import { btnGhost } from "@/components/ui";
+import { UserAvatar } from "@/components/avatar";
 
 const links = [
   { href: "/people", label: "People" },
@@ -35,7 +36,11 @@ export function AppNav({ user }: { user: CurrentUser }) {
           ))}
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {/* Google already gives us a profile picture at sign-in; it was simply never
+              shown. On a shared install it is the quickest way to tell whose session
+              you are looking at. */}
+          <UserAvatar name={user.name ?? user.email ?? "?"} image={user.image} />
           <span
             className="hidden text-xs text-neutral-500 sm:block dark:text-neutral-400"
             title={user.email ?? undefined}

@@ -7,6 +7,7 @@ import { readFieldValue } from "@/lib/fields/values";
 import { primaryEmail } from "@/lib/people";
 import {
   isFilterActive,
+  NON_FILTER_PARAMS,
   parseFilter,
   peopleWhere,
   type RawParams,
@@ -20,6 +21,8 @@ import {
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
 import { LabelChips } from "@/components/label-chip";
+import { Avatar } from "@/components/avatar";
+import { effectivePhotoMap } from "@/lib/photos-db";
 import { PeopleFilters } from "@/components/people-filters";
 
 const PAGE_SIZE = 200;
@@ -75,6 +78,9 @@ export default async function PeoplePage({
   ]);
 
   const labels = labelRows.map(({ _count, ...l }) => ({ ...l, count: _count.people }));
+  // One query for the page rather than one per row: the effective photo depends on the
+  // viewer, so it cannot be included in the person query itself.
+  const photos = await effectivePhotoMap(people, user.id);
   const filtered = isFilterActive(filter);
 
   return (
@@ -93,6 +99,24 @@ export default async function PeoplePage({
           </div>
         }
       />
+
+      {/* Set by a completed transfer. It confirms here rather than on the contact's own
+          page because a transfer un-renders the form that would otherwise show it — and
+          when no access was kept, that page is not readable any more either. */}
+      {typeof params.gave === "string" && params.gave ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-950/60 dark:text-teal-300"
+        >
+          <strong className="font-medium">{params.gave}</strong> now belongs to someone
+          else.{" "}
+          {params.kept === "edit"
+            ? "You kept view and edit access."
+            : params.kept === "view"
+              ? "You kept view-only access."
+              : "You no longer have access, and it will leave your Google Contacts on the next sync."}
+        </p>
+      ) : null}
 
       <PeopleFilters filter={filter} labels={labels} resultCount={total} />
 
@@ -152,12 +176,19 @@ export default async function PeoplePage({
                     className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50 dark:border-neutral-800/60 dark:hover:bg-neutral-800/40"
                   >
                     <td className="px-5 py-3">
-                      <Link
-                        href={`/people/${person.id}`}
-                        className="font-medium text-teal-700 hover:underline dark:text-teal-400"
-                      >
-                        {person.displayName}
-                      </Link>
+                      <span className="flex items-center gap-2.5">
+                        <Avatar
+                          personId={person.id}
+                          name={person.displayName}
+                          photo={photos.get(person.id)}
+                        />
+                        <Link
+                          href={`/people/${person.id}`}
+                          className="font-medium text-teal-700 hover:underline dark:text-teal-400"
+                        >
+                          {person.displayName}
+                        </Link>
+                      </span>
                       {person.ownerId !== user.id ? (
                         <span
                           className="ml-2 text-xs text-amber-700 dark:text-amber-400"
@@ -222,6 +253,8 @@ export default async function PeoplePage({
 function buildExportQuery(params: RawParams): string {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
+    // A transfer confirmation is not a filter and must not narrow the export.
+    if ((NON_FILTER_PARAMS as readonly string[]).includes(key)) continue;
     for (const v of Array.isArray(value) ? value : value ? [value] : []) {
       qs.append(key, v);
     }

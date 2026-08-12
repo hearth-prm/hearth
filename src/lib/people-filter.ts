@@ -72,6 +72,14 @@ function pick<T extends string>(value: string, allowed: readonly T[]): T | null 
   return (allowed as readonly string[]).includes(value) ? (value as T) : null;
 }
 
+/**
+ * Parameters the list page understands that are NOT filters.
+ *
+ * Listed so the export link and filter links can drop them: carrying a one-off
+ * confirmation into every subsequent URL would make it reappear on every click.
+ */
+export const NON_FILTER_PARAMS = ["gave", "kept"] as const;
+
 export function parseFilter(params: RawParams): PeopleFilter {
   return {
     q: one(params.q),
@@ -228,6 +236,59 @@ export function filterHref(
 
   const qs = params.toString();
   return qs ? `/people?${qs}` : "/people";
+}
+
+export interface FilterPill {
+  /** Stable key for React, and what the × is removing. */
+  id: string;
+  label: string;
+  /** Where the × goes: the same view minus this one filter. */
+  href: string;
+}
+
+/**
+ * The active filters, as removable chips.
+ *
+ * Built here rather than in the component so "what is currently narrowing this list"
+ * has one definition, shared by the chips and by the count line. Label names have to
+ * be supplied because only the caller has them — the filter itself holds ids.
+ */
+export function activePills(
+  f: PeopleFilter,
+  labelNames: ReadonlyMap<string, string>,
+): FilterPill[] {
+  const pills: FilterPill[] = [];
+
+  if (f.q) {
+    pills.push({ id: "q", label: `“${f.q}”`, href: filterHref(f, { q: null }) });
+  }
+  if (f.relation) {
+    pills.push({
+      id: "rel",
+      label: RELATION_LABELS[f.relation],
+      href: filterHref(f, { rel: null }),
+    });
+  }
+  if (f.google) {
+    pills.push({
+      id: "google",
+      label: GOOGLE_STATE_LABELS[f.google],
+      href: filterHref(f, { google: null }),
+    });
+  }
+  if (f.has) {
+    pills.push({ id: "has", label: HAS_LABELS[f.has], href: filterHref(f, { has: null }) });
+  }
+  for (const id of f.labelIds) {
+    pills.push({
+      id: `label:${id}`,
+      // A label whose name is unknown was probably deleted; showing the raw id would
+      // be worse than admitting it.
+      label: labelNames.get(id) ?? "unknown label",
+      href: toggleLabelHref(f, id),
+    });
+  }
+  return pills;
 }
 
 /** Toggle one label in or out of the current selection. */

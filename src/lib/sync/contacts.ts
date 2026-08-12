@@ -48,6 +48,8 @@ export interface ContactSyncResult {
   failed: number;
   /** Google contact groups whose membership was reconciled. */
   groupsTouched: number;
+  /** Contact photos uploaded to or removed from Google. */
+  photosPushed: number;
   /** True when the run stopped early because Google asked us to slow down. */
   rateLimited: boolean;
   errors: string[];
@@ -73,6 +75,7 @@ function emptyResult(): ContactSyncResult {
     adopted: 0,
     failed: 0,
     groupsTouched: 0,
+    photosPushed: 0,
     rateLimited: false,
     errors: [],
   };
@@ -85,6 +88,7 @@ export function summarise(r: ContactSyncResult): string {
   if (r.deleted) parts.push(`${r.deleted} removed`);
   if (r.adopted) parts.push(`${r.adopted} re-linked`);
   if (r.groupsTouched) parts.push(`${r.groupsTouched} label(s) applied`);
+  if (r.photosPushed) parts.push(`${r.photosPushed} photo(s)`);
   if (r.failed) parts.push(`${r.failed} failed`);
   if (r.rateLimited) parts.push("paused on Google's rate limit");
   return parts.length ? parts.join(", ") : "nothing to do";
@@ -263,10 +267,33 @@ export async function syncContactsForUser(
       contactPoints: true,
       googleSyncs: { where: { userId } },
       labels: { select: { labelId: true } },
+      // Both candidate photos: this account's own override, and the owner's default.
+      // Which one wins is decided per contact below.
+      photos: {
+        where: { userId: { in: [userId] } },
+        select: { userId: true, etag: true },
+      },
     },
     orderBy: { updatedAt: "asc" },
     take: batchSize,
   });
+
+  // The owner's photo is the fallback for contacts this user does not own, so those
+  // rows are fetched separately rather than widening the include above.
+  const ownerPhotoEtags = new Map<string, string>();
+  {
+    const foreign = queue.filter((p) => p.ownerId !== userId);
+    if (foreign.length > 0) {
+      const rows = await prisma.personPhoto.findMany({
+        where: { personId: { in: foreign.map((p) => p.id) } },
+        select: { personId: true, userId: true, etag: true },
+      });
+      for (const p of foreign) {
+        const owners = rows.find((r) => r.personId === p.id && r.userId === p.ownerId);
+        if (owners) ownerPhotoEtags.set(p.id, owners.etag);
+      }
+    }
+  }
 
   // Group membership is reconciled after the contacts themselves, because a contact
   // has to exist in Google before it can join a group. Collected as we go so the
@@ -276,9 +303,27 @@ export async function syncContactsForUser(
     labelled.push({ personId, resourceName, labelIds });
   };
 
+  // Photos likewise: a contact must exist in Google before it can be given a picture,
+  // and the upload is a separate endpoint from the field write.
+  const photoWork: {
+    personId: string;
+    resourceName: string;
+    /** etag of the photo this account should end up with, or null for none. */
+    wantEtag: string | null;
+  }[] = [];
+
   for (const person of queue) {
     const link = person.googleSyncs[0];
     const labelIds = person.labels.map((pl) => pl.labelId);
+    // This account's own picture wins; otherwise it inherits the owner's. For a
+    // contact this user owns, their own row IS the owner's, so the first term covers it.
+    const wantPhotoEtag =
+      person.photos.find((ph) => ph.userId === userId)?.etag ??
+      ownerPhotoEtags.get(person.id) ??
+      null;
+    const notePhoto = (resourceName: string) => {
+      photoWork.push({ personId: person.id, resourceName, wantEtag: wantPhotoEtag });
+    };
     const { customFields, mappings } = await contextFor(person.ownerId);
     const { person: payload, updateFields } = serializePerson(person, {
       customFields,
@@ -316,16 +361,19 @@ export async function syncContactsForUser(
           const created = await deps.people.createContact(payload);
           await markSynced(person.id, userId, created.resourceName, created.etag, now());
           noteLabels(person.id, created.resourceName, labelIds);
+          notePhoto(created.resourceName);
           result.created += 1;
         } else {
           await markSynced(person.id, userId, written.resourceName, written.etag, now());
           noteLabels(person.id, written.resourceName, labelIds);
+          notePhoto(written.resourceName);
           result.updated += 1;
         }
       } else {
         const created = await deps.people.createContact(payload);
         await markSynced(person.id, userId, created.resourceName, created.etag, now());
         noteLabels(person.id, created.resourceName, labelIds);
+        notePhoto(created.resourceName);
         result.created += 1;
       }
     } catch (err) {
@@ -350,7 +398,56 @@ export async function syncContactsForUser(
     }
   }
 
-  // --- 3. labels as Google contact groups --------------------------------
+  // --- 3. photos ---------------------------------------------------------
+  //
+  // Compared against what this account was last sent, so an unchanged photo costs
+  // nothing: the etag is a hash of the bytes, so equality really does mean "Google
+  // already has this image". Uploading changes the contact's etag in Google, which
+  // makes the stored one stale — harmless, because the next field write recovers from
+  // an etag conflict by re-reading.
+  //
+  // Not fatal, for the same reason as labels: the contact itself is already correct,
+  // and failing it would roll back a good push to retry it for a picture.
+  for (const work of photoWork) {
+    try {
+      const current = await prisma.personSync.findFirst({
+        where: { personId: work.personId, userId },
+        select: { googlePhotoEtag: true },
+      });
+      if ((current?.googlePhotoEtag ?? null) === work.wantEtag) continue;
+
+      if (work.wantEtag) {
+        const bytes = await prisma.personPhoto.findFirst({
+          where: { personId: work.personId, etag: work.wantEtag },
+          select: { data: true },
+        });
+        if (!bytes) continue; // deleted between the queue and here
+        await deps.people.updateContactPhoto({
+          resourceName: work.resourceName,
+          data: bytes.data,
+        });
+      } else {
+        // Only reached when a photo was previously pushed and has since been removed.
+        await deps.people.deleteContactPhoto(work.resourceName);
+      }
+
+      await prisma.personSync.updateMany({
+        where: { personId: work.personId, userId },
+        data: { googlePhotoEtag: work.wantEtag },
+      });
+      result.photosPushed += 1;
+    } catch (err) {
+      const classified = classifyGoogleError(err);
+      if (classified.kind === "auth") throw new GoogleAuthError(classified.message);
+      if (classified.kind === "rate_limit") {
+        result.rateLimited = true;
+        break;
+      }
+      result.errors.push(`photo ${work.personId}: ${classified.message}`);
+    }
+  }
+
+  // --- 4. labels as Google contact groups --------------------------------
   //
   // Deliberately after the contacts, and deliberately not fatal: the contacts
   // themselves are already correct in Google, and marking them failed over a group

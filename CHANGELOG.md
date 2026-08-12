@@ -25,6 +25,64 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Added
+
+- **Contact photos.** A picture per contact, shown on the contact page and beside every
+  row in the list, with initials as the fallback — in a list of two hundred, a repeated
+  silhouette is noise, while initials still tell rows apart.
+  - **The owner's photo is the default and reaches everyone the contact is shared with,
+    but a recipient may set their own instead.** This is the one deliberate exception to
+    "one record reads the same to everyone": a photo answers *is this the person I
+    mean?*, and the picture that does that job is legitimately personal, where a job
+    title is not. Labels and custom fields still follow the owner precisely because
+    they describe the record rather than serve the viewer.
+  - Hence `PersonPhoto` keyed on (contact, user) rather than a column on `Person`. Each
+    Google account receives *its* effective photo, so one Hearth contact can wear a
+    different face in two address books on purpose.
+  - Anyone who can **read** a contact may set their own photo, not only someone who can
+    edit it. Their upload is their own row and changes nothing for anybody else.
+  - Bytes live in Postgres, so the verified `pg_dump` that `update-hearth.sh` already
+    takes before every update carries them. A separate upload directory would need its
+    own backup story, and the forgotten backup is the one that matters.
+  - Resizing happens in the **browser**, which keeps a native image library out of the
+    Docker image, bounds the upload on a slow connection, and strips EXIF — including
+    where the photo was taken — as a side effect of re-encoding. The server still
+    validates independently: it sniffs the magic bytes and reads the dimensions out of
+    the JPEG or PNG header rather than trusting anything the client declared.
+  - Photos push to Google through `people.updateContactPhoto`, a separate endpoint from
+    the field write because `photos` is read-only on a person. Compared against a
+    per-account record of what was last sent, so an unchanged photo costs nothing.
+
+- **The signed-in user's own picture in the header.** Google has supplied it since the
+  first sign-in; it was simply never displayed.
+
+- **Transferring a contact to another user.** Ownership decides which field definitions
+  read a record, whose labels may be applied, and who can delete or share it — so the
+  transfer moves or drops each of those, and the confirmation names what it will drop
+  before you commit.
+  - You choose what you keep: nothing, view, or view and edit. Choosing nothing is what
+    takes the contact out of your Google Contacts; keeping access necessarily keeps it
+    there, since you can still read it.
+  - Shares the previous owner granted **move with the record**, so nobody it was already
+    shared with silently loses access.
+  - Labels are dropped, because a label is the previous owner's own filing system and
+    inventing entries in someone else's is not Hearth's to do. Custom values are kept in
+    place but stop showing unless the new owner has a field of the same name — so
+    transferring back restores them.
+  - Only an owner may transfer. An edit share is permission to help maintain a contact,
+    not to decide who it belongs to.
+
+### Changed
+
+- **The contact filters are now a menu and a row of chips**, rather than three rows of
+  pills above the list. Selected filters appear inside the search box and each carries
+  an × that removes just itself; the **Filter** button shows how many are active.
+  - Still links carrying the whole filter state, so filters compose, a filtered list is
+    a URL worth keeping, and Back undoes one at a time.
+  - The menu is a native `<details>` rather than React state, so it opens on the first
+    click instead of only after hydration. Every filter click is a navigation, so a
+    menu needing hydration would ignore exactly the clicks people make most.
+
 ## [0.5.0] — 2026-08-12
 
 ### Added
