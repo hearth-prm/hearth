@@ -225,16 +225,6 @@ export function PersonLabelsForm({
   const [open, setOpen] = useState(false);
   const chosen = new Set(selected);
 
-  if (labels.length === 0) {
-    return (
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        {ownerName
-          ? `${ownerName} has not created any labels yet.`
-          : "No labels yet — create some in Settings → Labels."}
-      </p>
-    );
-  }
-
   if (!open) {
     return (
       <button
@@ -259,6 +249,13 @@ export function PersonLabelsForm({
         </p>
       ) : null}
 
+      {labels.length === 0 ? (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {ownerName
+            ? `${ownerName} has no labels yet. One you add below will be created for them.`
+            : "No labels yet. Type one below and it will be created."}
+        </p>
+      ) : (
       <div
         role="group"
         aria-label="Labels"
@@ -281,6 +278,23 @@ export function PersonLabelsForm({
             <LabelChip label={l} />
           </label>
         ))}
+      </div>
+      )}
+
+      <div>
+        <label htmlFor={`newlabel-${personId}`} className={labelClass}>
+          New label
+        </label>
+        <input
+          id={`newlabel-${personId}`}
+          name="newLabel"
+          maxLength={MAX_LABEL_NAME}
+          placeholder="Family, Book club…"
+          className={`${inputClass} mt-1.5`}
+        />
+        <p className={helpClass}>
+          Created and applied when you save. Manage them all in Settings → Labels.
+        </p>
       </div>
 
       <div className="flex items-center gap-2">

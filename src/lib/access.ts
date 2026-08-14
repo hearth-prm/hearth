@@ -16,9 +16,13 @@ import { prisma } from "@/lib/db";
  * grants. Deleting is deliberately absent from both: it stays with the owner, since
  * an EDIT grant is permission to help maintain a record, not to destroy it.
  *
- * Sync is the one thing that does NOT use these clauses. It queries `ownerId`
- * directly, so a contact shared with you is never pushed into your Google account —
- * it is not yours to publish.
+ * Sync DOES use these clauses, and must: a contact shared with you belongs in your
+ * Google Contacts too, which is the whole point of sharing one. (An earlier version of
+ * this comment claimed the opposite, and so did the code.)
+ *
+ * Household cards — the contact representing each user of the install — need no special
+ * case here. They are owned by the head of the household and shared with everyone
+ * through ordinary Share rows, so every clause below already covers them.
  */
 
 export interface CurrentUser {

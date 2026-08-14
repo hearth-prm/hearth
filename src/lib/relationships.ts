@@ -86,6 +86,25 @@ export function viewFrom(
   };
 }
 
+/**
+ * How a relationship's dates read.
+ *
+ * An ended relationship is how Hearth expresses "ex-": a Partner-of with an end date
+ * says everything a separate "Ex-partner" type would, without a second type that has to
+ * be kept in step with the first. That only works if the end date is actually shown,
+ * which it was not — the view carried endedOn and the page rendered only "since".
+ */
+export function relationshipPeriod(
+  startedOn: Date | null,
+  endedOn: Date | null,
+  format: (d: Date) => string,
+): string | null {
+  if (startedOn && endedOn) return `${format(startedOn)} to ${format(endedOn)}`;
+  if (startedOn) return `since ${format(startedOn)}`;
+  if (endedOn) return `until ${format(endedOn)}`;
+  return null;
+}
+
 /** Every relationship touching `personId`, from that person's perspective. */
 export async function loadRelationshipsFor(
   ownerId: string,

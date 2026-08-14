@@ -24,15 +24,21 @@ function UserPicker({
   idPrefix,
 }: {
   users: readonly ShareableUser[];
-  /** User ids that already have access, so the list can say so. */
+  /** Already have access, so they are not offered — revoking is a separate control. */
   alreadyShared: ReadonlySet<string>;
   idPrefix: string;
 }) {
+  // Filtered out rather than labelled: a list of people to share with should contain
+  // people you can share with. Anyone already holding access is shown above the picker
+  // with a Remove beside them, which is where changing their access belongs.
+  users = users.filter((u) => !alreadyShared.has(u.id));
+
   if (users.length === 0) {
     return (
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Nobody else has signed in to this Hearth yet. Once they do, they will appear
-        here.
+        {alreadyShared.size > 0
+          ? "Everyone on this install already has access."
+          : "Nobody else has signed in to this Hearth yet. Once they do, they will appear here."}
       </p>
     );
   }
@@ -47,7 +53,7 @@ function UserPicker({
         <label
           key={u.id}
           htmlFor={`${idPrefix}-${u.id}`}
-          className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800"
+          className="flex items-start gap-2 rounded px-1.5 py-1 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           <input
             id={`${idPrefix}-${u.id}`}
@@ -56,15 +62,12 @@ function UserPicker({
             value={u.id}
             className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
           />
-          <span>
+          {/* min-w-0 + break-words: an email is unbreakable text in a column that can be
+              narrow, and without this it pushed the row past the card's edge. */}
+          <span className="min-w-0 flex-1 break-words">
             {u.name ? `${u.name} · ` : ""}
             {u.email}
           </span>
-          {alreadyShared.has(u.id) ? (
-            <span className="ml-auto text-xs text-neutral-500 dark:text-neutral-400">
-              already has access
-            </span>
-          ) : null}
         </label>
       ))}
     </div>
@@ -168,7 +171,7 @@ export function ShareRecordForm({
         </div>
       </div>
 
-      {users.length > 0 ? (
+      {users.some((u) => !alreadyShared.includes(u.id)) ? (
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label className={labelClass}>They can</label>

@@ -3,9 +3,11 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/access";
 import { listOtherUsers } from "@/lib/users";
 import { revokeShare, shareEverything } from "@/lib/actions/shares";
-import { Badge, Card, CardHeader } from "@/components/ui";
+import { handOverHousehold, repairHousehold } from "@/lib/actions/household";
+import { Badge, Card, CardHeader, DetailRow, Hint } from "@/components/ui";
 import { DeleteForm } from "@/components/delete-form";
 import { ShareEverythingForm } from "@/components/share-forms";
+import { HandOverForm, RepairHouseholdForm } from "@/components/household-form";
 
 const SCOPE_LABELS: Record<string, string> = {
   ALL_PEOPLE: "All contacts",
@@ -17,7 +19,20 @@ const SCOPE_LABELS: Record<string, string> = {
 export default async function SharingPage() {
   const user = await requireUser();
 
-  const [users, given, received] = await Promise.all([
+  const [head, cards, me, users, given, received] = await Promise.all([
+    prisma.user.findFirst({
+      where: { isHeadOfHousehold: true },
+      select: { id: true, name: true, email: true },
+    }),
+    prisma.person.findMany({
+      where: { linkedUserId: { not: null } },
+      select: { id: true, displayName: true, linkedUserId: true },
+      orderBy: { displayName: "asc" },
+    }),
+    prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { isHeadOfHousehold: true },
+    }),
     listOtherUsers(user.id),
     prisma.share.findMany({
       where: { ownerId: user.id },
@@ -39,8 +54,65 @@ export default async function SharingPage() {
     }),
   ]);
 
+  const isHead = me.isHeadOfHousehold;
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Household
+              <Hint label="What household cards are">
+                Every user of this Hearth gets a contact card. The head of the household
+                owns them and everyone can edit them, so your own details reach your own
+                Google Contacts — which is what your phone&rsquo;s “share contact” sends.
+              </Hint>
+            </span>
+          }
+        />
+        <dl className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+          <DetailRow label="Head of household">
+            {head ? (
+              <>
+                {head.name ?? head.email}
+                {isHead ? <span className="text-neutral-400"> · you</span> : null}
+              </>
+            ) : (
+              <span className="text-neutral-400">nobody yet</span>
+            )}
+          </DetailRow>
+          <DetailRow label="Contact cards">
+            {cards.length === 0 ? (
+              <span className="text-neutral-400">none yet</span>
+            ) : (
+              <span className="flex flex-wrap gap-x-3 gap-y-1">
+                {cards.map((c) => (
+                  <Link
+                    key={c.id}
+                    href={`/people/${c.id}`}
+                    className="text-teal-700 hover:underline dark:text-teal-400"
+                  >
+                    {c.displayName}
+                    {c.linkedUserId === user.id ? " (you)" : ""}
+                  </Link>
+                ))}
+              </span>
+            )}
+          </DetailRow>
+        </dl>
+        <div className="flex flex-wrap items-start justify-between gap-4 border-t border-neutral-100 px-5 py-3 dark:border-neutral-800/60">
+          {isHead ? (
+            <HandOverForm action={handOverHousehold} users={users} />
+          ) : (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Only the head of the household can hand it over.
+            </p>
+          )}
+          <RepairHouseholdForm action={repairHousehold} />
+        </div>
+      </Card>
+
       <Card>
         <CardHeader
           title="Share everything"

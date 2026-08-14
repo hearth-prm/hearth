@@ -31,6 +31,14 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+
+  /// Owns the household cards — the contact record representing each user.
+  ///
+  /// A flag on User rather than an install-level settings row, because "who is the head"
+  /// is a fact about a person and there is exactly one of them: a partial unique index
+  /// enforces that in the database rather than in application code that could forget.
+  /// The first user to sign in becomes head, and it can be handed over in settings.
+  isHeadOfHousehold Boolean @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -51,6 +59,7 @@ model User {
   labels            Label[]
   labelGroups       LabelGroup[]
   personPhotos      PersonPhoto[]
+  contactCard       Person?            @relation("UserContactCard")
 }
 
 model Account {
@@ -281,6 +290,17 @@ model Person {
   id      String @id @default(cuid())
   ownerId String
 
+  /// Set on a household card: the user this contact represents.
+  ///
+  /// Unique, so a user can never accumulate two cards. This is what lets Hearth answer
+  /// "did my wife give me this?" without the user hand-picking her own contact record
+  /// every time.
+  ///
+  /// These cards are owned by the head of the household and shared with every user,
+  /// including the one each card is about — so your own details land in your own Google
+  /// Contacts, where your phone's "share contact" can send them to anyone.
+  linkedUserId String? @unique
+
   // --- core fields (mirrored in src/lib/fields/core.ts) ---
   givenName    String?
   familyName   String?
@@ -308,6 +328,8 @@ model Person {
   updatedAt DateTime @updatedAt
 
   owner             User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Cascade: deleting a user takes the card that represents them with it.
+  linkedUser        User?           @relation("UserContactCard", fields: [linkedUserId], references: [id], onDelete: Cascade)
   contactPoints     ContactPoint[]
   relationshipsFrom Relationship[]  @relation("RelationshipFrom")
   relationshipsTo   Relationship[]  @relation("RelationshipTo")
@@ -317,6 +339,7 @@ model Person {
   labels            PersonLabel[]
   photos            PersonPhoto[]
 
+  @@index([linkedUserId])
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
   @@index([ownerId, addToGoogle])

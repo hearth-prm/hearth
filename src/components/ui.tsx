@@ -57,7 +57,7 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 dark:border-neutral-800">
+    <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-3 dark:border-neutral-800">
       <div>
         <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
           {title}
@@ -160,17 +160,60 @@ export function Badge({
 export function DetailRow({
   label,
   children,
+  compact = false,
 }: {
   label: ReactNode;
   children: ReactNode;
+  /**
+   * For a narrow sidebar. The 11rem label column is right in a wide card and wrong in
+   * a 22rem one, where it leaves so little room that a timestamp wraps onto three
+   * lines — which is what made the Record card look like it had escaped its border.
+   */
+  compact?: boolean;
 }) {
   return (
-    <div className="grid gap-1 px-5 py-3 sm:grid-cols-[11rem_1fr] sm:gap-4">
+    <div
+      className={`grid gap-0.5 px-4 py-2 ${
+        compact ? "" : "sm:grid-cols-[11rem_1fr] sm:gap-4 sm:px-5 sm:py-2.5"
+      }`}
+    >
       <dt className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
         {label}
       </dt>
-      <dd className="text-sm text-neutral-900 dark:text-neutral-100">{children}</dd>
+      {/* min-w-0 lets a long unbroken value (a Google resource id, say) shrink and
+          wrap instead of pushing the grid wider than its card. */}
+      <dd className="min-w-0 break-words text-sm text-neutral-900 dark:text-neutral-100">
+        {children}
+      </dd>
     </div>
+  );
+}
+
+/**
+ * Explanation on hover, rather than permanently on screen.
+ *
+ * A paragraph explaining a control is read once and then occupies space forever. The
+ * title attribute alone is not enough — it never appears on touch, and it is invisible
+ * to anyone who does not think to hover — so the trigger is a focusable marker that
+ * also opens on keyboard focus, and the text is exposed to assistive technology.
+ */
+export function Hint({ children, label = "What is this?" }: { children: ReactNode; label?: string }) {
+  return (
+    <span className="group relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label={label}
+        className="flex size-4 cursor-help items-center justify-center rounded-full border border-neutral-300 text-[10px] font-semibold leading-none text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-500 dark:border-neutral-600 dark:text-neutral-400 dark:hover:text-neutral-200"
+      >
+        ?
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 w-64 -translate-x-1/2 rounded-md border border-neutral-200 bg-white p-2 text-xs font-normal leading-relaxed text-neutral-600 opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+      >
+        {children}
+      </span>
+    </span>
   );
 }
 

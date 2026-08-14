@@ -13,7 +13,7 @@ const links = [
 export function AppNav({ user }: { user: CurrentUser }) {
   return (
     <header className="border-b border-neutral-200 bg-white/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80">
-      <div className="mx-auto flex w-full max-w-5xl items-center gap-6 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex w-full max-w-7xl items-center gap-6 px-4 py-3 sm:px-6 2xl:max-w-[88rem]">
         <Link
           href="/people"
           className="flex items-center gap-2 text-sm font-semibold tracking-tight"

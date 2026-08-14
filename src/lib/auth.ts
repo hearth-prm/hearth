@@ -43,6 +43,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       await prisma.userSettings
         .create({ data: { userId: user.id } })
         .catch(() => undefined);
+
+      // A contact card for the new user, and shares so every card reaches every user.
+      // Also best-effort: a household without one person's card is a smaller problem
+      // than a sign-in that fails, and ensureContactCard is idempotent, so the next
+      // person to join repairs it.
+      const { ensureContactCard } = await import("@/lib/household");
+      await ensureContactCard(user.id).catch(() => undefined);
     },
   },
 });

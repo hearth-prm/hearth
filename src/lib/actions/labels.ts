@@ -191,6 +191,10 @@ export async function setPersonLabels(
     const person = await requireWritablePerson(user.id, personId);
 
     const requested = [...new Set(form.getAll("labelId").map(String).filter(Boolean))];
+    // A label typed here is created and applied in one step. Requiring a trip to
+    // Settings to invent "Book club" before you can put anyone in it puts the
+    // administration of labels in the way of the only reason to have one.
+    const typed = normaliseLabelName(readString(form, "newLabel"));
 
     // Silently dropping foreign ids rather than erroring: the only way to submit
     // one is a stale form or a hand-made request, and in both cases the user's
@@ -199,9 +203,17 @@ export async function setPersonLabels(
       where: { id: { in: requested }, ownerId: person.ownerId },
       select: { id: true },
     });
-    const labelIds = owned.map((l) => l.id);
+    const labelIds: string[] = owned.map((l) => l.id);
 
     await prisma.$transaction(async (tx) => {
+      if (typed) {
+        // Created against the contact's OWNER, like every other label on it: a shared
+        // contact carries one set of labels so it reads the same to everyone, and a
+        // label invented here has to live where those live.
+        const made = await ensureLabel(tx, person.ownerId, typed);
+        if (!labelIds.includes(made.id)) labelIds.push(made.id);
+      }
+
       // Clearing every label is a real request, and `notIn: []` is not a reliable
       // way to say "match everything" — so the two cases are written out.
       const stale: Prisma.PersonLabelWhereInput = labelIds.length

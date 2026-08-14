@@ -4,7 +4,7 @@ import { useActionState, useRef, useState } from "react";
 import { PHOTO_MAX_EDGE } from "@/lib/photos";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
 import { SubmitButton } from "@/components/submit-button";
-import { btnSecondary, FormMessage, helpClass } from "@/components/ui";
+import { btnSecondary, FormMessage, Hint } from "@/components/ui";
 
 /**
  * Resize in the browser, then upload.
@@ -121,15 +121,15 @@ export function PhotoForm({
       {hasOwn ? (
         <ClearButton clear={clear} personId={personId} fallsBack={clearingFallsBack} />
       ) : null}
-      </div>
 
-      <p className={helpClass}>
-        {isOwner
-          ? `Resized to ${PHOTO_MAX_EDGE}px before uploading. Pushed to your Google Contacts, and to everyone you have shared this contact with, unless they have chosen their own picture.`
-          : hasOwn
-            ? "This is your own picture for this contact. It replaces the owner’s for you and in your Google Contacts, and does not change theirs."
-            : "You are seeing the owner’s photo. Adding one of your own replaces it for you and in your Google Contacts — it does not change theirs."}
-      </p>
+        <Hint label="How photos work">
+          {isOwner
+            ? `Resized to ${PHOTO_MAX_EDGE}px before uploading. Pushed to your Google Contacts, and to everyone you have shared this contact with, unless they have chosen their own picture.`
+            : hasOwn
+              ? "This is your own picture for this contact. It replaces the owner’s for you and in your Google Contacts, and does not change theirs."
+              : "You are seeing the owner’s photo. Adding one of your own replaces it for you and in your Google Contacts — it does not change theirs."}
+        </Hint>
+      </div>
     </div>
   );
 }

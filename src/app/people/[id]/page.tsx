@@ -5,7 +5,11 @@ import { canWritePerson, readablePeopleWhere, requireUser } from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
-import { loadRelationshipsFor, loadRelationshipTypes } from "@/lib/relationships";
+import {
+  loadRelationshipsFor,
+  loadRelationshipTypes,
+  relationshipPeriod,
+} from "@/lib/relationships";
 import { CONTACT_KIND_LABELS } from "@/lib/people";
 import { getUserSettings } from "@/lib/settings";
 import { formatDateOnly, formatInstant } from "@/lib/time";
@@ -18,6 +22,7 @@ import {
   Card,
   CardHeader,
   DetailRow,
+  Hint,
   PageHeader,
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
@@ -32,7 +37,7 @@ import { effectivePhotoFor } from "@/lib/photos-db";
 import { clearPersonPhoto, setPersonPhoto } from "@/lib/actions/photos";
 import { PersonLabelsForm } from "@/components/label-forms";
 import { setPersonLabels } from "@/lib/actions/labels";
-import { shareRecord } from "@/lib/actions/shares";
+import { revokeShare, shareRecord } from "@/lib/actions/shares";
 import { TransferForm } from "@/components/transfer-form";
 import { transferOwnership } from "@/lib/actions/transfer";
 import { listOtherUsers } from "@/lib/users";
@@ -241,20 +246,27 @@ export default async function PersonPage({
 
           <Card>
             <CardHeader
-              title="Relationships"
-              description="One row serves both people — it reads correctly from either side."
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  Relationships
+                  <Hint label="How relationships work">
+                    One row serves both people — it reads correctly from either side, so
+                    adding “Parent of” here shows “Child of” on their page.
+                  </Hint>
+                </span>
+              }
             />
-            <div className="px-5 py-4">
+            <div className="px-5 py-3">
               {relationships.length === 0 ? (
-                <p className="mb-5 text-sm text-neutral-500 dark:text-neutral-400">
+                <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
                   No relationships recorded.
                 </p>
               ) : (
-                <ul className="mb-6 divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                <ul className="mb-3 divide-y divide-neutral-100 dark:divide-neutral-800/60">
                   {relationships.map((rel) => (
                     <li
                       key={rel.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                      className="flex flex-wrap items-center justify-between gap-2 py-1.5"
                     >
                       <span className="text-sm">
                         <span className="text-neutral-500 dark:text-neutral-400">
@@ -272,11 +284,26 @@ export default async function PersonPage({
                             — {rel.notes}
                           </span>
                         ) : null}
-                        {rel.startedOn ? (
-                          <span className="ml-2 text-xs text-neutral-400">
-                            since {formatDateOnly(rel.startedOn)}
-                          </span>
-                        ) : null}
+                        {(() => {
+                          // An ended relationship reads "from X to Y" — which is how a
+                          // former partner is expressed, rather than a separate type.
+                          const period = relationshipPeriod(
+                            rel.startedOn,
+                            rel.endedOn,
+                            formatDateOnly,
+                          );
+                          return period ? (
+                            <span
+                              className={`ml-2 text-xs ${
+                                rel.endedOn
+                                  ? "text-neutral-500 dark:text-neutral-400"
+                                  : "text-neutral-400"
+                              }`}
+                            >
+                              {period}
+                            </span>
+                          ) : null;
+                        })()}
                       </span>
                       {canEdit ? (
                         <DeleteForm
@@ -294,7 +321,7 @@ export default async function PersonPage({
               )}
 
               {canEdit ? (
-              <div className="border-t border-neutral-100 pt-5 dark:border-neutral-800/60">
+              <div className="border-t border-neutral-100 pt-3 dark:border-neutral-800/60">
                 <RelationshipForm
                   action={addRelationship}
                   personId={person.id}
@@ -342,10 +369,7 @@ export default async function PersonPage({
           </Card>
 
           <Card>
-            <CardHeader
-              title="Photo"
-              description={isOwner ? undefined : "Yours alone, if you set one."}
-            />
+            <CardHeader title="Photo" />
             <div className="flex flex-wrap items-center gap-4 px-5 py-4">
               <Avatar
                 personId={person.id}
@@ -368,11 +392,15 @@ export default async function PersonPage({
 
           <Card>
             <CardHeader
-              title="Labels"
-              description={
-                isOwner
-                  ? "Also appear as labels in Google Contacts."
-                  : undefined
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  Labels
+                  <Hint label="How labels work">
+                    {isOwner
+                      ? "Labels also appear as labels in Google Contacts, in your account and in the account of anyone you share this contact with."
+                      : "These are the owner's labels. A shared contact carries one set, so it reads the same for everyone who can see it."}
+                  </Hint>
+                </span>
               }
             />
             <div className="space-y-3 px-5 py-4">
@@ -401,13 +429,32 @@ export default async function PersonPage({
                 title="Sharing"
                 description="Give someone else access to this contact."
               />
-              <div className="space-y-3 px-5 py-4">
+              <div className="space-y-3 px-5 py-3">
                 {myShares.length > 0 ? (
-                  <ul className="space-y-1 text-xs">
+                  <ul className="divide-y divide-neutral-100 text-xs dark:divide-neutral-800/60">
                     {myShares.map((sh) => (
-                      <li key={sh.id} className="text-neutral-600 dark:text-neutral-400">
-                        {sh.withUser.email} —{" "}
-                        {sh.permission === "EDIT" ? "can edit" : "view only"}
+                      <li
+                        key={sh.id}
+                        className="flex items-start justify-between gap-2 py-1.5"
+                      >
+                        <span className="min-w-0 break-words text-neutral-600 dark:text-neutral-400">
+                          {sh.withUser.email}
+                          <span className="text-neutral-400">
+                            {" · "}
+                            {sh.permission === "EDIT" ? "can edit" : "view only"}
+                          </span>
+                        </span>
+                        {/* Revoking lives beside the person it affects. It used to be
+                            only in Settings, which meant the page that told you who had
+                            access was not the page where you could change it. */}
+                        <DeleteForm
+                          action={revokeShare}
+                          id={sh.id}
+                          label="Remove"
+                          pendingLabel="Removing…"
+                          className="shrink-0 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                          confirmMessage={`Stop sharing ${person.displayName} with ${sh.withUser.email}? It will be removed from their Google Contacts on the next sync.`}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -425,10 +472,10 @@ export default async function PersonPage({
           <Card>
             <CardHeader title="Record" />
             <dl className="divide-y divide-neutral-100 text-xs dark:divide-neutral-800/60">
-              <DetailRow label="Added">
+              <DetailRow compact label="Added">
                 {formatInstant(person.createdAt, settings.timeZone)}
               </DetailRow>
-              <DetailRow label="Updated">
+              <DetailRow compact label="Updated">
                 {formatInstant(person.updatedAt, settings.timeZone)}
               </DetailRow>
               <GoogleContactLink
@@ -436,23 +483,23 @@ export default async function PersonPage({
                 addToGoogle={person.addToGoogle}
               />
               {mySync?.googleSyncedAt ? (
-                <DetailRow label="Last synced">
+                <DetailRow compact label="Last synced">
                   {formatInstant(mySync.googleSyncedAt, settings.timeZone)}
                 </DetailRow>
               ) : null}
               {mySync?.googleSyncError ? (
-                <DetailRow label="Sync error">
+                <DetailRow compact label="Sync error">
                   <span className="text-rose-600 dark:text-rose-400">
                     {mySync.googleSyncError}
                   </span>
                 </DetailRow>
               ) : null}
               {otherSyncs.length > 0 ? (
-                <DetailRow label="Also in Google for">
+                <DetailRow compact label="Also in Google for">
                   {otherSyncs.map((g) => g.user.email).join(", ")}
                 </DetailRow>
               ) : null}
-              <DetailRow label="Owner">
+              <DetailRow compact label="Owner">
                 {isOwner ? "You" : (person.owner.name ?? person.owner.email)}
               </DetailRow>
             </dl>

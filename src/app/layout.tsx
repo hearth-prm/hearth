@@ -20,7 +20,12 @@ export default async function RootLayout({
     <html lang="en">
       <body className="flex min-h-dvh flex-col bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
         {user ? <AppNav user={user} /> : null}
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6">
+        {/* max-w-5xl left roughly half a wide screen as margin. This is a data-dense
+            app whose pages are two columns of cards, so it earns the width; the read
+            column is bounded by the grid rather than by the page. py-8 was also more
+            air than the nav needs — the first card should read as attached to the
+            page, not floating below it. */}
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 2xl:max-w-[88rem]">
           {children}
         </main>
         <AppFooter />

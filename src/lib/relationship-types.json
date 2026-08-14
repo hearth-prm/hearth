@@ -1,14 +1,177 @@
 [
-  { "key": "spouse", "label": "Spouse of", "inverseLabel": "Spouse of", "symmetric": true, "order": 10 },
-  { "key": "partner", "label": "Partner of", "inverseLabel": "Partner of", "symmetric": true, "order": 20 },
-  { "key": "parent", "label": "Parent of", "inverseLabel": "Child of", "symmetric": false, "order": 30 },
-  { "key": "sibling", "label": "Sibling of", "inverseLabel": "Sibling of", "symmetric": true, "order": 40 },
-  { "key": "grandparent", "label": "Grandparent of", "inverseLabel": "Grandchild of", "symmetric": false, "order": 50 },
-  { "key": "relative", "label": "Relative of", "inverseLabel": "Relative of", "symmetric": true, "order": 60 },
-  { "key": "friend", "label": "Friend of", "inverseLabel": "Friend of", "symmetric": true, "order": 70 },
-  { "key": "colleague", "label": "Colleague of", "inverseLabel": "Colleague of", "symmetric": true, "order": 80 },
-  { "key": "manager", "label": "Manager of", "inverseLabel": "Reports to", "symmetric": false, "order": 90 },
-  { "key": "mentor", "label": "Mentor of", "inverseLabel": "Mentee of", "symmetric": false, "order": 100 },
-  { "key": "neighbour", "label": "Neighbour of", "inverseLabel": "Neighbour of", "symmetric": true, "order": 110 },
-  { "key": "knows", "label": "Knows", "inverseLabel": "Knows", "symmetric": true, "order": 900 }
+  {
+    "key": "spouse",
+    "label": "Spouse of",
+    "inverseLabel": "Spouse of",
+    "symmetric": true,
+    "order": 10
+  },
+  {
+    "key": "partner",
+    "label": "Partner of",
+    "inverseLabel": "Partner of",
+    "symmetric": true,
+    "order": 20
+  },
+  {
+    "key": "parent",
+    "label": "Parent of",
+    "inverseLabel": "Child of",
+    "symmetric": false,
+    "order": 30
+  },
+  {
+    "key": "sibling",
+    "label": "Sibling of",
+    "inverseLabel": "Sibling of",
+    "symmetric": true,
+    "order": 40
+  },
+  {
+    "key": "grandparent",
+    "label": "Grandparent of",
+    "inverseLabel": "Grandchild of",
+    "symmetric": false,
+    "order": 50
+  },
+  {
+    "key": "relative",
+    "label": "Relative of",
+    "inverseLabel": "Relative of",
+    "symmetric": true,
+    "order": 60
+  },
+  {
+    "key": "friend",
+    "label": "Friend of",
+    "inverseLabel": "Friend of",
+    "symmetric": true,
+    "order": 70
+  },
+  {
+    "key": "colleague",
+    "label": "Colleague of",
+    "inverseLabel": "Colleague of",
+    "symmetric": true,
+    "order": 80
+  },
+  {
+    "key": "manager",
+    "label": "Manager of",
+    "inverseLabel": "Reports to",
+    "symmetric": false,
+    "order": 90
+  },
+  {
+    "key": "mentor",
+    "label": "Mentor of",
+    "inverseLabel": "Mentee of",
+    "symmetric": false,
+    "order": 100
+  },
+  {
+    "key": "neighbour",
+    "label": "Neighbour of",
+    "inverseLabel": "Neighbour of",
+    "symmetric": true,
+    "order": 110
+  },
+  {
+    "key": "knows",
+    "label": "Knows",
+    "inverseLabel": "Knows",
+    "symmetric": true,
+    "order": 900
+  },
+  {
+    "key": "nesting_partner",
+    "label": "Nesting partner of",
+    "inverseLabel": "Nesting partner of",
+    "symmetric": true,
+    "order": 910
+  },
+  {
+    "key": "anchor_partner",
+    "label": "Anchor partner of",
+    "inverseLabel": "Anchor partner of",
+    "symmetric": true,
+    "order": 920
+  },
+  {
+    "key": "metamour",
+    "label": "Metamour of",
+    "inverseLabel": "Metamour of",
+    "symmetric": true,
+    "order": 930
+  },
+  {
+    "key": "comet",
+    "label": "Comet of",
+    "inverseLabel": "Comet of",
+    "symmetric": true,
+    "order": 940
+  },
+  {
+    "key": "queerplatonic",
+    "label": "Queerplatonic partner of",
+    "inverseLabel": "Queerplatonic partner of",
+    "symmetric": true,
+    "order": 950
+  },
+  {
+    "key": "co_parent",
+    "label": "Co-parent with",
+    "inverseLabel": "Co-parent with",
+    "symmetric": true,
+    "order": 960
+  },
+  {
+    "key": "step_parent",
+    "label": "Step-parent of",
+    "inverseLabel": "Step-child of",
+    "symmetric": false,
+    "order": 970
+  },
+  {
+    "key": "guardian",
+    "label": "Guardian of",
+    "inverseLabel": "In the care of",
+    "symmetric": false,
+    "order": 980
+  },
+  {
+    "key": "godparent",
+    "label": "Godparent of",
+    "inverseLabel": "Godchild of",
+    "symmetric": false,
+    "order": 990
+  },
+  {
+    "key": "in_law",
+    "label": "In-law of",
+    "inverseLabel": "In-law of",
+    "symmetric": true,
+    "order": 1000
+  },
+  {
+    "key": "housemate",
+    "label": "Housemate of",
+    "inverseLabel": "Housemate of",
+    "symmetric": true,
+    "order": 1010
+  },
+  {
+    "key": "caregiver",
+    "label": "Caregiver for",
+    "inverseLabel": "Cared for by",
+    "symmetric": false,
+    "order": 1020
+  },
+  {
+    "key": "ex_spouse",
+    "label": "Formerly married to",
+    "inverseLabel": "Formerly married to",
+    "symmetric": true,
+    "order": 1030
+  }
 ]
