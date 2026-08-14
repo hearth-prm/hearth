@@ -1,6 +1,11 @@
 import type { UserSettings } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { CALENDAR_SYNC_SCOPES, CONTACT_SYNC_SCOPES, grantCovers } from "@/lib/google/scopes";
+import {
+  CALENDAR_SYNC_SCOPES,
+  CONTACT_SYNC_SCOPES,
+  grantCovers,
+} from "@/lib/google/scopes";
+import { normalizeAppearance, type Appearance } from "@/lib/theme";
 
 /**
  * Read a user's settings, creating the default row on first access.
@@ -17,6 +22,21 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
   });
 }
 
+/**
+ * Just the appearance columns, and deliberately without the upsert above.
+ *
+ * The root layout needs these on every single request, and issuing a write per page
+ * view to guarantee a row exists is a bad trade when the absence of one already means
+ * exactly "use the defaults".
+ */
+export async function getAppearance(userId: string): Promise<Appearance> {
+  const row = await prisma.userSettings.findUnique({
+    where: { userId },
+    select: { theme: true, colorScheme: true, accentHue: true },
+  });
+  return normalizeAppearance(row);
+}
+
 export interface GoogleConnection {
   connected: boolean;
   /** Google account email, when we have it. */
@@ -30,7 +50,9 @@ export interface GoogleConnection {
   grantedScopes: string[];
 }
 
-export async function getGoogleConnection(userId: string): Promise<GoogleConnection> {
+export async function getGoogleConnection(
+  userId: string,
+): Promise<GoogleConnection> {
   const account = await prisma.account.findFirst({
     where: { userId, provider: "google" },
     select: { scope: true, refresh_token: true },
@@ -62,7 +84,8 @@ export async function getGoogleConnection(userId: string): Promise<GoogleConnect
     hasRefreshToken: Boolean(account.refresh_token),
     canSyncContacts,
     canSyncCalendar,
-    needsReconnect: !canSyncContacts || !canSyncCalendar || !account.refresh_token,
+    needsReconnect:
+      !canSyncContacts || !canSyncCalendar || !account.refresh_token,
     grantedScopes: (account.scope ?? "").split(/\s+/).filter(Boolean),
   };
 }

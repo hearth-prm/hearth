@@ -32,7 +32,7 @@ function ColorPicker({
         htmlFor={`${idPrefix}-auto`}
         className={`cursor-pointer rounded-full border px-2 py-0.5 text-xs ${
           value === ""
-            ? "border-teal-500 ring-1 ring-teal-500"
+            ? "border-accent-500 ring-1 ring-accent-500"
             : "border-neutral-300 dark:border-neutral-600"
         }`}
       >
@@ -273,7 +273,7 @@ export function PersonLabelsForm({
               name="labelId"
               value={l.id}
               defaultChecked={chosen.has(l.id)}
-              className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+              className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
             />
             <LabelChip label={l} />
           </label>

@@ -218,21 +218,21 @@ export default async function EventPage({
                         <div>
                           <Link
                             href={`/people/${a.person.id}`}
-                            className="text-sm font-medium text-teal-700 hover:underline dark:text-teal-400"
+                            className="text-sm font-medium text-accent-700 hover:underline dark:text-accent-400"
                           >
                             {a.person.displayName}
                           </Link>
                           <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                             {email ?? "no email on file"}
                             {a.rsvpFromGoogleAt ? (
-                              <span className="ml-2 text-teal-600 dark:text-teal-400">
+                              <span className="ml-2 text-accent-600 dark:text-accent-400">
                                 RSVP from Google
                               </span>
                             ) : null}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge tone={a.rsvp === "ACCEPTED" ? "teal" : a.rsvp === "DECLINED" ? "rose" : "neutral"}>
+                          <Badge tone={a.rsvp === "ACCEPTED" ? "accent" : a.rsvp === "DECLINED" ? "rose" : "neutral"}>
                             {RSVP_LABELS[a.rsvp]}
                           </Badge>
                           {canEdit ? (
@@ -288,7 +288,7 @@ export default async function EventPage({
                             type="checkbox"
                             name="inviteToGoogle"
                             defaultChecked={a.inviteToGoogle}
-                            className="size-3.5 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+                            className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
                           />
                           Invite in Google
                         </label>
@@ -334,7 +334,7 @@ export default async function EventPage({
                       href={event.googleHtmlLink}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="text-teal-700 hover:underline dark:text-teal-400"
+                      className="text-accent-700 hover:underline dark:text-accent-400"
                     >
                       Open in Google Calendar
                     </a>
@@ -346,7 +346,7 @@ export default async function EventPage({
                         href={`https://calendar.google.com/calendar/u/0/r/day/${event.startAt.getUTCFullYear()}/${event.startAt.getUTCMonth() + 1}/${event.startAt.getUTCDate()}`}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="text-teal-700 hover:underline dark:text-teal-400"
+                        className="text-accent-700 hover:underline dark:text-accent-400"
                       >
                         Open that day in Google Calendar
                       </a>

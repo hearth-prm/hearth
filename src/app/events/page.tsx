@@ -152,7 +152,7 @@ function EventGroup({
             <div className="min-w-0">
               <Link
                 href={`/events/${event.id}`}
-                className="font-medium text-teal-700 hover:underline dark:text-teal-400"
+                className="font-medium text-accent-700 hover:underline dark:text-accent-400"
               >
                 {event.title}
               </Link>

@@ -267,7 +267,7 @@ function Toggle({
           name={name}
           defaultChecked={defaultChecked}
           disabled={disabled}
-          className="mt-0.5 size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 disabled:opacity-50 dark:border-neutral-600"
+          className="mt-0.5 size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 disabled:opacity-50 dark:border-neutral-600"
         />
         <span>
           <span className={labelClass}>{label}</span>

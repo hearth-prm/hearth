@@ -80,7 +80,7 @@ export function PeopleFilters({
             <input key={id} type="hidden" name="label" value={id} />
           ))}
 
-          <div className="flex min-h-[2.375rem] flex-wrap items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-2 py-1 shadow-sm transition focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/30 dark:border-neutral-700 dark:bg-neutral-900">
+          <div className="flex min-h-[2.375rem] flex-wrap items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-2 py-1 shadow-sm transition focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/30 dark:border-neutral-700 dark:bg-neutral-900">
             <input
               type="search"
               name="q"
@@ -93,7 +93,7 @@ export function PeopleFilters({
               <Link
                 key={p.id}
                 href={p.href}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-teal-50 py-0.5 pl-2 pr-1 text-xs font-medium text-teal-800 transition hover:bg-teal-100 dark:bg-teal-950/60 dark:text-teal-300 dark:hover:bg-teal-900/60"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-50 py-0.5 pl-2 pr-1 text-xs font-medium text-accent-800 transition hover:bg-accent-100 dark:bg-accent-950/60 dark:text-accent-300 dark:hover:bg-accent-900/60"
                 title={`Remove filter: ${p.label}`}
               >
                 {p.label}
@@ -112,7 +112,7 @@ export function PeopleFilters({
           >
             Filter
             {pills.length > 0 ? (
-              <span className="rounded-full bg-teal-600 px-1.5 text-xs font-semibold text-white">
+              <span className="rounded-full bg-accent-600 px-1.5 text-xs font-semibold text-white">
                 {pills.length}
               </span>
             ) : null}
@@ -175,7 +175,7 @@ export function PeopleFilters({
                   {filter.labelIds.length > 1 ? (
                     <Link
                       href={filterHref(filter, { labelMode: filter.allLabels ? null : "all" })}
-                      className="mt-1 block rounded px-2 py-1.5 text-xs text-teal-700 hover:bg-neutral-50 dark:text-teal-400 dark:hover:bg-neutral-800"
+                      className="mt-1 block rounded px-2 py-1.5 text-xs text-accent-700 hover:bg-neutral-50 dark:text-accent-400 dark:hover:bg-neutral-800"
                     >
                       {filter.allLabels
                         ? "matching all — switch to any"
@@ -239,13 +239,13 @@ function Option({
       aria-pressed={on}
       className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-sm transition ${
         on
-          ? "bg-teal-50 text-teal-900 dark:bg-teal-950/60 dark:text-teal-200"
+          ? "bg-accent-50 text-accent-900 dark:bg-accent-950/60 dark:text-accent-200"
           : "text-neutral-700 hover:bg-neutral-50 dark:text-neutral-300 dark:hover:bg-neutral-800"
       }`}
     >
       <span className="min-w-0">{children}</span>
       {on ? (
-        <span aria-hidden className="shrink-0 text-teal-600 dark:text-teal-400">
+        <span aria-hidden className="shrink-0 text-accent-600 dark:text-accent-400">
           ✓
         </span>
       ) : null}

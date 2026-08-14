@@ -40,7 +40,7 @@ export default async function LabelsPage() {
                   {l._count.people > 0 ? (
                     <Link
                       href={`/people?label=${encodeURIComponent(l.id)}`}
-                      className="text-xs text-teal-700 hover:underline dark:text-teal-400"
+                      className="text-xs text-accent-700 hover:underline dark:text-accent-400"
                     >
                       {l._count.people} contact{l._count.people === 1 ? "" : "s"}
                     </Link>

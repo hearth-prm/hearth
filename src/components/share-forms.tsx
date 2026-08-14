@@ -60,7 +60,7 @@ function UserPicker({
             type="checkbox"
             name="userId"
             value={u.id}
-            className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+            className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
           />
           {/* min-w-0 + break-words: an email is unbreakable text in a column that can be
               narrow, and without this it pushed the row past the card's edge. */}

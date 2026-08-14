@@ -27,6 +27,27 @@ that formally marks its milestone.
 
 ### Added
 
+- **Light, dark, or follow the device — and an accent colour of your choosing.** In the
+  header there is a toggle that cycles the three; Settings → Appearance spells them out
+  and offers seven accent schemes plus one you mix yourself. Every choice is per user, so
+  a household sharing an install does not share a colour scheme.
+  - Light/dark is three-valued rather than a boolean, because "follow my machine" is a
+    real preference that has to be distinguishable from "I chose light" — otherwise
+    someone who picks light on a dark-set laptop is overridden by their OS every
+    morning. Tailwind's stock `dark:` variant cannot express that, so Hearth defines its
+    own: it fires on an explicit `data-theme="dark"`, *or* on the system preference when
+    the user has not explicitly chosen light.
+  - **A colour scheme is one number.** All eleven accent shades are derived from a single
+    hue in oklch, which keeps them looking evenly spaced at any hue — something a
+    hand-picked ramp per scheme would not. That is what makes "invent your own" cost an
+    integer rather than a palette table, and it is why the named schemes live in
+    `src/lib/theme.ts` and not in the stylesheet: the CSS only knows how to build a ramp
+    from whatever hue it is handed.
+  - The choice is applied server-side on `<html>`, so the first paint is already correct.
+    There is no flash of the wrong theme and no blocking script to cause one.
+  - Appearance has no Save button. The page you are looking at *is* the preview, so the
+    control writes in the background and says so only if the write fails.
+
 - **Contact photos.** A picture per contact, shown on the contact page and beside every
   row in the list, with initials as the fallback — in a list of two hundred, a repeated
   silhouette is noise, while initials still tell rows apart.
@@ -58,6 +79,41 @@ that formally marks its milestone.
     back to the owner's, and removing the last photo removes it from Google while
     keeping the contact.
 
+- **A contact card for every Hearth user, owned by the head of household.** Signing in
+  now creates a contact for you, so the people using Hearth appear in it on the same
+  footing as everyone else — they can be given relationships, put on events, and
+  labelled.
+  - One user is the **head of household** and owns those cards; Settings names them and
+    can hand the role over, which moves every card with it. Ownership had to sit
+    *somewhere* real: a record owned by nobody would need rules of its own in the single
+    file that decides who may read, write and share anything, and a second set of rules
+    there is the last thing that file should grow.
+  - Each card is shared with every other user **and with the person it describes**, which
+    is the point rather than a curiosity: your own card is a contact your phone can pass
+    on through its ordinary "share contact" function.
+  - Existing installs get cards for their existing users, with the earliest-created
+    elected head, and the email each signed in with seeded on their card.
+
+- **Relationships can be edited after they are created**, not only added and deleted.
+  Type, direction, dates and notes are all changeable; the other person is not, because
+  that is a different relationship rather than an edit to this one.
+  - Type and direction submit as a single field, so the two cannot arrive contradicting
+    each other. For an asymmetric type the form offers both readings — "parent of" and
+    "child of" — and you pick the sentence that is true.
+
+- **Relationship end dates are now shown.** With both dates a relationship reads
+  "2019 to 2024", with only a start "since 2019", and with only an end "until 2024". The
+  end date has been storable for some time and was invisible everywhere.
+
+- **Relationship types for households that are not a couple with children.** The seed
+  adds metamour, co-parent, nesting partner and comparable shapes alongside the
+  traditional set, and no type is implicitly one-of-two. A relationship manager that
+  cannot describe its user's actual household is not managing their relationships.
+
+- **Labels can be created from a contact page.** Settings remains where they are renamed,
+  recoloured and deleted, which is management; having to leave the contact you were
+  looking at in order to invent the label you wanted on it was not.
+
 - **The signed-in user's own picture in the header.** Google has supplied it since the
   first sign-in; it was simply never displayed.
 
@@ -77,7 +133,39 @@ that formally marks its milestone.
   - Only an owner may transfer. An edit share is permission to help maintain a contact,
     not to decide who it belongs to.
 
+- **A share can be taken back.** Each person a contact or event is shared with now has a
+  **Remove** beside them. Granting access was always reversible in principle — there was
+  simply no control for it — and a sharing feature you cannot undo is one people are
+  right to be wary of using.
+
 ### Changed
+
+- **The share picker no longer offers people who already have access.** Their name
+  appearing in the list of candidates implied there was something left to grant, and
+  re-granting was a no-op that looked like a change.
+
+- **Pages use the width they are given.** The content column went from `max-w-5xl` to
+  `max-w-7xl` — on a wide screen the old bound left roughly half the display as margin,
+  and these pages are two columns of cards whose reading width is set by the grid rather
+  than by the page. The air between the nav and the first row came down with it, so the
+  first card reads as attached to the page instead of floating below it.
+
+- **Explanations moved to hover, rather than standing permanently on screen.** A
+  paragraph that tells you how a control works is read once and then occupies space
+  forever. The ones that were pure instruction — the photo uploader's, chiefly — are now
+  a `?` marker that opens on hover *and* on keyboard focus, and is exposed to assistive
+  technology. Text that states a *consequence* rather than an instruction stayed put.
+
+- **The Record card no longer overflows its border.** Its label column was the 11rem one
+  meant for a full-width card; in a 22rem sidebar that left so little room for a value
+  that timestamps wrapped onto three lines and pushed past the edge. Detail rows now have
+  a compact mode, and long unbroken values (a Google resource id, say) wrap instead of
+  widening the grid.
+
+- **The relationship section is no longer mostly padding.** Each row was carrying more
+  vertical space than the single line of text inside it, so a household of six read as a
+  scroll. Rows are now `py-1.5` and each relationship — type, person, dates and note —
+  fits on one line.
 
 - **The contact filters are now a menu and a row of chips**, rather than three rows of
   pills above the list. Selected filters appear inside the search box and each carries

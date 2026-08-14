@@ -68,7 +68,7 @@ export function AttendeePicker({
                 name="attendeeId"
                 value={p.id}
                 defaultChecked={selected.has(p.id)}
-                className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+                className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
               />
               {p.displayName}
             </label>

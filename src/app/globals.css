@@ -1,12 +1,129 @@
 @import "tailwindcss";
 
-/* Let the browser render form controls and scrollbars to match the theme. */
-html {
-  color-scheme: light dark;
+/* ---------------------------------------------------------------------------
+   Dark mode, in three states
+   ---------------------------------------------------------------------------
+   Tailwind's default `dark:` follows prefers-color-scheme only, which cannot
+   express "this user chose light on a machine set to dark". So the variant matches
+   two things: an explicit data-theme="dark" anywhere up the tree, or the system
+   preference when the user has NOT explicitly chosen light.
+
+   The :not([data-theme="light"]) guard is what makes the choice win in both
+   directions. Without it, picking light on a dark machine would leave every
+   dark: utility still firing.
+
+   Every branch is anchored at :root, and that anchor is load-bearing rather than
+   tidiness. A bare :not([data-theme="light"]) is tested against the element the
+   utility sits on — and <body> does not carry the attribute, so it passes the guard
+   no matter what <html> says. Written that way the guard silently does nothing and
+   choosing light on a dark machine still paints dark. Anchoring asks the question of
+   the element that actually holds the attribute.
+   --------------------------------------------------------------------------- */
+@custom-variant dark {
+  &:where(:root[data-theme="dark"], :root[data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
 }
 
-/* Tailwind resets these, but a PRM is a form-heavy app and native validation
-   bubbles / date pickers look wrong without a consistent accent. */
+/* ---------------------------------------------------------------------------
+   The accent colour, as one number
+   ---------------------------------------------------------------------------
+   Every interactive colour in Hearth is one hue's ramp, so a colour scheme is a
+   single value rather than eleven. The lightness and chroma steps below are fixed
+   and perceptual — oklch keeps them looking equally spaced whatever the hue, which
+   a hand-picked hex ramp per scheme would not.
+
+   `@theme inline` matters: it makes accent-* utilities emit var(--accent-N)
+   instead of baking today's value in at build time, which is what lets the scheme
+   change at runtime from an attribute.
+   --------------------------------------------------------------------------- */
+@theme inline {
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-950);
+}
+
 :root {
-  accent-color: theme(--color-teal-600);
+  /* Teal, matching what Hearth shipped with. */
+  --accent-hue: 184;
+
+  --accent-50: oklch(0.98 0.018 var(--accent-hue));
+  --accent-100: oklch(0.951 0.04 var(--accent-hue));
+  --accent-200: oklch(0.902 0.067 var(--accent-hue));
+  --accent-300: oklch(0.833 0.098 var(--accent-hue));
+  --accent-400: oklch(0.744 0.126 var(--accent-hue));
+  --accent-500: oklch(0.664 0.142 var(--accent-hue));
+  --accent-600: oklch(0.582 0.136 var(--accent-hue));
+  --accent-700: oklch(0.5 0.118 var(--accent-hue));
+  --accent-800: oklch(0.424 0.098 var(--accent-hue));
+  --accent-900: oklch(0.362 0.081 var(--accent-hue));
+  --accent-950: oklch(0.265 0.06 var(--accent-hue));
+}
+
+/* The hue always arrives as an inline style on <html>, named scheme or not, so the
+   list of schemes lives in exactly one place (src/lib/theme.ts) instead of being
+   duplicated here where the two copies could drift. "Create your own scheme" is
+   therefore not a special case — it is the same code path with a different number.
+
+   A scheme preview cannot reuse the accent-* utilities: a custom property's var()s
+   are substituted where the property is DECLARED, so setting --accent-hue on a
+   swatch does not re-tint an --accent-500 it inherited from :root. The swatch has to
+   build the colour itself, which is what this does. */
+.hue-swatch {
+  background: oklch(0.664 0.142 var(--accent-hue));
+}
+
+/* The hue slider shows the hues it selects from, drawn at the same lightness and
+   chroma as the mid accent step — so the strip is the actual palette rather than a
+   generic rainbow promising colours the ramp will not produce. */
+.hue-track {
+  background: linear-gradient(to right, oklch(0.664 0.142 0), oklch(0.664 0.142 30), oklch(0.664 0.142 60), oklch(0.664 0.142 90), oklch(0.664 0.142 120), oklch(0.664 0.142 150), oklch(0.664 0.142 180), oklch(0.664 0.142 210), oklch(0.664 0.142 240), oklch(0.664 0.142 270), oklch(0.664 0.142 300), oklch(0.664 0.142 330), oklch(0.664 0.142 360));
+}
+.hue-track::-webkit-slider-thumb {
+  appearance: none;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid oklch(0.45 0 0);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+.hue-track::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid oklch(0.45 0 0);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+html {
+  /* Let the browser render form controls and scrollbars to match, including when
+     the choice disagrees with the system setting. */
+  color-scheme: light dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Tailwind resets this, but a PRM is a form-heavy app and native validation
+   bubbles and date pickers look wrong without a consistent accent. */
+:root {
+  accent-color: var(--accent-600);
 }

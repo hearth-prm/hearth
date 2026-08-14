@@ -12,8 +12,12 @@ import {
 } from "@/lib/relationships";
 import { CONTACT_KIND_LABELS } from "@/lib/people";
 import { getUserSettings } from "@/lib/settings";
-import { formatDateOnly, formatInstant } from "@/lib/time";
-import { addRelationship, removeRelationship } from "@/lib/actions/relationships";
+import { dateOnlyToInput, formatDateOnly, formatInstant } from "@/lib/time";
+import {
+  addRelationship,
+  removeRelationship,
+  updateRelationship,
+} from "@/lib/actions/relationships";
 import { deletePerson } from "@/lib/actions/people";
 import {
   Badge,
@@ -29,6 +33,7 @@ import { SyncBadge } from "@/components/sync-badge";
 import { GoogleContactLink } from "@/components/google-contact-link";
 import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
+import { RelationshipEditForm } from "@/components/relationship-edit-form";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
@@ -201,7 +206,7 @@ export default async function PersonPage({
                     {" "}
                     <Link
                       href={`/people/${person.id}/edit`}
-                      className="text-teal-700 hover:underline dark:text-teal-400"
+                      className="text-accent-700 hover:underline dark:text-accent-400"
                     >
                       Add some details
                     </Link>
@@ -266,7 +271,7 @@ export default async function PersonPage({
                   {relationships.map((rel) => (
                     <li
                       key={rel.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-1.5"
+                      className="flex flex-wrap items-start justify-between gap-2 py-1.5"
                     >
                       <span className="text-sm">
                         <span className="text-neutral-500 dark:text-neutral-400">
@@ -274,7 +279,7 @@ export default async function PersonPage({
                         </span>{" "}
                         <Link
                           href={`/people/${rel.other.id}`}
-                          className="font-medium text-teal-700 hover:underline dark:text-teal-400"
+                          className="font-medium text-accent-700 hover:underline dark:text-accent-400"
                         >
                           {rel.other.displayName}
                         </Link>
@@ -306,14 +311,36 @@ export default async function PersonPage({
                         })()}
                       </span>
                       {canEdit ? (
-                        <DeleteForm
-                          action={removeRelationship}
-                          id={rel.id}
-                          label="Remove"
-                          pendingLabel="Removing…"
-                          className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                          confirmMessage="Remove this relationship?"
-                        />
+                        <span className="flex shrink-0 items-center gap-3">
+                          <RelationshipEditForm
+                            action={updateRelationship}
+                            relationshipId={rel.id}
+                            subjectId={person.id}
+                            subjectName={person.displayName}
+                            otherName={rel.other.displayName}
+                            types={types.map((t) => ({
+                              id: t.id,
+                              label: t.label,
+                              inverseLabel: t.inverseLabel,
+                              symmetric: t.symmetric,
+                            }))}
+                            current={{
+                              typeId: rel.typeId,
+                              outgoing: rel.outgoing,
+                              startedOn: rel.startedOn ? dateOnlyToInput(rel.startedOn) : "",
+                              endedOn: rel.endedOn ? dateOnlyToInput(rel.endedOn) : "",
+                              notes: rel.notes ?? "",
+                            }}
+                          />
+                          <DeleteForm
+                            action={removeRelationship}
+                            id={rel.id}
+                            label="Remove"
+                            pendingLabel="Removing…"
+                            className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                            confirmMessage="Remove this relationship?"
+                          />
+                        </span>
                       ) : null}
                     </li>
                   ))}
@@ -353,7 +380,7 @@ export default async function PersonPage({
                   <li key={a.id} className="px-5 py-3">
                     <Link
                       href={`/events/${a.event.id}`}
-                      className="text-sm font-medium text-teal-700 hover:underline dark:text-teal-400"
+                      className="text-sm font-medium text-accent-700 hover:underline dark:text-accent-400"
                     >
                       {a.event.title}
                     </Link>
@@ -526,14 +553,14 @@ export default async function PersonPage({
 function ContactValue({ kind, value }: { kind: string; value: string }) {
   if (kind === "EMAIL") {
     return (
-      <a href={`mailto:${value}`} className="text-teal-700 hover:underline dark:text-teal-400">
+      <a href={`mailto:${value}`} className="text-accent-700 hover:underline dark:text-accent-400">
         {value}
       </a>
     );
   }
   if (kind === "PHONE") {
     return (
-      <a href={`tel:${value}`} className="text-teal-700 hover:underline dark:text-teal-400">
+      <a href={`tel:${value}`} className="text-accent-700 hover:underline dark:text-accent-400">
         {value}
       </a>
     );
@@ -544,7 +571,7 @@ function ContactValue({ kind, value }: { kind: string; value: string }) {
         href={value}
         target="_blank"
         rel="noreferrer noopener"
-        className="text-teal-700 hover:underline dark:text-teal-400"
+        className="text-accent-700 hover:underline dark:text-accent-400"
       >
         {value}
       </a>

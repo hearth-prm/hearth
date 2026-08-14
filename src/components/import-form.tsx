@@ -85,7 +85,7 @@ export function ImportForm({
               description={`${plan.rows.length} row${plan.rows.length === 1 ? "" : "s"} read from the file.`}
             />
             <div className="flex flex-wrap gap-4 px-5 py-4 text-sm">
-              <Stat label="New contacts" value={plan.counts.create} tone="teal" />
+              <Stat label="New contacts" value={plan.counts.create} tone="accent" />
               <Stat label="Updated" value={plan.counts.update} tone="slate" />
               <Stat label="Skipped" value={plan.counts.skip} tone="neutral" />
               <Stat label="With warnings" value={plan.counts.warnings} tone="amber" />
@@ -158,10 +158,10 @@ function Stat({
 }: {
   label: string;
   value: number;
-  tone: "teal" | "slate" | "amber" | "neutral";
+  tone: "accent" | "slate" | "amber" | "neutral";
 }) {
   const tones = {
-    teal: "text-teal-700 dark:text-teal-400",
+    accent: "text-accent-700 dark:text-accent-400",
     slate: "text-slate-700 dark:text-slate-300",
     amber: "text-amber-700 dark:text-amber-400",
     neutral: "text-neutral-500 dark:text-neutral-400",
@@ -180,7 +180,7 @@ function RowLine({ row }: { row: PlannedRow }) {
       <td className="px-5 py-2 text-xs text-neutral-400">{row.line}</td>
       <td className="px-5 py-2">
         {row.action === "create" ? (
-          <Badge tone="teal">new</Badge>
+          <Badge tone="accent">new</Badge>
         ) : row.action === "update" ? (
           <Badge tone="slate">update</Badge>
         ) : (

@@ -45,7 +45,7 @@ export function FieldInput({
             type="checkbox"
             name={name}
             defaultChecked={fieldCheckedValue(value)}
-            className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+            className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
             aria-describedby={describedBy || undefined}
           />
           <span className={labelClass}>{def.label}</span>
@@ -149,7 +149,7 @@ function Control({
                 name={name}
                 value={opt}
                 defaultChecked={selected.has(opt)}
-                className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+                className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
               />
               {opt}
             </label>

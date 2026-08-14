@@ -91,7 +91,7 @@ export default async function SharingPage() {
                   <Link
                     key={c.id}
                     href={`/people/${c.id}`}
-                    className="text-teal-700 hover:underline dark:text-teal-400"
+                    className="text-accent-700 hover:underline dark:text-accent-400"
                   >
                     {c.displayName}
                     {c.linkedUserId === user.id ? " (you)" : ""}
@@ -149,7 +149,7 @@ export default async function SharingPage() {
                     {s.person ? (
                       <>
                         {" — "}
-                        <Link href={`/people/${s.person.id}`} className="text-teal-700 hover:underline dark:text-teal-400">
+                        <Link href={`/people/${s.person.id}`} className="text-accent-700 hover:underline dark:text-accent-400">
                           {s.person.displayName}
                         </Link>
                       </>
@@ -157,7 +157,7 @@ export default async function SharingPage() {
                     {s.event ? (
                       <>
                         {" — "}
-                        <Link href={`/events/${s.event.id}`} className="text-teal-700 hover:underline dark:text-teal-400">
+                        <Link href={`/events/${s.event.id}`} className="text-accent-700 hover:underline dark:text-accent-400">
                           {s.event.title}
                         </Link>
                       </>

@@ -40,7 +40,7 @@ export function GoogleContactLink({
         href={`https://contacts.google.com/person/${encodeURIComponent(id)}`}
         target="_blank"
         rel="noreferrer noopener"
-        className="text-teal-700 hover:underline dark:text-teal-400"
+        className="text-accent-700 hover:underline dark:text-accent-400"
       >
         Open in Google Contacts
       </a>

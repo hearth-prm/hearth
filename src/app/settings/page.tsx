@@ -14,44 +14,68 @@ import {
 import { listUserCalendars } from "@/lib/google/calendars";
 import { describeActiveProvider, googlePlacesConfigured } from "@/lib/places";
 import { SyncPanel } from "@/components/sync-panel";
-import { Badge, btnSecondary, Card, CardHeader, DetailRow } from "@/components/ui";
+import {
+  Badge,
+  btnSecondary,
+  Card,
+  CardHeader,
+  DetailRow,
+} from "@/components/ui";
 import { SettingsForm } from "@/components/settings-form";
+import { AppearanceForm } from "@/components/appearance-form";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [settings, google, pendingCount, errorCount, eventsPending, eventsError, calendars] =
-    await Promise.all([
-      getUserSettings(user.id),
-      getGoogleConnection(user.id),
-      // Counts for THIS account's copies, including shared contacts it must push.
-      prisma.person.count({
-        where: {
-          AND: [
-            readablePeopleWhere(user.id),
-            { addToGoogle: true },
-            {
-              OR: [
-                { googleSyncs: { none: { userId: user.id } } },
-                { googleSyncs: { some: { userId: user.id, googleSyncStatus: "PENDING" } } },
-              ],
-            },
-          ],
-        },
-      }),
-      prisma.personSync.count({
-        where: { userId: user.id, googleSyncStatus: "ERROR" },
-      }),
-      prisma.event.count({
-        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "PENDING" },
-      }),
-      prisma.event.count({
-        where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
-      }),
-      listUserCalendars(user.id),
-    ]);
+  const [
+    settings,
+    google,
+    pendingCount,
+    errorCount,
+    eventsPending,
+    eventsError,
+    calendars,
+  ] = await Promise.all([
+    getUserSettings(user.id),
+    getGoogleConnection(user.id),
+    // Counts for THIS account's copies, including shared contacts it must push.
+    prisma.person.count({
+      where: {
+        AND: [
+          readablePeopleWhere(user.id),
+          { addToGoogle: true },
+          {
+            OR: [
+              { googleSyncs: { none: { userId: user.id } } },
+              {
+                googleSyncs: {
+                  some: { userId: user.id, googleSyncStatus: "PENDING" },
+                },
+              },
+            ],
+          },
+        ],
+      },
+    }),
+    prisma.personSync.count({
+      where: { userId: user.id, googleSyncStatus: "ERROR" },
+    }),
+    prisma.event.count({
+      where: {
+        ownerId: user.id,
+        addToGoogle: true,
+        googleSyncStatus: "PENDING",
+      },
+    }),
+    prisma.event.count({
+      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+    }),
+    listUserCalendars(user.id),
+  ]);
 
   return (
     <div className="space-y-6">
+      <AppearanceForm />
+
       <Card>
         <CardHeader
           title="Google account"
@@ -59,7 +83,7 @@ export default async function SettingsPage() {
             google.needsReconnect ? (
               <Badge tone="amber">Reconnect needed</Badge>
             ) : (
-              <Badge tone="teal">Connected</Badge>
+              <Badge tone="accent">Connected</Badge>
             )
           }
         />
@@ -82,8 +106,8 @@ export default async function SettingsPage() {
           {google.needsReconnect ? (
             <p className="mb-3 text-sm text-amber-700 dark:text-amber-400">
               Hearth is missing a permission it needs
-              {google.hasRefreshToken ? "" : ", or offline access"}. Reconnecting
-              re-prompts Google for consent.
+              {google.hasRefreshToken ? "" : ", or offline access"}.
+              Reconnecting re-prompts Google for consent.
             </p>
           ) : null}
           <form
@@ -93,7 +117,9 @@ export default async function SettingsPage() {
             }}
           >
             <button type="submit" className={btnSecondary}>
-              {google.needsReconnect ? "Reconnect Google" : "Re-authorise Google"}
+              {google.needsReconnect
+                ? "Reconnect Google"
+                : "Re-authorise Google"}
             </button>
           </form>
 

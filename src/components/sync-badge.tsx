@@ -12,7 +12,7 @@ export function SyncBadge({
 
   switch (status) {
     case "SYNCED":
-      return <Badge tone="teal">In Google</Badge>;
+      return <Badge tone="accent">In Google</Badge>;
     case "ERROR":
       return <Badge tone="rose">Sync error</Badge>;
     case "DISABLED":

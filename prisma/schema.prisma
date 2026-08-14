@@ -139,6 +139,17 @@ model UserSettings {
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
+  /// light | dark | system. "system" stores nothing on the html element and lets
+  /// prefers-color-scheme decide, which is why it is a third value rather than a
+  /// boolean: "follow my machine" is a real preference, not the absence of one.
+  theme               String  @default("system")
+  /// Named accent scheme, or "custom" to use accentHue.
+  colorScheme         String  @default("teal")
+  /// Hue in degrees for a scheme the user mixed themselves. The whole palette is
+  /// derived from it in oklch, so a bespoke scheme costs one number rather than
+  /// eleven colours that have to look evenly spaced by hand.
+  accentHue           Int     @default(184)
+
   /// Which service backs place search on the event location field.
   ///
   /// "auto" uses Google Places when GOOGLE_PLACES_API_KEY is set and OpenStreetMap

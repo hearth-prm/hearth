@@ -33,8 +33,11 @@ async function statusText(page: Page): Promise<string> {
  *
  * statusText gives up after five seconds and returns "", which lets an assertion run
  * against state the action has not finished writing — a flake that looks exactly like a
- * behaviour change. When a test depends on the write having landed, it has to wait for
- * the message that says so.
+ * behaviour change.
+ *
+ * Only for messages that persist. An action that calls revalidatePath on the page its
+ * own form sits in can have that message replaced by the refresh before it is ever
+ * observed, so waiting on it is itself a race — use waitForDb for those.
  */
 async function waitForStatus(page: Page, contains: string): Promise<string> {
   await page.waitForFunction(
@@ -43,6 +46,26 @@ async function waitForStatus(page: Page, contains: string): Promise<string> {
     { timeout: 30_000 },
   );
   return (await page.textContent('[role="status"]')) ?? "";
+}
+
+/**
+ * Wait for the write itself, rather than for a message about it.
+ *
+ * The honest signal when a test cares that something landed: a toast is a courtesy to the
+ * user and may be swept away by the very revalidation that proves the save worked, while
+ * the row either exists or does not.
+ */
+async function waitForDb(
+  label: string,
+  holds: () => Promise<boolean>,
+  timeoutMs = 20_000,
+): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await holds().catch(() => false)) return;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  console.log(`     (gave up waiting for ${label})`);
 }
 
 const h = await start();
@@ -128,7 +151,9 @@ try {
   await A.page.goto("/settings/labels");
   ok("1.11 an unused label says so", (await A.page.textContent("body"))?.includes("not used yet") === true);
 
-  // Delete needs the confirm() dialog accepted.
+  // Delete needs the confirm() dialog accepted. Registered ONCE for the whole run: a
+  // page-level listener outlives the section that adds it, so a second registration
+  // means two handlers race to accept the same dialog and the loser throws.
   A.page.on("dialog", (d) => d.accept());
   const coloured2 = await prisma.label.findFirstOrThrow({ where: { ownerId: A.id, name: "Coloured" } });
   await A.page.click(`li:has-text("Coloured") button:has-text("Delete")`);
@@ -161,7 +186,8 @@ try {
   await A.page.check(`#pl-${sam.id}-${family.id}`);
   await A.page.check(`#pl-${sam.id}-${vipLabel.id}`);
   await A.page.click('button:has-text("Save labels")');
-  await waitForStatus(A.page, "Labels saved");
+  await waitForDb("both labels applied", async () =>
+    (await prisma.personLabel.count({ where: { personId: sam.id } })) === 2);
   let applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
   ok("2.2 both labels are applied", applied.length === 2, applied.length);
 
@@ -184,7 +210,8 @@ try {
   await A.page.click('button:has-text("Change labels")');
   await A.page.uncheck(`#pl-${sam.id}-${vipLabel.id}`);
   await A.page.click('button:has-text("Save labels")');
-  await waitForStatus(A.page, "Labels saved");
+  await waitForDb("one label left", async () =>
+    (await prisma.personLabel.count({ where: { personId: sam.id } })) === 1);
   applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
   ok("2.5 unticking a label DOES remove it", applied.length === 1 && applied[0]!.labelId === family.id, applied);
 
@@ -203,7 +230,8 @@ try {
   await B.page.click('button:has-text("Change labels")');
   await B.page.check(`#pl-${sam.id}-${vipLabel.id}`);
   await B.page.click('button:has-text("Save labels")');
-  await waitForStatus(B.page, "Labels saved");
+  await waitForDb("B's label applied", async () =>
+    (await prisma.personLabel.count({ where: { personId: sam.id } })) === 2);
   applied = await prisma.personLabel.findMany({ where: { personId: sam.id } });
   ok("2.7 B can apply one of A's labels", applied.length === 2,
      applied.map((a) => a.labelId));
@@ -1088,6 +1116,324 @@ try {
   await B.page.goto(`/people/${sam.id}`);
   ok("11.5 an EDIT recipient is not offered a transfer",
      (await B.page.textContent("body"))?.includes("Transfer ownership") !== true);
+
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§12 Household cards");
+
+  // The harness signs users in directly, so cards come from ensureContactCard rather
+  // than the createUser hook — the same function the hook calls.
+  const { ensureContactCard } = await import("@/lib/household");
+  for (const who of [A, B]) await ensureContactCard(who.id);
+
+  const heads = await prisma.user.count({ where: { isHeadOfHousehold: true } });
+  ok("12.1 exactly one head of household", heads === 1, heads);
+
+  const aCard = await prisma.person.findFirst({
+    where: { linkedUserId: A.id },
+    include: { owner: { select: { email: true } }, shares: true, contactPoints: true },
+  });
+  const bCard = await prisma.person.findFirst({
+    where: { linkedUserId: B.id },
+    include: { owner: { select: { email: true } }, shares: true },
+  });
+  ok("12.2 each user has a card", Boolean(aCard && bCard));
+  ok("12.2b named from their profile", aCard?.displayName === "Alice", aCard?.displayName);
+  ok("12.2c with their email on it",
+     aCard?.contactPoints.some((c) => c.value === "alice@e2e.test") === true,
+     aCard?.contactPoints.length);
+  ok("12.3 both owned by the head",
+     aCard?.owner.email === bCard?.owner.email, [aCard?.owner.email, bCard?.owner.email]);
+  ok("12.4 a card is shared with the user it is about — that is what reaches their Google",
+     bCard?.shares.some((sh) => sh.withUserId === B.id) === true ||
+       bCard?.ownerId === B.id,
+     bCard?.shares.length);
+
+  await B.page.goto(`/people/${aCard!.id}`);
+  ok("12.5 a non-owner can open somebody's card",
+     (await B.page.textContent("body"))?.includes("Alice") === true);
+  ok("12.5b and may edit it", (await B.page.$$('a:has-text("Edit")')).length === 1);
+
+  await A.page.goto("/settings/sharing");
+  const sharingText = (await A.page.textContent("body")) ?? "";
+  ok("12.6 settings shows the household", sharingText.includes("Head of household"));
+  ok("12.6b and lists the cards", sharingText.includes("Alice") && sharingText.includes("Bob"));
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§13 Relationship editing");
+
+  const relTarget = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Rel Target", givenName: "Rel", familyName: "Target" },
+  });
+  const parentType = await prisma.relationshipType.findFirstOrThrow({
+    where: { key: "parent", ownerId: null },
+  });
+  await prisma.relationship.create({
+    data: { ownerId: A.id, fromPersonId: sam.id, toPersonId: relTarget.id, typeId: parentType.id },
+  });
+
+  await A.page.goto(`/people/${sam.id}`);
+  ok("13.1 the row reads from this contact's side",
+     (await A.page.textContent("body"))?.includes("Parent of") === true);
+  ok("13.2 an Edit control sits beside Remove",
+     (await A.page.$$('button:has-text("Edit")')).length >= 1);
+
+  await A.page.click('li:has-text("Rel Target") button:has-text("Edit")');
+  await A.page.waitForSelector('select[name="typeDirection"]', { timeout: 10_000 });
+  const opts = await A.page.$$eval('select[name="typeDirection"] option', (els) =>
+    els.map((e) => e.textContent?.trim()));
+  ok("13.3 both readings of an asymmetric type are offered",
+     opts.includes("Parent of") && opts.includes("Child of"), opts.slice(0, 6));
+  ok("13.3b a symmetric type appears once",
+     opts.filter((o) => o === "Sibling of").length === 1, opts.filter((o) => o === "Sibling of"));
+
+  // Dates, and the "from X to Y" rendering they drive.
+  await A.page.fill('input[name="startedOn"]', "2001-05-06");
+  await A.page.fill('input[name="endedOn"]', "2020-01-02");
+  await A.page.fill('input[name="notes"]', "adopted");
+  await A.page.click('form:has(select[name="typeDirection"]) button:has-text("Save")');
+  await waitForDb("the dates saved", async () =>
+    (await prisma.relationship.count({ where: { notes: "adopted" } })) === 1);
+
+  const saved = await prisma.relationship.findFirstOrThrow({ where: { toPersonId: relTarget.id } });
+  ok("13.4 dates and notes are saved",
+     saved.startedOn?.toISOString().slice(0, 10) === "2001-05-06" &&
+     saved.endedOn?.toISOString().slice(0, 10) === "2020-01-02" && saved.notes === "adopted",
+     { s: saved.startedOn, e: saved.endedOn, n: saved.notes });
+
+  await A.page.goto(`/people/${sam.id}`);
+  ok("13.5 an ended relationship reads as a range, not just a start",
+     /2001.*to.*2020|2001.*2020/.test((await A.page.textContent("body")) ?? ""),
+     (await A.page.textContent('li:has-text("Rel Target")')));
+
+  // Flipping direction from the far end — the case that would reverse a family tree.
+  await A.page.goto(`/people/${relTarget.id}`);
+  ok("13.6 the far end reads as the inverse",
+     (await A.page.textContent("body"))?.includes("Child of") === true);
+  await A.page.click('li:has-text("Sam") button:has-text("Edit")');
+  await A.page.waitForSelector('select[name="typeDirection"]', { timeout: 10_000 });
+  await A.page.selectOption('select[name="typeDirection"]', { label: "Parent of" });
+  await A.page.click('form:has(select[name="typeDirection"]) button:has-text("Save")');
+  await waitForDb("the direction flipped", async () =>
+    (await prisma.relationship.findUniqueOrThrow({ where: { id: saved.id } })).fromPersonId
+      === relTarget.id);
+
+  const flipped = await prisma.relationship.findFirstOrThrow({
+    where: { id: saved.id },
+  });
+  ok("13.7 choosing 'Parent of' here makes THIS contact the parent",
+     flipped.fromPersonId === relTarget.id && flipped.toPersonId === sam.id,
+     { from: flipped.fromPersonId === relTarget.id ? "target" : "sam" });
+  await A.page.goto(`/people/${sam.id}`);
+  ok("13.7b so the other page now reads 'Child of'",
+     (await A.page.textContent('li:has-text("Rel Target")'))?.includes("Child of") === true,
+     await A.page.textContent('li:has-text("Rel Target")'));
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§14 Labels from a contact, and sharing controls");
+
+  const inlineTarget = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Inline Ida", givenName: "Inline", familyName: "Ida" },
+  });
+  await A.page.goto(`/people/${inlineTarget.id}`);
+  await A.page.click('button:has-text("Add labels")');
+  await A.page.fill('input[name="newLabel"]', "Invented Here");
+  await A.page.click('button:has-text("Save labels")');
+  await waitForDb("the invented label exists", async () =>
+    (await prisma.label.count({ where: { ownerId: A.id, name: "Invented Here" } })) === 1);
+  ok("14.1 a label typed on a contact page is created",
+     (await prisma.label.count({ where: { ownerId: A.id, name: "Invented Here" } })) === 1);
+  ok("14.1b and applied to that contact",
+     (await prisma.personLabel.count({ where: { personId: inlineTarget.id } })) === 1);
+
+  await A.page.goto("/settings/labels");
+  ok("14.1c and shows up in settings alongside the rest",
+     (await A.page.textContent("body"))?.includes("Invented Here") === true);
+
+  // Sharing: someone who already has access is not offered again, and can be removed.
+  const shareTarget = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Share Sid", givenName: "Share", familyName: "Sid" },
+  });
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: B.id, personId: shareTarget.id, scope: "PERSON", permission: "VIEW" },
+  });
+  await A.page.goto(`/people/${shareTarget.id}`);
+  const sharingCard = (await A.page.textContent("body")) ?? "";
+  ok("14.2 an existing recipient is listed with their permission",
+     sharingCard.includes("bob@e2e.test") && sharingCard.includes("view only"));
+  ok("14.2b and is NOT offered in the picker as well",
+     !sharingCard.includes("already has access"), true);
+  // The claim is about who is offered, not how many: §11 added a third user, so the
+  // picker legitimately still has somebody in it.
+  const offered = await A.page.$$eval('input[name="userId"]', (els) =>
+    els.map((e) => (e as HTMLInputElement).value));
+  ok("14.2c the existing recipient is not among those offered",
+     !offered.includes(B.id), offered.length);
+  ok("14.2d but somebody who has no access still is", offered.length >= 1, offered.length);
+
+  // The dialog handler from §1 is still in force; see the note there.
+  await A.page.click('button:has-text("Remove")');
+  await A.page.waitForFunction(
+    () => !document.body.textContent?.includes("view only"),
+    undefined, { timeout: 20_000 },
+  ).catch(() => {});
+  ok("14.3 a share can be removed from the contact page",
+     (await prisma.share.count({ where: { personId: shareTarget.id } })) === 0);
+  await A.page.goto(`/people/${shareTarget.id}`);
+  ok("14.3b and the picker offers them again",
+     (await A.page.$$eval('input[name="userId"]', (els) =>
+       els.map((e) => (e as HTMLInputElement).value))).includes(B.id));
+
+  // ---------------------------------------------------------------------------
+  section("§15 Appearance: light/dark and colour schemes");
+  // ---------------------------------------------------------------------------
+  // The claim worth testing is not "an attribute changed" — it is that the accent
+  // utilities and the dark: variant recompute from it. So most of these read the
+  // colour the browser actually painted, and the paint probe reloads a page so the
+  // server-rendered path is exercised rather than only the client one.
+
+  const htmlState = () =>
+    A.page.evaluate(() => ({
+      theme: document.documentElement.getAttribute("data-theme"),
+      scheme: document.documentElement.getAttribute("data-scheme"),
+      hue: document.documentElement.style.getPropertyValue("--accent-hue").trim(),
+    }));
+  /** What bg-accent-600 resolves to, read from the New contact button. */
+  const accentPaint = async () => {
+    await A.page.goto("/people");
+    return A.page.evaluate(() => {
+      const el = document.querySelector('a[href="/people/new"]');
+      return el ? getComputedStyle(el).backgroundColor : "";
+    });
+  };
+  const bodyPaint = () =>
+    A.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const settingsRow = () => prisma.userSettings.findUnique({ where: { userId: A.id } });
+
+  await A.page.emulateMedia({ colorScheme: "light" });
+  await A.page.goto("/settings");
+  let state = await htmlState();
+  ok("15.1 light and dark defaults to following the device", state.theme === null, state);
+  ok("15.1b and the accent to the scheme Hearth ships with",
+     state.scheme === "teal" && state.hue === "184", state);
+  const systemLightBg = await bodyPaint();
+  const tealPaint = await accentPaint();
+
+  await A.page.goto("/settings");
+  await A.page.click('button[role="radio"]:has-text("Rose")');
+  await A.page.waitForFunction(
+    () => document.documentElement.style.getPropertyValue("--accent-hue").trim() === "14",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  state = await htmlState();
+  ok("15.2 a scheme applies on the spot, with nothing to save",
+     state.scheme === "rose" && state.hue === "14", state);
+  await waitForDb("the scheme to be stored", async () =>
+    (await settingsRow())?.colorScheme === "rose");
+  ok("15.2b and is stored without a form submit",
+     (await settingsRow())?.colorScheme === "rose", (await settingsRow())?.colorScheme);
+  const rosePaint = await accentPaint();
+  ok("15.2c and every accent utility repaints, server-rendered",
+     rosePaint !== tealPaint && rosePaint !== "", `${tealPaint} -> ${rosePaint}`);
+
+  // Three states, tested as three. The nav toggle cycles system → light → dark.
+  await A.page.goto("/settings");
+  await A.page.click("header button[data-theme-choice]");
+  await A.page.waitForFunction(
+    () => document.documentElement.getAttribute("data-theme") === "light",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.3 the nav toggle moves off system", (await htmlState()).theme === "light");
+  await A.page.click("header button[data-theme-choice]");
+  await A.page.waitForFunction(
+    () => document.documentElement.getAttribute("data-theme") === "dark",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.3b and on to dark", (await htmlState()).theme === "dark");
+  const darkBg = await bodyPaint();
+  // This is the half stock Tailwind cannot do: dark styling with the device set light.
+  ok("15.3c dark: fires from the attribute alone, on a device set to light",
+     darkBg !== systemLightBg && darkBg !== "", `${systemLightBg} -> ${darkBg}`);
+
+  await A.page.emulateMedia({ colorScheme: "dark" });
+  await A.page.click("header button[data-theme-choice]");
+  await A.page.waitForFunction(
+    () => !document.documentElement.hasAttribute("data-theme"),
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.4 back on system, the device decides", (await bodyPaint()) === darkBg);
+  await A.page.click("header button[data-theme-choice]");
+  await A.page.waitForFunction(
+    () => document.documentElement.getAttribute("data-theme") === "light",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.4b and choosing light beats a device set to dark",
+     (await bodyPaint()) === systemLightBg, await bodyPaint());
+  await waitForDb("the theme to be stored", async () => (await settingsRow())?.theme === "light");
+  ok("15.4c which is stored", (await settingsRow())?.theme === "light", (await settingsRow())?.theme);
+  await A.page.reload();
+  ok("15.4d and comes back server-rendered, still beating the device",
+     (await htmlState()).theme === "light" && (await bodyPaint()) === systemLightBg);
+  await A.page.emulateMedia({ colorScheme: "light" });
+
+  // A hue of one's own.
+  await A.page.goto("/settings");
+  await A.page.click('button[role="radio"]:has-text("Custom")');
+  await A.page.waitForSelector("#accentHue", { timeout: 10_000 });
+  ok("15.5 Custom starts from the colour already in use, so nothing jumps",
+     (await htmlState()).hue === "14", await htmlState());
+
+  // Driving a range input needs the native value setter: assigning .value is swallowed
+  // by React's value tracker. The events after it are the ones the control listens to,
+  // so this exercises the real preview-then-commit path rather than going around it.
+  await A.page.$eval("#accentHue", (el) => {
+    const input = el as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input, "300",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("pointerup", { bubbles: true }));
+  });
+  await A.page.waitForFunction(
+    () => document.documentElement.style.getPropertyValue("--accent-hue").trim() === "300",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.5b the slider mixes a scheme that is not on the list",
+     (await htmlState()).hue === "300", await htmlState());
+  await waitForDb("the custom hue to be stored", async () => {
+    const row = await settingsRow();
+    return row?.colorScheme === "custom" && row?.accentHue === 300;
+  });
+  const customRow = await settingsRow();
+  ok("15.5c and one number is the whole scheme",
+     customRow?.colorScheme === "custom" && customRow?.accentHue === 300,
+     `${customRow?.colorScheme}/${customRow?.accentHue}`);
+  const customPaint = await accentPaint();
+  ok("15.5d which paints what neither named scheme does",
+     customPaint !== rosePaint && customPaint !== tealPaint && customPaint !== "",
+     customPaint);
+
+  await A.page.goto("/settings");
+  await A.page.press("#accentHue", "ArrowRight");
+  await A.page.waitForFunction(
+    () => document.documentElement.style.getPropertyValue("--accent-hue").trim() === "301",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("15.6 the slider is keyboard operable", (await htmlState()).hue === "301",
+     await htmlState());
+  await waitForDb("the keyboard change to be stored", async () =>
+    (await settingsRow())?.accentHue === 301);
+  ok("15.6b and a keyboard change saves like a dragged one",
+     (await settingsRow())?.accentHue === 301, (await settingsRow())?.accentHue);
+
+  // Appearance is per-user, like everything else on that page.
+  await B.page.goto("/people");
+  const bState = await B.page.evaluate(() => ({
+    theme: document.documentElement.getAttribute("data-theme"),
+    hue: document.documentElement.style.getPropertyValue("--accent-hue").trim(),
+  }));
+  ok("15.7 another user keeps their own appearance",
+     bState.theme === null && bState.hue === "184", bState);
 
 } finally {
   await h.stop();

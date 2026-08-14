@@ -56,6 +56,10 @@ export interface RelationshipView {
   id: string;
   /** How the link reads from the subject's point of view. */
   label: string;
+  /** For the edit form: which type this is, and which way round the subject sits. */
+  typeId: string;
+  /** True when the subject is the type's `from` side, so `label` is type.label. */
+  outgoing: boolean;
   /** The person at the other end. */
   other: Pick<Person, "id" | "displayName">;
   notes: string | null;
@@ -79,11 +83,45 @@ export function viewFrom(
   return {
     id: rel.id,
     label: outgoing ? rel.type.label : rel.type.inverseLabel,
+    typeId: rel.typeId,
+    outgoing,
     other: outgoing ? rel.to : rel.from,
     notes: rel.notes,
     startedOn: rel.startedOn,
     endedOn: rel.endedOn,
   };
+}
+
+/**
+ * Which way round a relationship should be stored, given who edited it.
+ *
+ * One row serves both people, so an edit submitted from Jill's page picks a label as Jill
+ * reads it. Storing that verbatim would silently reverse the family tree: choosing
+ * "Parent of" on Jill's page has to make JILL the parent, which means moving her to the
+ * `from` side. This is also how a relationship entered backwards gets corrected.
+ *
+ * Pure, and separated from the action, because it is the only part with a rule in it —
+ * and a server action cannot be called outside a request scope, so logic left inside one
+ * can only be tested through a browser.
+ *
+ * Returns null when the subject is not party to the relationship at all, which means a
+ * stale form or a hand-made request.
+ */
+export function orientRelationship(
+  existing: { fromPersonId: string; toPersonId: string },
+  subjectId: string,
+  subjectIsFrom: boolean,
+): { fromPersonId: string; toPersonId: string } | null {
+  const involved =
+    existing.fromPersonId === subjectId || existing.toPersonId === subjectId;
+  if (!involved) return null;
+
+  const otherId =
+    existing.fromPersonId === subjectId ? existing.toPersonId : existing.fromPersonId;
+
+  return subjectIsFrom
+    ? { fromPersonId: subjectId, toPersonId: otherId }
+    : { fromPersonId: otherId, toPersonId: subjectId };
 }
 
 /**

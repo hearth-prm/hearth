@@ -106,7 +106,7 @@ export default async function PeoplePage({
       {typeof params.gave === "string" && params.gave ? (
         <p
           role="status"
-          className="mb-4 rounded-md bg-teal-50 px-3 py-2 text-sm text-teal-800 dark:bg-teal-950/60 dark:text-teal-300"
+          className="mb-4 rounded-md bg-accent-50 px-3 py-2 text-sm text-accent-800 dark:bg-accent-950/60 dark:text-accent-300"
         >
           <strong className="font-medium">{params.gave}</strong> now belongs to someone
           else.{" "}
@@ -184,7 +184,7 @@ export default async function PeoplePage({
                         />
                         <Link
                           href={`/people/${person.id}`}
-                          className="font-medium text-teal-700 hover:underline dark:text-teal-400"
+                          className="font-medium text-accent-700 hover:underline dark:text-accent-400"
                         >
                           {person.displayName}
                         </Link>
@@ -240,7 +240,7 @@ export default async function PeoplePage({
             selection mechanism — you filter the list, then export what you see. */}
         <Link
           href={`/api/people/export${buildExportQuery(params)}`}
-          className="text-teal-700 underline dark:text-teal-400"
+          className="text-accent-700 underline dark:text-accent-400"
         >
           Export {filtered ? "these" : "all"} as CSV
         </Link>

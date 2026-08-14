@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
  */
 
 export const inputClass =
-  "w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 shadow-sm outline-none transition placeholder:text-neutral-400 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500";
+  "w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 shadow-sm outline-none transition placeholder:text-neutral-400 focus:border-accent-500 focus:ring-2 focus:ring-accent-500/30 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-500";
 
 export const labelClass =
   "block text-sm font-medium text-neutral-700 dark:text-neutral-300";
@@ -20,7 +20,7 @@ export const helpClass = "mt-1 text-xs text-neutral-500 dark:text-neutral-400";
 export const errorClass = "mt-1 text-xs text-rose-600 dark:text-rose-400";
 
 export const btnPrimary =
-  "inline-flex items-center justify-center gap-1.5 rounded-md bg-teal-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 disabled:opacity-60";
+  "inline-flex items-center justify-center gap-1.5 rounded-md bg-accent-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-accent-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600 disabled:opacity-60";
 
 export const btnSecondary =
   "inline-flex items-center justify-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3.5 py-2 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800";
@@ -129,12 +129,12 @@ export function EmptyState({
   );
 }
 
-type BadgeTone = "neutral" | "teal" | "amber" | "rose" | "slate";
+type BadgeTone = "neutral" | "accent" | "amber" | "rose" | "slate";
 
 const badgeTones: Record<BadgeTone, string> = {
   neutral:
     "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300",
-  teal: "bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300",
+  accent: "bg-accent-100 text-accent-800 dark:bg-accent-950 dark:text-accent-300",
   amber: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
   rose: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
   slate: "bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400",
@@ -203,7 +203,7 @@ export function Hint({ children, label = "What is this?" }: { children: ReactNod
       <button
         type="button"
         aria-label={label}
-        className="flex size-4 cursor-help items-center justify-center rounded-full border border-neutral-300 text-[10px] font-semibold leading-none text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-500 dark:border-neutral-600 dark:text-neutral-400 dark:hover:text-neutral-200"
+        className="flex size-4 cursor-help items-center justify-center rounded-full border border-neutral-300 text-[10px] font-semibold leading-none text-neutral-500 transition hover:border-neutral-400 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-500 dark:border-neutral-600 dark:text-neutral-400 dark:hover:text-neutral-200"
       >
         ?
       </button>
@@ -230,7 +230,7 @@ export function FormMessage({
       role="status"
       className={`rounded-md px-3 py-2 text-sm ${
         ok
-          ? "bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300"
+          ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
           : "bg-rose-50 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
       }`}
     >

@@ -127,7 +127,7 @@ export function FieldCreateForm({
             <input
               type="checkbox"
               name="required"
-              className="size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+              className="size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
             />
             Required
           </label>
@@ -135,7 +135,7 @@ export function FieldCreateForm({
             <input
               type="checkbox"
               name="showInList"
-              className="size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+              className="size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
             />
             Show as a column in lists
           </label>
@@ -225,7 +225,7 @@ export function FieldEditForm({
             type="checkbox"
             name="required"
             defaultChecked={field.required}
-            className="size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+            className="size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
           />
           Required
         </label>
@@ -234,7 +234,7 @@ export function FieldEditForm({
             type="checkbox"
             name="showInList"
             defaultChecked={field.showInList}
-            className="size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+            className="size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
           />
           Show as a column in lists
         </label>

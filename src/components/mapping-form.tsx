@@ -68,7 +68,7 @@ export function MappingForm({
                     type="checkbox"
                     name={`send_${row.fieldKey}`}
                     defaultChecked={row.target !== NO_TARGET}
-                    className="size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+                    className="size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
                   />
                   Send
                 </label>

@@ -101,7 +101,7 @@ export function TransferForm({
                 value={value}
                 checked={kept === value}
                 onChange={() => setKept(value)}
-                className="mt-1 size-4 border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+                className="mt-1 size-4 border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
               />
               <span>{text}</span>
             </label>

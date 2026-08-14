@@ -66,7 +66,7 @@ export function RelationshipTypeForm({
           name="symmetric"
           checked={symmetric}
           onChange={(e) => setSymmetric(e.target.checked)}
-          className="mt-0.5 size-4 rounded border-neutral-300 text-teal-600 dark:border-neutral-600"
+          className="mt-0.5 size-4 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
         />
         <span>
           <span className={labelClass}>Direction does not matter</span>

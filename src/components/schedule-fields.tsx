@@ -51,7 +51,7 @@ export function ScheduleFields({
           name={fieldInputName("allDay")}
           checked={isAllDay}
           onChange={(e) => setIsAllDay(e.target.checked)}
-          className="size-4 rounded border-neutral-300 text-teal-600 focus:ring-teal-500 dark:border-neutral-600"
+          className="size-4 rounded border-neutral-300 text-accent-600 focus:ring-accent-500 dark:border-neutral-600"
         />
         <span className={labelClass}>All day</span>
       </label>
