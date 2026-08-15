@@ -95,6 +95,11 @@ export default async function SettingsPage() {
           <DetailRow label="Calendar permission">
             {google.canSyncCalendar ? "Granted" : "Not granted"}
           </DetailRow>
+          <DetailRow label="Send mail permission">
+            {google.canSendMail
+              ? "Granted — thank-you lists can be emailed"
+              : "Not granted — reconnect to email thank-you lists"}
+          </DetailRow>
           <DetailRow label="Offline access">
             {google.hasRefreshToken
               ? "Yes — background sync can refresh its own token"

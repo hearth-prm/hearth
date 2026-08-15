@@ -131,6 +131,26 @@ export function writableEventsWhere(userId: string): Prisma.EventWhereInput {
   };
 }
 
+/**
+ * A gift follows its RECIPIENT.
+ *
+ * Not its own sharing dimension, and not its recorder: the question a gift answers is
+ * "what does this person have to say thank you for", so whoever may see that person
+ * may see it. That makes a gift for a contact your partner shared with you appear
+ * without a second set of rules to keep in step with the first — and it means a gift
+ * cannot become a back door to a contact you were never given.
+ *
+ * The giver is deliberately not consulted. Being able to see Mary does not entitle you
+ * to the list of what she gave a household you have no access to.
+ */
+export function readableGiftsWhere(userId: string): Prisma.GiftWhereInput {
+  return { recipient: readablePeopleWhere(userId) };
+}
+
+export function writableGiftsWhere(userId: string): Prisma.GiftWhereInput {
+  return { recipient: writablePeopleWhere(userId) };
+}
+
 /** Deleting is the owner's alone, whatever has been shared. */
 export function ownedPeopleWhere(userId: string): Prisma.PersonWhereInput {
   return { ownerId: userId };

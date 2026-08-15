@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import {
   CALENDAR_SYNC_SCOPES,
   CONTACT_SYNC_SCOPES,
+  MAIL_SEND_SCOPES,
   grantCovers,
 } from "@/lib/google/scopes";
 import { normalizeAppearance, type Appearance } from "@/lib/theme";
@@ -51,6 +52,8 @@ export interface GoogleConnection {
   hasRefreshToken: boolean;
   canSyncContacts: boolean;
   canSyncCalendar: boolean;
+  /** Whether a thank-you list can be emailed. */
+  canSendMail: boolean;
   /** True when the stored grant is missing scopes we now need. */
   needsReconnect: boolean;
   grantedScopes: string[];
@@ -71,6 +74,7 @@ export async function getGoogleConnection(
       hasRefreshToken: false,
       canSyncContacts: false,
       canSyncCalendar: false,
+      canSendMail: false,
       needsReconnect: true,
       grantedScopes: [],
     };
@@ -83,6 +87,7 @@ export async function getGoogleConnection(
 
   const canSyncContacts = grantCovers(account.scope, CONTACT_SYNC_SCOPES);
   const canSyncCalendar = grantCovers(account.scope, CALENDAR_SYNC_SCOPES);
+  const canSendMail = grantCovers(account.scope, MAIL_SEND_SCOPES);
 
   return {
     connected: true,
@@ -90,8 +95,9 @@ export async function getGoogleConnection(
     hasRefreshToken: Boolean(account.refresh_token),
     canSyncContacts,
     canSyncCalendar,
+    canSendMail,
     needsReconnect:
-      !canSyncContacts || !canSyncCalendar || !account.refresh_token,
+      !canSyncContacts || !canSyncCalendar || !canSendMail || !account.refresh_token,
     grantedScopes: (account.scope ?? "").split(/\s+/).filter(Boolean),
   };
 }

@@ -14,14 +14,17 @@ export function SubmitButton({
   children = "Save",
   pendingLabel = "Saving…",
   className = btnPrimary,
+  disabled = false,
 }: {
   children?: React.ReactNode;
   pendingLabel?: string;
   className?: string;
+  /** Disable for a reason of the caller's own; pending still disables regardless. */
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
-    <button type="submit" className={className} disabled={pending}>
+    <button type="submit" className={className} disabled={pending || disabled}>
       {pending ? pendingLabel : children}
     </button>
   );

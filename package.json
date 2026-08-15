@@ -5,7 +5,7 @@
   "description": "Self-hosted Personal Relationship Manager with extensible fields and one-way Google sync",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "next start",
     "typecheck": "tsc --noEmit && tsc -p scripts/e2e --noEmit",
     "db:generate": "prisma generate",
@@ -16,7 +16,7 @@
     "docker:up": "sh scripts/docker-up.sh",
     "preversion": "npm run typecheck",
     "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
-    "e2e": "next build && tsx scripts/e2e/verify.mts",
+    "e2e": "NODE_OPTIONS=--max-old-space-size=4096 next build && tsx scripts/e2e/verify.mts",
     "token": "tsx scripts/e2e/get-token.mts",
     "e2e:google": "tsx scripts/e2e/google.mts"
   },

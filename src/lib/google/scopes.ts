@@ -21,13 +21,23 @@ export const GOOGLE_SCOPES = [
   // List the user's calendars so Settings can offer a target-calendar picker.
   // Read-only: Hearth never creates or modifies calendars themselves.
   "https://www.googleapis.com/auth/calendar.readonly",
+
+  // Send a thank-you list as the signed-in user. Send-only: it cannot read a
+  // mailbox, which is the least a feature that only ever sends should ask for.
+  "https://www.googleapis.com/auth/gmail.send",
 ] as const;
 
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
 export const SCOPE_DESCRIPTIONS: Record<string, string> = {
+  [GMAIL_SEND_SCOPE]: "Send mail as you (thank-you lists only)",
   "https://www.googleapis.com/auth/contacts": "Manage your Google Contacts",
   "https://www.googleapis.com/auth/calendar.events": "Manage events on your calendars",
   "https://www.googleapis.com/auth/calendar.readonly": "See your list of calendars",
 };
+
+/** Scopes that must be present before a thank-you list can be sent. */
+export const MAIL_SEND_SCOPES = [GMAIL_SEND_SCOPE];
 
 /** Scopes that must be present for contact sync to be possible. */
 export const CONTACT_SYNC_SCOPES = ["https://www.googleapis.com/auth/contacts"];

@@ -60,6 +60,7 @@ model User {
   labelGroups       LabelGroup[]
   personPhotos      PersonPhoto[]
   contactCard       Person?            @relation("UserContactCard")
+  giftsRecorded     Gift[]
 }
 
 model Account {
@@ -354,6 +355,9 @@ model Person {
   googleSyncs       PersonSync[]
   labels            PersonLabel[]
   photos            PersonPhoto[]
+  giftsGiven        Gift[]          @relation("GiftGiver")
+  giftsReceived     Gift[]          @relation("GiftRecipient")
+  giftEvents        EventGiftRecipient[]
 
   @@index([linkedUserId])
   @@index([ownerId, displayName])
@@ -501,6 +505,12 @@ model Event {
   /// User-defined field values, keyed by FieldDefinition.key.
   custom Json @default("{}")
 
+  /// Gifts change hands at this event, so the page offers the gift controls.
+  ///
+  /// A flag rather than an event type: an occasion is not made a birthday by presents
+  /// being given at it, and a wedding is not stopped from being one.
+  isGiftEvent Boolean @default(false)
+
   // --- Google Calendar sync state ---
   /// Whether this event belongs on the user's Google Calendar.
   ///
@@ -529,9 +539,11 @@ model Event {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner     User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  attendees EventAttendee[]
-  shares    Share[]
+  owner          User                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  attendees      EventAttendee[]
+  shares         Share[]
+  gifts          Gift[]
+  giftRecipients EventGiftRecipient[]
 
   @@index([ownerId, startAt])
   /// Drives the sync queue: pending/errored events whose backoff has elapsed.
@@ -795,4 +807,67 @@ model SyncTombstone {
 
   @@index([ownerId, processedAt])
   @@index([target, resourceId])
+}
+
+/// Somebody at a gift event who the gifts are FOR.
+///
+/// Separate from EventAttendee on purpose: a toddler receiving half the presents need
+/// not be on the invitation, and plenty of attendees receive nothing. Conflating the
+/// two would make the guest list decide the thank-you list.
+model EventGiftRecipient {
+  eventId  String
+  personId String
+
+  createdAt DateTime @default(now())
+
+  event  Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, personId])
+  @@index([personId])
+}
+
+/// One present, from one person to another.
+///
+/// giverId and recipientId both point at Person, so a single table answers "what did
+/// Mary give us?" and "what have we given Mary?" without a direction flag — the same
+/// trick Relationship uses, and the reason a contact page can show both lists from one
+/// query.
+///
+/// eventId is what separates the two cases the feature was asked for: a Christmas pile
+/// is gifts carrying an event, a one-off is the same row without one.
+///
+/// Who may see a gift is decided by its RECIPIENT: readable if you can read that
+/// contact, writable if you can write it. Reusing the existing boundary rather than
+/// giving gifts a sharing dimension of their own means a gift for someone your partner
+/// shared with you simply appears, with no second set of rules to keep in step.
+model Gift {
+  id      String @id @default(cuid())
+  /// Who recorded it. Kept for provenance; it does not decide who may read it.
+  ownerId String
+
+  eventId     String?
+  giverId     String
+  recipientId String
+
+  description String
+  notes       String? @db.Text
+  /// For a one-off. Gifts at an event take their date from the event.
+  receivedOn  DateTime? @db.Date
+  /// Set when a thank-you list including this gift was sent, so what is outstanding
+  /// can be told from what is done.
+  thankedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner     User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  event     Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  giver     Person @relation("GiftGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  recipient Person @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([giverId])
+  @@index([recipientId])
+  @@index([ownerId])
 }

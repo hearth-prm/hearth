@@ -18,6 +18,7 @@ export function DeleteForm({
   pendingLabel = "Deleting…",
   confirmMessage,
   className = btnDanger,
+  extra,
 }: {
   action: (formData: FormData) => Promise<void>;
   id: string;
@@ -26,6 +27,8 @@ export function DeleteForm({
   pendingLabel?: string;
   confirmMessage: string;
   className?: string;
+  /** Further hidden fields, for a row whose identity is not a single id. */
+  extra?: Record<string, string>;
 }) {
   return (
     <form
@@ -35,6 +38,9 @@ export function DeleteForm({
       }}
     >
       <input type="hidden" name={idName} value={id} />
+      {Object.entries(extra ?? {}).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
       <SubmitButton className={className} pendingLabel={pendingLabel}>
         {label}
       </SubmitButton>

@@ -34,6 +34,9 @@ import { GoogleContactLink } from "@/components/google-contact-link";
 import { DeleteForm } from "@/components/delete-form";
 import { RelationshipForm } from "@/components/relationship-form";
 import { RelationshipEditForm } from "@/components/relationship-edit-form";
+import { GiftForm, GiftEditForm } from "@/components/gift-forms";
+import { listGiftsForPerson, giftDate } from "@/lib/gifts";
+import { addGift, removeGift, updateGift } from "@/lib/actions/gifts";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
@@ -86,7 +89,7 @@ export default async function PersonPage({
   // shared contact's custom values are keyed by the owner's field definitions, so
   // reading them through the viewer's registry would render nothing — or, worse,
   // whatever happened to share a key name.
-  const [defs, relationships, types, settings, others, myShares, ownerLabels] =
+  const [defs, relationships, types, settings, others, myShares, ownerLabels, gifts] =
     await Promise.all([
       loadRegistry(person.ownerId, "PERSON"),
       loadRelationshipsFor(person.ownerId, person.id),
@@ -111,6 +114,8 @@ export default async function PersonPage({
         orderBy: { name: "asc" },
         select: { id: true, name: true, color: true },
       }),
+      // Gifts in both directions; the split into given and received happens below.
+      listGiftsForPerson(user.id, person.id),
     ]);
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
@@ -129,6 +134,10 @@ export default async function PersonPage({
 
   // Only render fields that actually hold something — a detail page listing 20
   // empty rows is worse than one showing the six facts you recorded.
+  // This contact plus everyone else in the same address book, so a gift can be
+  // recorded in either direction from here.
+  const giftPeople = [{ id: person.id, displayName: person.displayName }, ...others];
+
   const populated = defs
     .map((def) => ({ def, value: readFieldValue(person, def) }))
     .filter(({ def, value }) => formatFieldValue(def, value).length > 0 && def.key !== "notes");
@@ -368,6 +377,102 @@ export default async function PersonPage({
         </div>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Gifts"
+              description="Both directions — what they gave, and what they were given."
+            />
+            {gifts.length === 0 ? (
+              <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
+                Nothing recorded yet.
+              </p>
+            ) : (
+              <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                {gifts.map((gift) => {
+                  // One row read from either end: which of the two names to show is
+                  // the only thing that differs, which is why there is no direction
+                  // column to keep in step.
+                  const theyGave = gift.giverId === person.id;
+                  const other = theyGave ? gift.recipient : gift.giver;
+                  const on = giftDate(gift);
+                  return (
+                    <li key={gift.id} className="flex flex-wrap items-start justify-between gap-2 px-5 py-2.5">
+                      <span className="min-w-0 text-sm">
+                        <span className="text-neutral-500 dark:text-neutral-400">
+                          {theyGave ? "gave" : "received"}
+                        </span>{" "}
+                        {gift.description}{" "}
+                        <span className="text-neutral-500 dark:text-neutral-400">
+                          {theyGave ? "to" : "from"}
+                        </span>{" "}
+                        <Link
+                          href={`/people/${other.id}`}
+                          className="text-accent-700 hover:underline dark:text-accent-400"
+                        >
+                          {other.displayName}
+                        </Link>
+                        {gift.event ? (
+                          <>
+                            {" "}
+                            <Link
+                              href={`/events/${gift.event.id}`}
+                              className="text-xs text-neutral-500 underline dark:text-neutral-400"
+                            >
+                              {gift.event.title}
+                            </Link>
+                          </>
+                        ) : on ? (
+                          <span className="ml-1 text-xs text-neutral-400">
+                            {formatDateOnly(on)}
+                          </span>
+                        ) : null}
+                        {gift.notes ? (
+                          <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                            {gift.notes}
+                          </span>
+                        ) : null}
+                      </span>
+                      {canEdit ? (
+                        <span className="flex shrink-0 items-center gap-3">
+                          <GiftEditForm
+                            action={updateGift}
+                            giftId={gift.id}
+                            hasEvent={Boolean(gift.eventId)}
+                            current={{
+                              description: gift.description,
+                              notes: gift.notes ?? "",
+                              receivedOn: gift.receivedOn
+                                ? dateOnlyToInput(gift.receivedOn)
+                                : "",
+                            }}
+                          />
+                          <DeleteForm
+                            action={removeGift}
+                            id={gift.id}
+                            label="Remove"
+                            pendingLabel="Removing…"
+                            confirmMessage={`Remove "${gift.description}"?`}
+                            className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                          />
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {canEdit ? (
+              <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
+                <GiftForm
+                  action={addGift}
+                  givers={giftPeople}
+                  recipients={giftPeople}
+                  defaultGiverId={person.id}
+                />
+              </div>
+            ) : null}
+          </Card>
+
           <Card>
             <CardHeader title="Events" description="Where they showed up." />
             {person.eventAttendances.length === 0 ? (

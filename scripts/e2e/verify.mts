@@ -1438,14 +1438,17 @@ try {
   // An accent for light and a different one for dark. This is the part the server
   // cannot decide, so the checks below read painted colour rather than stored values.
   /**
-   * Set the theme from the settings page, and say whether it took.
+   * Set the theme from the settings page, and say whether it stuck.
    *
-   * Retried rather than waited on. A click that lands before React has attached its
-   * handler does nothing whatsoever, and the page offers no signal that it has
-   * hydrated — so this presses until the document agrees, instead of pressing once
-   * and hoping. Returning a boolean matters as much: the first version swallowed the
-   * timeout, which turned "the click did not register" into a confusing failure two
-   * checks further down.
+   * Waits for the DATABASE, not just the document. The control applies the change
+   * optimistically and saves in the background, so the DOM agrees almost at once while
+   * the write is still in flight — and the very next navigation re-renders <html> from
+   * the stored row, undoing what the check just confirmed. An earlier version watched
+   * the attribute alone and failed two checks later, on a page that had legitimately
+   * gone back to the old value.
+   *
+   * The click is retried as well, since one landing before React attaches its handler
+   * does nothing at all and the page gives no signal that it has hydrated.
    */
   const setTheme = async (label: string): Promise<boolean> => {
     await A.page.goto("/settings");
@@ -1458,7 +1461,10 @@ try {
           want, { timeout: 1_000 },
         )
         .then(() => true, () => false);
-      if (took) return true;
+      if (!took) continue;
+      await waitForDb(`the theme to reach the database (${want})`, async () =>
+        (await settingsRow())?.theme === want);
+      return (await settingsRow())?.theme === want;
     }
     return false;
   };
@@ -1515,6 +1521,167 @@ try {
   }));
   ok("15.7 another user keeps their own appearance",
      bState.theme === null && bState.hue === "184", bState);
+
+  // ---------------------------------------------------------------------------
+  section("§16 Gifts");
+  // ---------------------------------------------------------------------------
+
+  // Dynamic, like every other app import here: these modules read DATABASE_URL when
+  // they load, so they must not be pulled in before the harness has a database.
+  const { readableGiftsWhere, writableGiftsWhere } = await import("@/lib/access");
+  const { buildThankYouMail } = await import("@/lib/thank-you");
+  const { buildMessage } = await import("@/lib/google/mail");
+
+  const xmas = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Gift Test Xmas", startAt: new Date("2026-12-25T10:00:00Z"),
+      timeZone: "UTC", allDay: true,
+    },
+  });
+  const kid = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Gift Kid", givenName: "Gift", familyName: "Kid" },
+  });
+  const auntie = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Gift Auntie", givenName: "Gift", familyName: "Auntie",
+      contactPoints: { create: [{ kind: "EMAIL", value: "auntie@e2e.test", isPrimary: true, order: 0 }] } },
+  });
+
+  await A.page.goto(`/events/${xmas.id}`);
+  ok("16.1 an ordinary event shows no gift section",
+     !((await A.page.textContent("body")) ?? "").includes("Who the presents are for"));
+
+  await A.page.click('button:has-text("Track gifts at this event")');
+  await waitForDb("gift tracking on", async () =>
+    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
+  ok("16.2 an event can be marked as one where gifts change hands",
+     (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
+
+  await A.page.goto(`/events/${xmas.id}`);
+  await A.page.selectOption('select[name="personId"]', kid.id);
+  await A.page.click('button:has-text("Add")');
+  await waitForDb("the recipient to be listed", async () =>
+    (await prisma.eventGiftRecipient.count({ where: { eventId: xmas.id } })) === 1);
+  ok("16.3 gifts can be aimed at somebody who is not on the guest list",
+     (await prisma.eventGiftRecipient.count({ where: { eventId: xmas.id, personId: kid.id } })) === 1
+       && (await prisma.eventAttendee.count({ where: { eventId: xmas.id } })) === 0);
+
+  await A.page.goto(`/events/${xmas.id}`);
+  await A.page.click('button:has-text("Record a gift")');
+  await A.page.selectOption('select[name="giverId"]', auntie.id);
+  await A.page.selectOption('select[name="recipientId"]', kid.id);
+  await A.page.fill('input[name="description"]', "A blue scarf");
+  await A.page.fill('textarea[name="notes"]', "Hand-knitted");
+  await A.page.click('button:has-text("Save gift")');
+  await waitForDb("the gift to be recorded", async () =>
+    (await prisma.gift.count({ where: { eventId: xmas.id } })) === 1);
+  const recorded = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
+  ok("16.4 a gift records what it was, who gave it and who got it",
+     recorded.description === "A blue scarf" && recorded.giverId === auntie.id
+       && recorded.recipientId === kid.id, recorded.description);
+  ok("16.4b including a note of its own", recorded.notes === "Hand-knitted", recorded.notes);
+  ok("16.4c and no date, since the event already answers when",
+     recorded.receivedOn === null, recorded.receivedOn);
+
+  // Both directions from a contact page, which is the case a fixed recipient could not
+  // express: what Auntie GAVE, not only what she was given.
+  await A.page.goto(`/people/${auntie.id}`);
+  const auntiePage = (await A.page.textContent("body")) ?? "";
+  ok("16.5 the giver's own page shows what they gave",
+     auntiePage.includes("A blue scarf") && auntiePage.includes("gave"), true);
+  await A.page.goto(`/people/${kid.id}`);
+  ok("16.5b and the recipient's page shows the same row as received",
+     ((await A.page.textContent("body")) ?? "").includes("received"));
+
+  // A one-off, with no event behind it.
+  await A.page.goto(`/people/${auntie.id}`);
+  await A.page.click('button:has-text("Record a gift")');
+  const defaultGiver = await A.page.inputValue('select[name="giverId"]');
+  ok("16.6 the giver defaults to the contact whose page you are on",
+     defaultGiver === auntie.id, defaultGiver);
+
+  // …and is overridable, which is the whole point: this one goes the other way.
+  await A.page.selectOption('select[name="giverId"]', kid.id);
+  await A.page.selectOption('select[name="recipientId"]', auntie.id);
+  await A.page.fill('input[name="description"]', "A thank-you plant");
+  await A.page.fill('input[name="receivedOn"]', "2026-07-04");
+  await A.page.click('button:has-text("Save gift")');
+  await waitForDb("the one-off to be recorded", async () =>
+    (await prisma.gift.count({ where: { eventId: null, recipientId: auntie.id } })) === 1);
+  // findFirst, not findFirstOrThrow: a wait that gave up should fail one check, not
+  // throw and take every check after it down with it.
+  const oneOff = await prisma.gift.findFirst({
+    where: { eventId: null, recipientId: auntie.id },
+  });
+  ok("16.6b a gift needs no event, and keeps a date of its own",
+     oneOff?.eventId === null
+       && oneOff?.receivedOn?.toISOString().startsWith("2026-07-04") === true,
+     oneOff?.receivedOn);
+  ok("16.6c recorded in the direction chosen rather than the one prefilled",
+     oneOff?.giverId === kid.id, oneOff?.giverId);
+
+  // Access follows the recipient, not the giver and not the recorder.
+  //
+  // Asked of a user created here rather than of B: §5 gives B a blanket ALL_PEOPLE
+  // share over A's contacts, so B can already read everything A owns. Testing against
+  // them would have made "no access" false to begin with — and made the check that
+  // sharing GRANTS access pass without granting anything.
+  const outsider = await h.signIn("outsider@e2e.test", "Outsider");
+  const seenBy = (userId: string) =>
+    prisma.gift.count({ where: { AND: [{ id: recorded.id }, readableGiftsWhere(userId)] } });
+
+  ok("16.7 someone with no access to the recipient cannot see the gift",
+     (await seenBy(outsider.id)) === 0);
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: outsider.id, personId: auntie.id, scope: "PERSON", permission: "VIEW" },
+  });
+  ok("16.7b and seeing the GIVER is not enough either",
+     (await seenBy(outsider.id)) === 0);
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: outsider.id, personId: kid.id, scope: "PERSON", permission: "VIEW" },
+  });
+  ok("16.7c sharing the recipient is what grants it",
+     (await seenBy(outsider.id)) === 1);
+  ok("16.7d and a VIEW share does not make it writable",
+     (await prisma.gift.count({
+       where: { AND: [{ id: recorded.id }, writableGiftsWhere(outsider.id)] },
+     })) === 0);
+
+  // The thank-you note, built without a mailbox. These are pure functions precisely so
+  // the wording a person will actually read can be checked without sending anything.
+  const mail = buildThankYouMail({
+    to: "kid@e2e.test",
+    recipientName: "Gift Kid",
+    occasion: "Gift Test Xmas",
+    gifts: [{
+      description: "A blue scarf", notes: "Hand-knitted", giverName: "Gift Auntie",
+      giverEmail: "auntie@e2e.test", giverPhone: null, giverAddress: null,
+    }],
+  });
+  ok("16.8 the note names the gift, the giver and how to reach them",
+     mail.text.includes("A blue scarf") && mail.text.includes("Gift Auntie")
+       && mail.text.includes("auntie@e2e.test"), mail.text);
+  ok("16.8b and carries the note through to the reader",
+     mail.text.includes("Hand-knitted") && mail.html.includes("Hand-knitted"));
+  ok("16.8c with the occasion in the subject",
+     mail.subject.includes("Gift Test Xmas"), mail.subject);
+
+  const raw = buildMessage(mail);
+  ok("16.9 the message is base64url, which is what Gmail accepts",
+     !raw.includes("+") && !raw.includes("/") && !raw.includes("="), raw.slice(0, 24));
+  const decoded = Buffer.from(raw, "base64url").toString("utf8");
+  ok("16.9b it is multipart with both a plain and an HTML part",
+     decoded.includes("multipart/alternative")
+       && decoded.includes("text/plain") && decoded.includes("text/html"));
+  const accented = buildMessage({ ...mail, subject: "Thank-you list for Zoë" });
+  ok("16.9c and a subject with an accent is encoded rather than mangled",
+     Buffer.from(accented, "base64url").toString("utf8").includes("=?UTF-8?B?"));
+
+  // The button says why it cannot send, rather than failing once pressed.
+  await A.page.goto(`/events/${xmas.id}`);
+  const giftPage = (await A.page.textContent("body")) ?? "";
+  ok("16.10 a recipient with no email is told so, not left to press and fail",
+     giftPage.includes("Gift Kid has no email address"), true);
+
 
 } finally {
   await h.stop();

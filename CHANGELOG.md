@@ -27,6 +27,32 @@ that formally marks its milestone.
 
 ### Added
 
+- **Gift tracking, and a thank-you list you can email.** Mark an event as one where
+  presents change hands, say who they are for — more than one, since Christmas is not a
+  birthday — and record what each person was given, by whom, with a note. A button then
+  emails a recipient the whole list *with each giver's contact details beside their
+  gift*, so thank-yous can be written away from Hearth without cross-referencing two
+  lists on a phone.
+  - **One table, both directions.** `giverId` and `recipientId` both point at a contact,
+    so "what did Mary give us?" and "what have we given Mary?" are the same rows read
+    from different ends — no direction column, and a contact page needs one query rather
+    than two. It is the same trick the relationship table uses.
+  - Gifts need no event: a one-off recorded on a contact page is the identical row
+    without one, and carries a date of its own instead of borrowing the event's.
+  - **Who may see a gift is decided by its recipient**, not by whoever recorded it and
+    not by the giver. That reuses the existing access boundary rather than giving gifts
+    a sharing dimension of their own, so a gift for a contact your partner shared with
+    you simply appears — and being able to see Mary does not entitle you to the list of
+    what she gave a household you have no access to.
+  - Recipients are **not** the guest list. A toddler receiving half the presents need
+    not be on the invitation, and most attendees receive nothing.
+  - Gifts are Hearth records and are never sent to Google, which keeps them clear of the
+    sync machinery entirely.
+  - Hearth had never sent an email before this — calendar invitations are sent by
+    *Google*, not by us — so this adds a small mail path using the `gmail.send` scope,
+    which can send and cannot read a mailbox. Existing installs will show "Reconnect
+    needed" until the new permission is granted.
+
 - **Light, dark, or follow the device — and an accent colour of your choosing.** In the
   header there is a toggle that cycles the three; Settings → Appearance spells them out
   and offers seven accent schemes plus one you mix yourself. Every choice is per user, so
