@@ -143,12 +143,17 @@ model UserSettings {
   /// prefers-color-scheme decide, which is why it is a third value rather than a
   /// boolean: "follow my machine" is a real preference, not the absence of one.
   theme               String  @default("system")
-  /// Named accent scheme, or "custom" to use accentHue.
-  colorScheme         String  @default("teal")
+  /// Accent in light mode: a named scheme, or "custom" to use lightAccentHue.
+  lightColorScheme    String  @default("teal")
   /// Hue in degrees for a scheme the user mixed themselves. The whole palette is
   /// derived from it in oklch, so a bespoke scheme costs one number rather than
   /// eleven colours that have to look evenly spaced by hand.
-  accentHue           Int     @default(184)
+  lightAccentHue      Int     @default(184)
+  /// And the same pair for dark mode. Two accents rather than one because a hue that
+  /// carries on white is often muddy on near-black; which pair applies is decided by
+  /// a CSS rule, since under "system" only the browser knows the mode.
+  darkColorScheme     String  @default("teal")
+  darkAccentHue       Int     @default(184)
 
   /// Which service backs place search on the event location field.
   ///

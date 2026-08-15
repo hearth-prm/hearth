@@ -1293,11 +1293,20 @@ try {
   // server-rendered path is exercised rather than only the client one.
 
   const htmlState = () =>
-    A.page.evaluate(() => ({
-      theme: document.documentElement.getAttribute("data-theme"),
-      scheme: document.documentElement.getAttribute("data-scheme"),
-      hue: document.documentElement.style.getPropertyValue("--accent-hue").trim(),
-    }));
+    A.page.evaluate(() => {
+      const root = document.documentElement;
+      const cs = getComputedStyle(root);
+      return {
+        theme: root.getAttribute("data-theme"),
+        scheme: root.getAttribute("data-scheme"),
+        // The hue AFTER the stylesheet has chosen between the light and dark ones.
+        // Reading the inline style instead would test what the server sent rather
+        // than what the page resolved, which is the half that can be wrong.
+        hue: cs.getPropertyValue("--accent-hue").trim(),
+        light: cs.getPropertyValue("--accent-hue-light").trim(),
+        dark: cs.getPropertyValue("--accent-hue-dark").trim(),
+      };
+    });
   /** What bg-accent-600 resolves to, read from the New contact button. */
   const accentPaint = async () => {
     await A.page.goto("/people");
@@ -1329,9 +1338,9 @@ try {
   ok("15.2 a scheme applies on the spot, with nothing to save",
      state.scheme === "rose" && state.hue === "14", state);
   await waitForDb("the scheme to be stored", async () =>
-    (await settingsRow())?.colorScheme === "rose");
+    (await settingsRow())?.lightColorScheme === "rose");
   ok("15.2b and is stored without a form submit",
-     (await settingsRow())?.colorScheme === "rose", (await settingsRow())?.colorScheme);
+     (await settingsRow())?.lightColorScheme === "rose", (await settingsRow())?.lightColorScheme);
   const rosePaint = await accentPaint();
   ok("15.2c and every accent utility repaints, server-rendered",
      rosePaint !== tealPaint && rosePaint !== "", `${tealPaint} -> ${rosePaint}`);
@@ -1402,12 +1411,12 @@ try {
      (await htmlState()).hue === "300", await htmlState());
   await waitForDb("the custom hue to be stored", async () => {
     const row = await settingsRow();
-    return row?.colorScheme === "custom" && row?.accentHue === 300;
+    return row?.lightColorScheme === "custom" && row?.lightAccentHue === 300;
   });
   const customRow = await settingsRow();
   ok("15.5c and one number is the whole scheme",
-     customRow?.colorScheme === "custom" && customRow?.accentHue === 300,
-     `${customRow?.colorScheme}/${customRow?.accentHue}`);
+     customRow?.lightColorScheme === "custom" && customRow?.lightAccentHue === 300,
+     `${customRow?.lightColorScheme}/${customRow?.lightAccentHue}`);
   const customPaint = await accentPaint();
   ok("15.5d which paints what neither named scheme does",
      customPaint !== rosePaint && customPaint !== tealPaint && customPaint !== "",
@@ -1422,15 +1431,87 @@ try {
   ok("15.6 the slider is keyboard operable", (await htmlState()).hue === "301",
      await htmlState());
   await waitForDb("the keyboard change to be stored", async () =>
-    (await settingsRow())?.accentHue === 301);
+    (await settingsRow())?.lightAccentHue === 301);
   ok("15.6b and a keyboard change saves like a dragged one",
-     (await settingsRow())?.accentHue === 301, (await settingsRow())?.accentHue);
+     (await settingsRow())?.lightAccentHue === 301, (await settingsRow())?.lightAccentHue);
+
+  // An accent for light and a different one for dark. This is the part the server
+  // cannot decide, so the checks below read painted colour rather than stored values.
+  /**
+   * Set the theme from the settings page, and say whether it took.
+   *
+   * Retried rather than waited on. A click that lands before React has attached its
+   * handler does nothing whatsoever, and the page offers no signal that it has
+   * hydrated — so this presses until the document agrees, instead of pressing once
+   * and hoping. Returning a boolean matters as much: the first version swallowed the
+   * timeout, which turned "the click did not register" into a confusing failure two
+   * checks further down.
+   */
+  const setTheme = async (label: string): Promise<boolean> => {
+    await A.page.goto("/settings");
+    const want = label.toLowerCase();
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await A.page.click(`[aria-label="Appearance"] button:has-text("${label}")`);
+      const took = await A.page
+        .waitForFunction(
+          (w) => document.documentElement.getAttribute("data-theme") === w,
+          want, { timeout: 1_000 },
+        )
+        .then(() => true, () => false);
+      if (took) return true;
+    }
+    return false;
+  };
+
+  await A.page.goto("/settings");
+  await A.page.click('button[role="radio"]:has-text("Rose")');
+  await waitForDb("both accents back to rose", async () =>
+    (await settingsRow())?.darkColorScheme === "rose");
+  ok("15.8 while linked, one press sets the accent for both modes",
+     (await settingsRow())?.lightColorScheme === "rose"
+       && (await settingsRow())?.darkColorScheme === "rose");
+
+  await A.page.click("#linkAccents");
+  await A.page.waitForSelector('[aria-label="In dark mode"]', { timeout: 10_000 });
+  await A.page.click('[aria-label="In dark mode"] button[role="radio"]:has-text("Amber")');
+  await waitForDb("the dark accent alone to change", async () =>
+    (await settingsRow())?.darkColorScheme === "amber");
+  const split = await settingsRow();
+  ok("15.8b unlinked, each mode keeps its own",
+     split?.lightColorScheme === "rose" && split?.darkColorScheme === "amber",
+     `${split?.lightColorScheme}/${split?.darkColorScheme}`);
+
+  ok("15.8c the theme control still responds with two pickers on the page",
+     await setTheme("Light"));
+  const paintedLight = await accentPaint();
+  const stateLight = await htmlState();
+  ok("15.8d in light mode the light accent is the one resolved",
+     stateLight.hue === "14" && stateLight.light === "14" && stateLight.dark === "74",
+     stateLight);
+
+  ok("15.8e and switching to dark takes", await setTheme("Dark"));
+  const paintedDark = await accentPaint();
+  ok("15.8f and in dark mode the stylesheet swaps to the other",
+     (await htmlState()).hue === "74", await htmlState());
+  ok("15.8g so the two modes genuinely paint different accents",
+     paintedLight !== paintedDark && paintedDark !== "",
+     `${paintedLight} vs ${paintedDark}`);
+
+  // Re-linking has to choose one of the two; the mode being read is the one just judged.
+  await A.page.goto("/settings");
+  await A.page.click("#linkAccents");
+  await waitForDb("the accents to be linked again", async () =>
+    (await settingsRow())?.lightColorScheme === "amber");
+  const relinked = await settingsRow();
+  ok("15.8h re-linking keeps the accent of the mode you were looking at",
+     relinked?.lightColorScheme === "amber" && relinked?.darkColorScheme === "amber",
+     `${relinked?.lightColorScheme}/${relinked?.darkColorScheme}`);
 
   // Appearance is per-user, like everything else on that page.
   await B.page.goto("/people");
   const bState = await B.page.evaluate(() => ({
     theme: document.documentElement.getAttribute("data-theme"),
-    hue: document.documentElement.style.getPropertyValue("--accent-hue").trim(),
+    hue: getComputedStyle(document.documentElement).getPropertyValue("--accent-hue").trim(),
   }));
   ok("15.7 another user keeps their own appearance",
      bState.theme === null && bState.hue === "184", bState);

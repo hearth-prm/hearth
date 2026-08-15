@@ -32,7 +32,13 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 export async function getAppearance(userId: string): Promise<Appearance> {
   const row = await prisma.userSettings.findUnique({
     where: { userId },
-    select: { theme: true, colorScheme: true, accentHue: true },
+    select: {
+      theme: true,
+      lightColorScheme: true,
+      lightAccentHue: true,
+      darkColorScheme: true,
+      darkAccentHue: true,
+    },
   });
   return normalizeAppearance(row);
 }

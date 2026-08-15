@@ -1,7 +1,7 @@
 /**
- * Appearance: light/dark, and the accent colour.
+ * Appearance: light/dark, and an accent colour for each.
  *
- * Two design decisions worth stating up front.
+ * Three design decisions worth stating up front.
  *
  * Light/dark is three-valued, not a boolean. "Follow my machine" is a real preference
  * and has to be distinguishable from "I chose light", or someone who picks light on a
@@ -13,6 +13,12 @@
  * and no new CSS, only an integer. The consequence is that this file, not the
  * stylesheet, is the source of truth for what the named schemes are — the CSS knows
  * only how to build a ramp from whatever hue it is handed.
+ *
+ * The accent is stored PER MODE, because a hue that carries well on white is often
+ * muddy on near-black and the reverse. Which of the two applies cannot be settled here:
+ * under "System" only the browser knows which mode is showing. So the server hands over
+ * both hues and a CSS rule picks between them, and nothing in this file resolves the
+ * accent down to a single number for the page.
  */
 
 export const THEMES = ["system", "light", "dark"] as const;
@@ -46,10 +52,16 @@ export const COLOR_SCHEMES: readonly ColorScheme[] = [
 export const DEFAULT_SCHEME = "teal";
 export const DEFAULT_HUE = 184;
 
-export interface Appearance {
-  theme: Theme;
+/** One mode's accent: a named scheme, or "custom" together with the hue to use. */
+export interface SchemeChoice {
   colorScheme: string;
   accentHue: number;
+}
+
+export interface Appearance {
+  theme: Theme;
+  light: SchemeChoice;
+  dark: SchemeChoice;
 }
 
 export function isTheme(value: unknown): value is Theme {
@@ -75,39 +87,77 @@ export function normalizeHue(value: unknown): number {
   return ((Math.round(n) % 360) + 360) % 360;
 }
 
-/** The hue actually in force: a named scheme's own, or the custom one. */
-export function hueFor(appearance: Appearance): number {
-  if (appearance.colorScheme === CUSTOM_SCHEME)
-    return normalizeHue(appearance.accentHue);
-  const scheme = COLOR_SCHEMES.find((s) => s.id === appearance.colorScheme);
+export function normalizeChoice(value: {
+  colorScheme?: unknown;
+  accentHue?: unknown;
+}): SchemeChoice {
+  return {
+    colorScheme: normalizeScheme(value.colorScheme),
+    accentHue: normalizeHue(value.accentHue ?? DEFAULT_HUE),
+  };
+}
+
+/** The hue one mode actually uses: its named scheme's own, or its custom one. */
+export function hueFor(choice: SchemeChoice): number {
+  if (choice.colorScheme === CUSTOM_SCHEME) return normalizeHue(choice.accentHue);
+  const scheme = COLOR_SCHEMES.find((s) => s.id === choice.colorScheme);
   return scheme ? scheme.hue : DEFAULT_HUE;
+}
+
+/**
+ * True when both modes would paint the same accent.
+ *
+ * Inferred rather than stored: "keep these two the same" is a fact about the values,
+ * and a column recording it separately is a column that can disagree with them.
+ */
+export function accentsMatch(appearance: Appearance): boolean {
+  return (
+    appearance.light.colorScheme === appearance.dark.colorScheme &&
+    hueFor(appearance.light) === hueFor(appearance.dark)
+  );
 }
 
 /**
  * Widen a stored row into an Appearance.
  *
- * The parameter is deliberately loose: the columns are a TEXT and an INTEGER, so what
- * comes out of the database is not an Appearance until it has been through here. Typing
- * this as Partial<Appearance> would assert the very thing it exists to check.
+ * The parameter is deliberately loose: the columns are TEXT and INTEGER, so what comes
+ * out of the database is not an Appearance until it has been through here. Typing this
+ * as Partial<Appearance> would assert the very thing it exists to check.
  */
 export function normalizeAppearance(
   value:
-    | { theme?: unknown; colorScheme?: unknown; accentHue?: unknown }
+    | {
+        theme?: unknown;
+        lightColorScheme?: unknown;
+        lightAccentHue?: unknown;
+        darkColorScheme?: unknown;
+        darkAccentHue?: unknown;
+      }
     | null
     | undefined,
 ): Appearance {
   return {
     theme: normalizeTheme(value?.theme),
-    colorScheme: normalizeScheme(value?.colorScheme),
-    accentHue: normalizeHue(value?.accentHue ?? DEFAULT_HUE),
+    light: normalizeChoice({
+      colorScheme: value?.lightColorScheme,
+      accentHue: value?.lightAccentHue,
+    }),
+    dark: normalizeChoice({
+      colorScheme: value?.darkColorScheme,
+      accentHue: value?.darkAccentHue,
+    }),
   };
 }
 
 /**
  * What to spread onto <html>.
  *
- * The hue is always emitted inline, even for a named scheme, so the stylesheet never
- * has to carry a copy of the hue list that could drift from the one above.
+ * BOTH hues are handed over and neither is called --accent-hue: a stylesheet rule
+ * assigns that from one of these according to the mode in force. Resolving it here
+ * would mean guessing under "System", where the answer belongs to the browser.
+ *
+ * The hue is emitted inline even for a named scheme, so the stylesheet never carries a
+ * copy of the hue list that could drift from the one above.
  *
  * `data-theme` is omitted for "system" on purpose: its absence is what lets the
  * prefers-color-scheme half of the `dark:` variant take over.
@@ -117,13 +167,15 @@ export function htmlAppearanceProps(appearance: Appearance): {
   "data-scheme": string;
   style: React.CSSProperties;
 } {
-  const hue = hueFor(appearance);
   return {
     ...(appearance.theme === "system" ? {} : { "data-theme": appearance.theme }),
-    // Not read by any rule; it is here so the chosen scheme is visible when
-    // inspecting the page, and so a future stylesheet can hook onto it.
-    "data-scheme": appearance.colorScheme,
-    style: { "--accent-hue": String(hue) } as React.CSSProperties,
+    // Read by no rule; it is here so a chosen scheme is visible when inspecting the
+    // page. It names the light one, since the two are usually the same.
+    "data-scheme": appearance.light.colorScheme,
+    style: {
+      "--accent-hue-light": String(hueFor(appearance.light)),
+      "--accent-hue-dark": String(hueFor(appearance.dark)),
+    } as React.CSSProperties,
   };
 }
 
@@ -131,16 +183,20 @@ export function htmlAppearanceProps(appearance: Appearance): {
  * Apply a choice to the live document, ahead of the server round trip.
  *
  * A theme switch that waits for a network hop feels broken, so the control mutates
- * <html> itself and persists in the background. This must set the hue on the same
- * element that declares the ramp: a custom property's own var()s are substituted
- * where it is DECLARED, so an --accent-hue set further down the tree cannot re-tint
- * an --accent-500 inherited from :root.
+ * <html> itself and persists in the background. This must write to documentElement: a
+ * custom property's own var()s are substituted where it is DECLARED, so an
+ * --accent-hue-light set further down the tree cannot re-tint an --accent-500 that was
+ * inherited from :root already resolved.
+ *
+ * It deliberately does not set --accent-hue. That one is assigned by a stylesheet rule
+ * which knows the mode, and an inline value would outrank it.
  */
 export function applyAppearance(appearance: Appearance): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   if (appearance.theme === "system") root.removeAttribute("data-theme");
   else root.dataset.theme = appearance.theme;
-  root.dataset.scheme = appearance.colorScheme;
-  root.style.setProperty("--accent-hue", String(hueFor(appearance)));
+  root.dataset.scheme = appearance.light.colorScheme;
+  root.style.setProperty("--accent-hue-light", String(hueFor(appearance.light)));
+  root.style.setProperty("--accent-hue-dark", String(hueFor(appearance.dark)));
 }

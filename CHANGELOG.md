@@ -43,6 +43,15 @@ that formally marks its milestone.
     integer rather than a palette table, and it is why the named schemes live in
     `src/lib/theme.ts` and not in the stylesheet: the CSS only knows how to build a ramp
     from whatever hue it is handed.
+  - **A separate accent for light and for dark**, because a hue that carries on a white
+    page is often muddy on a near-black one. The control starts as a single picker —
+    most people want one colour — and a *Same in light and dark* tick splits it in two.
+    Whether they are linked is inferred from the two values rather than stored, since a
+    column recording "these should match" is a column that can disagree with them.
+  - Which of the two applies is decided **in CSS, not on the server**: under "System" the
+    mode belongs to the browser, so `<html>` carries both hues and a rule assigns
+    `--accent-hue` from one of them. When the accents are unlinked, Settings marks which
+    one you are currently reading, and follows a machine that flips at sunset.
   - The choice is applied server-side on `<html>`, so the first paint is already correct.
     There is no flash of the wrong theme and no blocking script to cause one.
   - Appearance has no Save button. The page you are looking at *is* the preview, so the

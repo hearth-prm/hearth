@@ -2,12 +2,7 @@
 
 import { prisma } from "@/lib/db";
 import { requireUserForAction } from "@/lib/access";
-import {
-  normalizeHue,
-  normalizeScheme,
-  normalizeTheme,
-  type Appearance,
-} from "@/lib/theme";
+import { normalizeChoice, normalizeTheme, type Appearance } from "@/lib/theme";
 
 /**
  * Persist an appearance choice.
@@ -24,10 +19,14 @@ import {
 export async function saveAppearance(appearance: Appearance): Promise<void> {
   const user = await requireUserForAction();
 
+  const light = normalizeChoice(appearance.light ?? {});
+  const dark = normalizeChoice(appearance.dark ?? {});
   const values = {
     theme: normalizeTheme(appearance.theme),
-    colorScheme: normalizeScheme(appearance.colorScheme),
-    accentHue: normalizeHue(appearance.accentHue),
+    lightColorScheme: light.colorScheme,
+    lightAccentHue: light.accentHue,
+    darkColorScheme: dark.colorScheme,
+    darkAccentHue: dark.accentHue,
   };
 
   await prisma.userSettings.upsert({
