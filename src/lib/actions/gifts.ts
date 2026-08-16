@@ -16,7 +16,7 @@ import { thankYouList } from "@/lib/gifts";
 import { buildThankYouMail } from "@/lib/thank-you";
 import { canSendMail, sendMail } from "@/lib/google/mail";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
-import { isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
+import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
 import { inputToDateOnly } from "@/lib/time";
 
 /**
@@ -136,23 +136,6 @@ export async function removeGift(form: FormData): Promise<void> {
     existing.eventId ? `/events/${existing.eventId}` : `/people/${existing.recipientId}`,
   );
   revalidatePath(`/people/${existing.giverId}`);
-}
-
-/** Turn the gift controls on or off for an event. */
-export async function setGiftEvent(_prev: ActionState, form: FormData): Promise<ActionState> {
-  try {
-    const user = await requireUserForAction();
-    const eventId = await requireWritableEvent(user.id, readString(form, "eventId"));
-    const isGiftEvent = readCheckbox(form, "isGiftEvent");
-
-    await prisma.event.update({ where: { id: eventId }, data: { isGiftEvent } });
-
-    revalidatePath(`/events/${eventId}`);
-    return actionOk(isGiftEvent ? "Gift tracking is on." : "Gift tracking is off.");
-  } catch (err) {
-    if (isFrameworkError(err)) throw err;
-    return toActionError(err);
-  }
 }
 
 export async function addGiftRecipient(

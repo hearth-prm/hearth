@@ -505,12 +505,6 @@ model Event {
   /// User-defined field values, keyed by FieldDefinition.key.
   custom Json @default("{}")
 
-  /// Gifts change hands at this event, so the page offers the gift controls.
-  ///
-  /// A flag rather than an event type: an occasion is not made a birthday by presents
-  /// being given at it, and a wedding is not stopped from being one.
-  isGiftEvent Boolean @default(false)
-
   // --- Google Calendar sync state ---
   /// Whether this event belongs on the user's Google Calendar.
   ///

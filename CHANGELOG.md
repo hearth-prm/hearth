@@ -197,10 +197,18 @@ that formally marks its milestone.
   a role dropdown, an RSVP dropdown, an invite checkbox and an Update button,
   permanently — four controls per person on a list whose usual job is to be read.
 
-- **Gift tracking is switched on from the Gifts section itself**, rather than from a card
-  of its own in the sidebar. The section now appears for anyone who could turn tracking
-  on, so the control has somewhere to live when it is off; a read-only viewer of an
-  untracked event still sees nothing.
+- **Any event can hold gifts**, with nothing to switch on first. The flag that decided
+  whether the gift controls appeared only ever recorded a preference about the page, not
+  a fact about the occasion, so it is gone and the column with it. Gifts themselves
+  reference their event directly and are unaffected.
+
+- **Gifts and Sharing are collapsible on the event page**, and Sharing moved above
+  Google — "who else can see this" is asked more often than "how is this syncing", and
+  it is the one of the two with a control in it rather than status. The gift section
+  opens by itself once something is recorded.
+
+- **A guest's email sits on the same line as their name.** Two lines per person was half
+  the height of the list, for a value most rows repeat the shape of.
 
 - **The gift list on a contact page hides its editing controls behind a toggle.** Per-row
   Edit and Remove on every line is clutter you learn to look past rather than use, so the

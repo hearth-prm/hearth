@@ -84,21 +84,22 @@ export function AttendeesCard({
           {attendees.map((a) => (
             <li key={a.id} className={showControls ? "px-5 py-4" : "px-5 py-2.5"}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
+                <div className="min-w-0 text-sm">
                   <Link
                     href={`/people/${a.personId}`}
-                    className="text-sm font-medium text-accent-700 hover:underline dark:text-accent-400"
+                    className="font-medium text-accent-700 hover:underline dark:text-accent-400"
                   >
                     {a.displayName}
                   </Link>
-                  <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {" - "}
                     {a.email ?? "no email on file"}
-                    {a.rsvpFromGoogle ? (
-                      <span className="ml-2 text-accent-600 dark:text-accent-400">
-                        RSVP from Google
-                      </span>
-                    ) : null}
-                  </p>
+                  </span>
+                  {a.rsvpFromGoogle ? (
+                    <span className="ml-2 text-xs text-accent-600 dark:text-accent-400">
+                      RSVP from Google
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge

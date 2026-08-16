@@ -1558,17 +1558,24 @@ try {
       contactPoints: { create: [{ kind: "EMAIL", value: "auntie@e2e.test", isPrimary: true, order: 0 }] } },
   });
 
-  await A.page.goto(`/events/${xmas.id}`);
-  ok("16.1 an ordinary event shows no gift section",
-     !((await A.page.textContent("body")) ?? "").includes("Who the presents are for"));
+  /**
+   * Open the Gifts section if it is closed, and leave it alone if it is not.
+   *
+   * It starts collapsed while empty and opens itself once something is recorded, so a
+   * bare click on the summary would open it in one run and close it in the next.
+   * Nothing inside a closed <details> is clickable, which makes that an intermittent
+   * failure rather than an obvious one.
+   */
+  const openGifts = async () => {
+    const closed = await A.page.$('details:not([open]) > summary:has-text("Gifts")');
+    if (closed) await closed.click();
+  };
 
-  await A.page.click('button:has-text("Track gifts")');
-  await waitForDb("gift tracking on", async () =>
-    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
-  ok("16.2 an event can be marked as one where gifts change hands",
-     (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
-
   await A.page.goto(`/events/${xmas.id}`);
+  ok("16.1 every event offers gifts, with no flag to set first",
+     ((await A.page.textContent("body")) ?? "").includes("Who the presents are for"));
+  await openGifts();
+  await A.page.waitForSelector('select[name="personId"]', { timeout: 10_000 });
   await A.page.selectOption('select[name="personId"]', kid.id);
   await A.page.click('button:has-text("Add")');
   await waitForDb("the recipient to be listed", async () =>
@@ -1578,6 +1585,7 @@ try {
        && (await prisma.eventAttendee.count({ where: { eventId: xmas.id } })) === 0);
 
   await A.page.goto(`/events/${xmas.id}`);
+  await openGifts();
   await A.page.click('button:has-text("Record a gift")');
   await A.page.selectOption('select[name="giverId"]', auntie.id);
   await A.page.selectOption('select[name="recipientId"]', kid.id);
@@ -1723,6 +1731,7 @@ try {
 
   // With one candidate there is nothing to choose, so it is chosen.
   await A.page.goto(`/events/${xmas.id}`);
+  await openGifts();
   await A.page.click('button:has-text("Record a gift")');
   ok("16.13 a lone gift recipient is preselected",
      (await A.page.inputValue('select[name="recipientId"]')) === kid.id);
@@ -1756,6 +1765,9 @@ try {
   });
   await A.page.reload();
   const guestsQuiet = (await A.page.textContent("body")) ?? "";
+  ok("16.18 sharing is collapsed, and opens to the same controls",
+     (await A.page.$('details:not([open]) > summary:has-text("Sharing")')) !== null);
+
   ok("16.16 the guest list hides its per-person controls until asked",
      !guestsQuiet.includes("Invite in Google") && guestsQuiet.includes("Gift Auntie"),
      true);
@@ -1764,23 +1776,6 @@ try {
   const guestsEditing = (await A.page.textContent("body")) ?? "";
   ok("16.16b and shows role, RSVP and the invite box when it is",
      guestsEditing.includes("Invite in Google") && guestsEditing.includes("Role"));
-
-  // Turning tracking off is reachable from the section it controls, not a separate card.
-  await A.page.click('button:has-text("Stop tracking gifts")');
-  await waitForDb("gift tracking off", async () =>
-    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === false);
-  ok("16.17 tracking can be turned off from the Gifts header",
-     (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === false);
-  await A.page.goto(`/events/${xmas.id}`);
-  ok("16.17b and the section stays, offering to turn it back on",
-     ((await A.page.textContent("body")) ?? "").includes("Turn on tracking"));
-  ok("16.17c while the gifts themselves are untouched",
-     (await prisma.gift.count({ where: { eventId: xmas.id } })) === 1);
-  await A.page.click('button:has-text("Track gifts")');
-  await waitForDb("gift tracking on again", async () =>
-    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
-  ok("16.17d and come back when it is turned on again",
-     ((await A.page.textContent("body")) ?? "").includes("A blue scarf"));
 
   // Reconnecting has to mean something. The adapter writes an Account row once and
   // never again, so without persistGoogleGrant a new scope never reached the column

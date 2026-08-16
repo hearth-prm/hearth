@@ -73,6 +73,72 @@ export function CardHeader({
   );
 }
 
+/**
+ * A card whose header is the thing you press to open it.
+ *
+ * For sections that are occasionally useful rather than usually read — sharing, gifts —
+ * where a permanently expanded card costs a screenful to say nothing. A native
+ * <details> again: it works before hydration and adds no client bundle.
+ *
+ * The divider moves to the top of the content rather than the bottom of the header, so
+ * a closed card does not end in a rule with nothing under it.
+ */
+export function CollapsibleCard({
+  title,
+  description,
+  meta,
+  defaultOpen = false,
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  /** Shown at the right of the summary — a count, usually. */
+  meta?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Card>
+      <details open={defaultOpen} className="group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 marker:content-none">
+          <div className="flex min-w-0 items-center gap-2">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-3.5 shrink-0 text-neutral-400 transition-transform group-open:rotate-90"
+              aria-hidden
+            >
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                {title}
+              </h2>
+              {description ? (
+                <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                  {description}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {meta ? (
+            <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400">
+              {meta}
+            </span>
+          ) : null}
+        </summary>
+        <div className="border-t border-neutral-200 dark:border-neutral-800">
+          {children}
+        </div>
+      </details>
+    </Card>
+  );
+}
+
 export function PageHeader({
   title,
   description,

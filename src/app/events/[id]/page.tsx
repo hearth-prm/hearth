@@ -25,6 +25,7 @@ import {
   btnSecondary,
   Card,
   CardHeader,
+  CollapsibleCard,
   DetailRow,
   PageHeader,
 } from "@/components/ui";
@@ -39,10 +40,8 @@ import {
   removeGift,
   removeGiftRecipient,
   sendThankYou,
-  setGiftEvent,
   updateGift,
 } from "@/lib/actions/gifts";
-import { GiftEventToggle } from "@/components/gift-event-toggle";
 import { DeleteForm } from "@/components/delete-form";
 import { AttendeeSearch } from "@/components/attendee-search";
 import { ShareRecordForm } from "@/components/share-forms";
@@ -102,15 +101,11 @@ export default async function EventPage({
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
-  // Only loaded when the event actually tracks gifts: the common event pays nothing
-  // for a feature it does not use.
-  const [gifts, giftRecipients, mailAllowed] = event.isGiftEvent
-    ? await Promise.all([
-        listGiftsForEvent(user.id, event.id),
-        listGiftRecipients(event.id),
-        canSendMail(user.id),
-      ])
-    : [[], [], false];
+  const [gifts, giftRecipients, mailAllowed] = await Promise.all([
+    listGiftsForEvent(user.id, event.id),
+    listGiftRecipients(event.id),
+    canSendMail(user.id),
+  ]);
 
   // Anyone readable can be a giver; recipients are drawn from the gift list, which is
   // what makes "who is this for" a decision made once rather than per present.
@@ -131,14 +126,12 @@ export default async function EventPage({
     ).map((p) => p.id),
   );
 
-  const giverChoices = event.isGiftEvent
-    ? await prisma.person.findMany({
-        where: readablePeopleWhere(user.id),
-        orderBy: { displayName: "asc" },
-        take: 500,
-        select: { id: true, displayName: true },
-      })
-    : [];
+  const giverChoices = await prisma.person.findMany({
+    where: readablePeopleWhere(user.id),
+    orderBy: { displayName: "asc" },
+    take: 500,
+    select: { id: true, displayName: true },
+  });
 
   // Guests Google cannot be told about: it identifies attendees only by email.
   const uninvitable = event.attendees
@@ -262,33 +255,16 @@ export default async function EventPage({
             }
           />
 
-          {event.isGiftEvent || canEdit ? (
-            <Card>
-              <CardHeader
-                title="Gifts"
-                description={
-                  event.isGiftEvent
-                    ? "Who the presents are for, and what each person was given."
-                    : "For an occasion where presents change hands."
-                }
-                action={
-                  canEdit ? (
-                    <GiftEventToggle
-                      action={setGiftEvent}
-                      eventId={event.id}
-                      isGiftEvent={event.isGiftEvent}
-                    />
-                  ) : null
-                }
-              />
-
-              {!event.isGiftEvent ? (
-                <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
-                  Turn on tracking to say who the gifts are for and record what arrives.
-                </p>
-              ) : null}
-
-              {event.isGiftEvent && canEdit ? (
+          {gifts.length > 0 || canEdit ? (
+            <CollapsibleCard
+              title="Gifts"
+              description="Who the presents are for, and what each person was given."
+              meta={gifts.length > 0 ? `${gifts.length}` : undefined}
+              // Open when there is something recorded, since then it is worth reading;
+              // otherwise it stays out of the way of an occasion with no presents.
+              defaultOpen={gifts.length > 0}
+            >
+              {canEdit ? (
                 <div className="border-b border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
                   <GiftRecipientForm
                     action={addGiftRecipient}
@@ -298,7 +274,7 @@ export default async function EventPage({
                 </div>
               ) : null}
 
-              {!event.isGiftEvent ? null : giftRecipients.length === 0 ? (
+              {giftRecipients.length === 0 ? (
                 <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
                   Say who the gifts are for, then record what they were given.
                 </p>
@@ -406,7 +382,7 @@ export default async function EventPage({
                 </ul>
               )}
 
-              {event.isGiftEvent && canEdit && giftRecipients.length > 0 ? (
+              {canEdit && giftRecipients.length > 0 ? (
                 <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
                   <GiftForm
                     action={addGift}
@@ -416,11 +392,38 @@ export default async function EventPage({
                   />
                 </div>
               ) : null}
-            </Card>
+            </CollapsibleCard>
           ) : null}
         </div>
 
         <div className="space-y-6">
+          {isOwner ? (
+            <CollapsibleCard
+              title="Sharing"
+              description="Give someone else access."
+              meta={myShares.length > 0 ? `${myShares.length}` : undefined}
+            >
+              <div className="space-y-3 px-5 py-4">
+                {myShares.length > 0 ? (
+                  <ul className="space-y-1 text-xs">
+                    {myShares.map((sh) => (
+                      <li key={sh.id} className="text-neutral-600 dark:text-neutral-400">
+                        {sh.withUser.email} —{" "}
+                        {sh.permission === "EDIT" ? "can edit" : "view only"}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <ShareRecordForm
+                  action={shareRecord}
+                  users={shareableUsers}
+                  alreadyShared={myShares.map((sh) => sh.withUserId)}
+                  eventId={event.id}
+                />
+              </div>
+            </CollapsibleCard>
+          ) : null}
+
           <Card>
             <CardHeader title="Google" />
             <dl className="divide-y divide-neutral-100 text-xs dark:divide-neutral-800/60">
@@ -485,30 +488,6 @@ export default async function EventPage({
               ) : null}
             </dl>
           </Card>
-
-          {isOwner ? (
-            <Card>
-              <CardHeader title="Sharing" description="Give someone else access." />
-              <div className="space-y-3 px-5 py-4">
-                {myShares.length > 0 ? (
-                  <ul className="space-y-1 text-xs">
-                    {myShares.map((sh) => (
-                      <li key={sh.id} className="text-neutral-600 dark:text-neutral-400">
-                        {sh.withUser.email} —{" "}
-                        {sh.permission === "EDIT" ? "can edit" : "view only"}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <ShareRecordForm
-                  action={shareRecord}
-                  users={shareableUsers}
-                  alreadyShared={myShares.map((sh) => sh.withUserId)}
-                  eventId={event.id}
-                />
-              </div>
-            </Card>
-          ) : null}
 
           <Card>
             <CardHeader title="Record" />
