@@ -426,8 +426,17 @@ export default async function EventPage({
                                 <span className="min-w-0">
                                   {gift.description}{" "}
                                   <span className="text-neutral-500 dark:text-neutral-400">
-                                    from {gift.giver.displayName}
-                                  </span>
+                                    from
+                                  </span>{" "}
+                                  {/* Writing a thank-you starts with looking up who to
+                                      thank, so the giver is the one name on this row
+                                      worth being a way to their details. */}
+                                  <Link
+                                    href={`/people/${gift.giver.id}`}
+                                    className="text-accent-700 hover:underline dark:text-accent-400"
+                                  >
+                                    {gift.giver.displayName}
+                                  </Link>
                                   {gift.notes ? (
                                     <span className="block text-xs text-neutral-500 dark:text-neutral-400">
                                       {gift.notes}

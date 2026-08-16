@@ -1582,6 +1582,16 @@ try {
   ok("16.4c and no date, since the event already answers when",
      recorded.receivedOn === null, recorded.receivedOn);
 
+  // waitForSelector rather than $eval: the row appears when the revalidation lands, and
+  // $eval on a selector that has not arrived yet throws and takes the whole run with it.
+  const giverLink = await A.page
+    .waitForSelector(`li:has-text("A blue scarf") a[href="/people/${auntie.id}"]`,
+      { timeout: 10_000 })
+    .then((el) => el.textContent())
+    .catch(() => null);
+  ok("16.4d and the giver is a way to their contact page",
+     giverLink?.trim() === "Gift Auntie", giverLink);
+
   // Both directions from a contact page, which is the case a fixed recipient could not
   // express: what Auntie GAVE, not only what she was given.
   await A.page.goto(`/people/${auntie.id}`);
