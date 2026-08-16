@@ -10,12 +10,6 @@ import {
 import { loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
-import {
-  ATTENDEE_ROLE_LABELS,
-  ATTENDEE_ROLES,
-  RSVP_LABELS,
-  RSVP_STATUSES,
-} from "@/lib/events";
 import { primaryEmail } from "@/lib/people";
 import { getUserSettings } from "@/lib/settings";
 import { formatInstant } from "@/lib/time";
@@ -32,10 +26,10 @@ import {
   Card,
   CardHeader,
   DetailRow,
-  inputClass,
   PageHeader,
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
+import { AttendeesCard } from "@/components/attendees-card";
 import { GiftForm, GiftEditForm, GiftRecipientForm, ThankYouButton } from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
 import { canSendMail } from "@/lib/google/mail";
@@ -50,7 +44,6 @@ import {
 } from "@/lib/actions/gifts";
 import { GiftEventToggle } from "@/components/gift-event-toggle";
 import { DeleteForm } from "@/components/delete-form";
-import { SubmitButton } from "@/components/submit-button";
 import { AttendeeSearch } from "@/components/attendee-search";
 import { ShareRecordForm } from "@/components/share-forms";
 import { shareRecord } from "@/lib/actions/shares";
@@ -247,134 +240,55 @@ export default async function EventPage({
             </Card>
           ) : null}
 
-          <Card>
-            <CardHeader
-              title="Who was there"
-              description={`${event.attendees.length} ${
-                event.attendees.length === 1 ? "person" : "people"
-              }`}
-            />
+          <AttendeesCard
+            attendees={event.attendees.map((a) => ({
+              id: a.id,
+              personId: a.person.id,
+              displayName: a.person.displayName,
+              email: primaryEmail(a.person.contactPoints),
+              role: a.role,
+              rsvp: a.rsvp,
+              inviteToGoogle: a.inviteToGoogle,
+              rsvpFromGoogle: Boolean(a.rsvpFromGoogleAt),
+            }))}
+            canEdit={canEdit}
+            updateAction={updateAttendee}
+            removeAction={removeAttendee}
+            addForm={
+              <form action={addAttendee}>
+                <input type="hidden" name="eventId" value={event.id} />
+                <AttendeeSearch search={searchPeople} eventId={event.id} />
+              </form>
+            }
+          />
 
-            {event.attendees.length === 0 ? (
-              <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
-                No one linked yet.
-              </p>
-            ) : (
-              <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
-                {event.attendees.map((a) => {
-                  const email = primaryEmail(a.person.contactPoints);
-                  return (
-                    <li key={a.id} className="px-5 py-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <Link
-                            href={`/people/${a.person.id}`}
-                            className="text-sm font-medium text-accent-700 hover:underline dark:text-accent-400"
-                          >
-                            {a.person.displayName}
-                          </Link>
-                          <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                            {email ?? "no email on file"}
-                            {a.rsvpFromGoogleAt ? (
-                              <span className="ml-2 text-accent-600 dark:text-accent-400">
-                                RSVP from Google
-                              </span>
-                            ) : null}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Badge tone={a.rsvp === "ACCEPTED" ? "accent" : a.rsvp === "DECLINED" ? "rose" : "neutral"}>
-                            {RSVP_LABELS[a.rsvp]}
-                          </Badge>
-                          {canEdit ? (
-                            <DeleteForm
-                              action={removeAttendee}
-                              id={a.id}
-                              idName="attendeeId"
-                              label="Remove"
-                              pendingLabel="Removing…"
-                              className="text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                              confirmMessage={`Remove ${a.person.displayName} from this event?`}
-                            />
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {canEdit ? (
-                      <form
-                        action={updateAttendee}
-                        className="mt-3 flex flex-wrap items-end gap-2"
-                      >
-                        <input type="hidden" name="attendeeId" value={a.id} />
-                        <label className="text-xs text-neutral-500 dark:text-neutral-400">
-                          Role
-                          <select
-                            name="role"
-                            defaultValue={a.role}
-                            className={`${inputClass} mt-1 py-1.5`}
-                          >
-                            {ATTENDEE_ROLES.map((r) => (
-                              <option key={r} value={r}>
-                                {ATTENDEE_ROLE_LABELS[r]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="text-xs text-neutral-500 dark:text-neutral-400">
-                          RSVP
-                          <select
-                            name="rsvp"
-                            defaultValue={a.rsvp}
-                            className={`${inputClass} mt-1 py-1.5`}
-                          >
-                            {RSVP_STATUSES.map((r) => (
-                              <option key={r} value={r}>
-                                {RSVP_LABELS[r]}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="flex items-center gap-1.5 pb-2 text-xs text-neutral-500 dark:text-neutral-400">
-                          <input
-                            type="checkbox"
-                            name="inviteToGoogle"
-                            defaultChecked={a.inviteToGoogle}
-                            className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
-                          />
-                          Invite in Google
-                        </label>
-                        <SubmitButton
-                          className={`${btnSecondary} py-1.5`}
-                          pendingLabel="Saving…"
-                        >
-                          Update
-                        </SubmitButton>
-                      </form>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            {canEdit ? (
-              <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
-                <form action={addAttendee}>
-                  <input type="hidden" name="eventId" value={event.id} />
-                  <AttendeeSearch search={searchPeople} eventId={event.id} />
-                </form>
-              </div>
-            ) : null}
-          </Card>
-
-          {event.isGiftEvent ? (
+          {event.isGiftEvent || canEdit ? (
             <Card>
               <CardHeader
                 title="Gifts"
-                description="Who the presents are for, and what each person was given."
+                description={
+                  event.isGiftEvent
+                    ? "Who the presents are for, and what each person was given."
+                    : "For an occasion where presents change hands."
+                }
+                action={
+                  canEdit ? (
+                    <GiftEventToggle
+                      action={setGiftEvent}
+                      eventId={event.id}
+                      isGiftEvent={event.isGiftEvent}
+                    />
+                  ) : null
+                }
               />
 
-              {canEdit ? (
+              {!event.isGiftEvent ? (
+                <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
+                  Turn on tracking to say who the gifts are for and record what arrives.
+                </p>
+              ) : null}
+
+              {event.isGiftEvent && canEdit ? (
                 <div className="border-b border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
                   <GiftRecipientForm
                     action={addGiftRecipient}
@@ -384,7 +298,7 @@ export default async function EventPage({
                 </div>
               ) : null}
 
-              {giftRecipients.length === 0 ? (
+              {!event.isGiftEvent ? null : giftRecipients.length === 0 ? (
                 <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
                   Say who the gifts are for, then record what they were given.
                 </p>
@@ -492,7 +406,7 @@ export default async function EventPage({
                 </ul>
               )}
 
-              {canEdit && giftRecipients.length > 0 ? (
+              {event.isGiftEvent && canEdit && giftRecipients.length > 0 ? (
                 <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
                   <GiftForm
                     action={addGift}
@@ -507,19 +421,6 @@ export default async function EventPage({
         </div>
 
         <div className="space-y-6">
-          {canEdit ? (
-            <Card>
-              <CardHeader title="Gifts" />
-              <div className="px-5 py-4">
-                <GiftEventToggle
-                  action={setGiftEvent}
-                  eventId={event.id}
-                  isGiftEvent={event.isGiftEvent}
-                />
-              </div>
-            </Card>
-          ) : null}
-
           <Card>
             <CardHeader title="Google" />
             <dl className="divide-y divide-neutral-100 text-xs dark:divide-neutral-800/60">

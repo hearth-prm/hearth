@@ -193,6 +193,15 @@ that formally marks its milestone.
   stays three hours long when its day moves, rather than having a deliberate choice
   silently reset.
 
+- **The guest list hides its per-person controls behind a toggle too.** Every row carried
+  a role dropdown, an RSVP dropdown, an invite checkbox and an Update button,
+  permanently — four controls per person on a list whose usual job is to be read.
+
+- **Gift tracking is switched on from the Gifts section itself**, rather than from a card
+  of its own in the sidebar. The section now appears for anyone who could turn tracking
+  on, so the control has somewhere to live when it is off; a read-only viewer of an
+  untracked event still sees nothing.
+
 - **The gift list on a contact page hides its editing controls behind a toggle.** Per-row
   Edit and Remove on every line is clutter you learn to look past rather than use, so the
   card reads as a list until you ask to change it. Received and given are separated, and

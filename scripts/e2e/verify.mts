@@ -282,6 +282,8 @@ try {
   ok("2.9f a VIEW event recipient sees the event", eventView.includes("Shared Party"));
   ok("2.9g but gets no Edit, no attendee controls",
      (await B.page.$$('a:has-text("Edit")')).length === 0 &&
+     // Not even the toggle that would reveal them.
+     (await B.page.$$('button[aria-label="Edit guests"]')).length === 0 &&
      (await B.page.$$('button:has-text("Update")')).length === 0 &&
      (await B.page.$$('button:has-text("Remove")')).length === 0);
 
@@ -289,11 +291,21 @@ try {
     where: { eventId: party.id, withUserId: B.id }, data: { permission: "EDIT" },
   });
   await B.page.goto(`/events/${party.id}`);
+  // The per-guest controls sit behind the guest list's own Edit toggle now, so the
+  // permission claim splits in two: an editor is offered the toggle, and pressing it
+  // yields the controls. A VIEW recipient (2.9g) is not offered it at all.
+  // Distinct names: this file is one long scope and §9 already has an `editLinks`.
+  const eventEditLinks = (await B.page.$$('a:has-text("Edit")')).length;
+  const guestEditToggles = (await B.page.$$('button[aria-label="Edit guests"]')).length;
   ok("2.9h an EDIT event recipient DOES get them back",
-     (await B.page.$$('a:has-text("Edit")')).length === 1 &&
-     (await B.page.$$('button:has-text("Update")')).length === 1,
-     { edit: (await B.page.$$('a:has-text("Edit")')).length,
-       update: (await B.page.$$('button:has-text("Update")')).length });
+     eventEditLinks === 1 && guestEditToggles === 1,
+     { eventEditLinks, guestEditToggles });
+  await B.page.click('button[aria-label="Edit guests"]');
+  await B.page
+    .waitForSelector('button:has-text("Update")', { timeout: 10_000 })
+    .catch(() => {});
+  ok("2.9i and the toggle yields the per-guest controls",
+     (await B.page.$$('button:has-text("Update")')).length === 1);
 
   await A.page.goto("/settings/labels");
   ok("2.10 a used label reports its contact count",
@@ -1550,7 +1562,7 @@ try {
   ok("16.1 an ordinary event shows no gift section",
      !((await A.page.textContent("body")) ?? "").includes("Who the presents are for"));
 
-  await A.page.click('button:has-text("Track gifts at this event")');
+  await A.page.click('button:has-text("Track gifts")');
   await waitForDb("gift tracking on", async () =>
     (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
   ok("16.2 an event can be marked as one where gifts change hands",
@@ -1736,6 +1748,39 @@ try {
   ok("16.14b and a length someone chose is kept, not reset to an hour",
      (await A.page.inputValue('input[name="f_endAt"]')) === "2026-11-06T12:00",
      await A.page.inputValue('input[name="f_endAt"]'));
+
+  // The guest list reads clean too, and its four controls per person are asked for.
+  await A.page.goto(`/events/${xmas.id}`);
+  await prisma.eventAttendee.create({
+    data: { eventId: xmas.id, personId: auntie.id, role: "OPTIONAL", rsvp: "NEEDS_ACTION" },
+  });
+  await A.page.reload();
+  const guestsQuiet = (await A.page.textContent("body")) ?? "";
+  ok("16.16 the guest list hides its per-person controls until asked",
+     !guestsQuiet.includes("Invite in Google") && guestsQuiet.includes("Gift Auntie"),
+     true);
+  await A.page.click('button[aria-label="Edit guests"]');
+  await A.page.waitForSelector('select[name="rsvp"]', { timeout: 10_000 });
+  const guestsEditing = (await A.page.textContent("body")) ?? "";
+  ok("16.16b and shows role, RSVP and the invite box when it is",
+     guestsEditing.includes("Invite in Google") && guestsEditing.includes("Role"));
+
+  // Turning tracking off is reachable from the section it controls, not a separate card.
+  await A.page.click('button:has-text("Stop tracking gifts")');
+  await waitForDb("gift tracking off", async () =>
+    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === false);
+  ok("16.17 tracking can be turned off from the Gifts header",
+     (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === false);
+  await A.page.goto(`/events/${xmas.id}`);
+  ok("16.17b and the section stays, offering to turn it back on",
+     ((await A.page.textContent("body")) ?? "").includes("Turn on tracking"));
+  ok("16.17c while the gifts themselves are untouched",
+     (await prisma.gift.count({ where: { eventId: xmas.id } })) === 1);
+  await A.page.click('button:has-text("Track gifts")');
+  await waitForDb("gift tracking on again", async () =>
+    (await prisma.event.findUnique({ where: { id: xmas.id } }))?.isGiftEvent === true);
+  ok("16.17d and come back when it is turned on again",
+     ((await A.page.textContent("body")) ?? "").includes("A blue scarf"));
 
   // Reconnecting has to mean something. The adapter writes an Account row once and
   // never again, so without persistGoogleGrant a new scope never reached the column
