@@ -55,6 +55,12 @@ export function GiftForm({
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
   const [open, setOpen] = useState(false);
 
+  // With one candidate there is no choice to make, so do not ask for one. At an event
+  // with a single gift recipient this is the difference between two clicks per present
+  // and one, and the answer would have been the same every time.
+  const soleRecipient = recipients.length === 1 ? recipients[0]!.id : undefined;
+  const recipientValue = defaultRecipientId ?? soleRecipient ?? "";
+
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} className={btnSecondary}>
@@ -97,10 +103,11 @@ export function GiftForm({
             id="gift-recipient"
             name="recipientId"
             className={`${inputClass} mt-1.5`}
-            defaultValue={defaultRecipientId ?? ""}
+            defaultValue={recipientValue}
             required
           >
-            <option value="">Who received it…</option>
+            {/* Only offered when there is in fact something to choose between. */}
+            {soleRecipient ? null : <option value="">Who received it…</option>}
             {recipients.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.displayName}

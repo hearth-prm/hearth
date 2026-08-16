@@ -4,6 +4,26 @@ import { useState } from "react";
 import { fieldInputName } from "@/lib/fields/types";
 import { errorClass, inputClass, labelClass } from "@/components/ui";
 
+const DEFAULT_LENGTH_MS = 60 * 60 * 1000;
+
+/**
+ * Read and write the naive "YYYY-MM-DDTHH:mm" the inputs use.
+ *
+ * Arithmetic is done in UTC deliberately. These strings are wall-clock times in the
+ * event's own zone, not the browser's, so letting the local Date constructor interpret
+ * them would apply the reader's DST rules to somebody else's timezone and shift an
+ * event by an hour twice a year.
+ */
+function parseNaive(value: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return null;
+  return Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!);
+}
+
+function formatNaive(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 16);
+}
+
 /**
  * The event "when" block: start, end, all-day and timezone together.
  *
@@ -43,6 +63,30 @@ export function ScheduleFields({
     };
   }
 
+  /**
+   * Moving the start carries the end along with it.
+   *
+   * The length of the event is preserved rather than reset, which is what Google
+   * Calendar does: a fresh event has no length yet, so it gets an hour — the case
+   * this was asked for — while an event somebody has already made three hours long
+   * stays three hours long when its day changes. Resetting to an hour every time
+   * would quietly undo a deliberate choice.
+   */
+  function changeStart(raw: string) {
+    const next = isAllDay && raw ? `${raw.slice(0, 10)}T00:00` : raw;
+    const nextStart = parseNaive(next);
+    setStart(next);
+    if (nextStart === null) return;
+
+    const previousStart = parseNaive(start);
+    const previousEnd = parseNaive(end);
+    const length =
+      previousStart !== null && previousEnd !== null && previousEnd > previousStart
+        ? previousEnd - previousStart
+        : DEFAULT_LENGTH_MS;
+    setEnd(formatNaive(nextStart + length));
+  }
+
   return (
     <div className="space-y-5">
       <label className="flex items-center gap-2">
@@ -70,7 +114,7 @@ export function ScheduleFields({
             type={isAllDay ? "date" : "datetime-local"}
             required
             value={startDisplay}
-            onChange={(e) => handleChange(setStart)(e.target.value)}
+            onChange={(e) => changeStart(e.target.value)}
             className={`${inputClass} mt-1.5`}
           />
           {errors?.startAt ? <p className={errorClass}>{errors.startAt}</p> : null}

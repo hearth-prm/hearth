@@ -1586,14 +1586,16 @@ try {
   // express: what Auntie GAVE, not only what she was given.
   await A.page.goto(`/people/${auntie.id}`);
   const auntiePage = (await A.page.textContent("body")) ?? "";
-  ok("16.5 the giver's own page shows what they gave",
-     auntiePage.includes("A blue scarf") && auntiePage.includes("gave"), true);
+  ok("16.5 the giver's own page files the row under Given",
+     auntiePage.includes("A blue scarf") && auntiePage.includes("Given"), true);
   await A.page.goto(`/people/${kid.id}`);
-  ok("16.5b and the recipient's page shows the same row as received",
-     ((await A.page.textContent("body")) ?? "").includes("received"));
+  ok("16.5b and the recipient's page files the same row under Received",
+     ((await A.page.textContent("body")) ?? "").includes("Received"));
 
   // A one-off, with no event behind it.
   await A.page.goto(`/people/${auntie.id}`);
+  // The recording controls live behind the card's edit toggle now.
+  await A.page.click('button[aria-label="Edit gifts"]');
   await A.page.click('button:has-text("Record a gift")');
   const defaultGiver = await A.page.inputValue('select[name="giverId"]');
   ok("16.6 the giver defaults to the contact whose page you are on",
@@ -1675,6 +1677,81 @@ try {
   const accented = buildMessage({ ...mail, subject: "Thank-you list for Zoë" });
   ok("16.9c and a subject with an accent is encoded rather than mangled",
      Buffer.from(accented, "base64url").toString("utf8").includes("=?UTF-8?B?"));
+
+  // The gift list reads clean by default; the edit affordances are asked for.
+  await A.page.goto(`/people/${kid.id}`);
+  ok("16.11 per-row Edit and Remove are hidden until you ask for them",
+     !((await A.page.textContent("body")) ?? "").includes("Record a gift"));
+  await A.page.click('button[aria-label="Edit gifts"]');
+  await A.page.waitForSelector('button:has-text("Record a gift")', { timeout: 10_000 });
+  ok("16.11b and appear together when you do",
+     ((await A.page.textContent("body")) ?? "").includes("Record a gift"));
+
+  // An event's gifts collapse under the occasion, which is named and dated and links
+  // to it — fifteen presents at one Christmas must not bury everything else.
+  const groupTitle = await A.page.textContent(
+    `details summary a[href="/events/${xmas.id}"]`,
+  );
+  ok("16.12 event gifts group under the occasion, linked by name",
+     groupTitle?.trim() === "Gift Test Xmas", groupTitle);
+  const groupSummary = await A.page.textContent(
+    `details:has(a[href="/events/${xmas.id}"]) summary`,
+  );
+  ok("16.12b and the group is dated", (groupSummary ?? "").includes("2026"), groupSummary);
+
+  // With one candidate there is nothing to choose, so it is chosen.
+  await A.page.goto(`/events/${xmas.id}`);
+  await A.page.click('button:has-text("Record a gift")');
+  ok("16.13 a lone gift recipient is preselected",
+     (await A.page.inputValue('select[name="recipientId"]')) === kid.id);
+
+  // Moving the start carries the end with it, keeping the event's length.
+  await A.page.goto("/events/new");
+  await A.page.fill('input[name="f_startAt"]', "2026-11-05T18:00");
+  await A.page.waitForFunction(
+    () => (document.querySelector('input[name="f_endAt"]') as HTMLInputElement)?.value !== "",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("16.14 setting a start fills the end an hour later, on the same day",
+     (await A.page.inputValue('input[name="f_endAt"]')) === "2026-11-05T19:00",
+     await A.page.inputValue('input[name="f_endAt"]'));
+
+  await A.page.fill('input[name="f_endAt"]', "2026-11-05T21:00");
+  await A.page.fill('input[name="f_startAt"]', "2026-11-06T09:00");
+  await A.page.waitForFunction(
+    () => (document.querySelector('input[name="f_endAt"]') as HTMLInputElement)?.value
+      === "2026-11-06T12:00",
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  ok("16.14b and a length someone chose is kept, not reset to an hour",
+     (await A.page.inputValue('input[name="f_endAt"]')) === "2026-11-06T12:00",
+     await A.page.inputValue('input[name="f_endAt"]'));
+
+  // Reconnecting has to mean something. The adapter writes an Account row once and
+  // never again, so without persistGoogleGrant a new scope never reached the column
+  // every permission check reads — and Settings asked for a reconnect for ever.
+  const { persistGoogleGrant } = await import("@/lib/google/grant");
+  await prisma.account.updateMany({
+    where: { userId: A.id, provider: "google" },
+    data: { scope: "openid email", access_token: "stale" },
+  });
+  const grantBefore = await prisma.account.findFirstOrThrow({
+    where: { userId: A.id, provider: "google" },
+  });
+  await persistGoogleGrant(A.id, {
+    scope: "openid email https://www.googleapis.com/auth/gmail.send",
+    access_token: "fresh",
+  });
+  const grantAfter = await prisma.account.findFirstOrThrow({
+    where: { userId: A.id, provider: "google" },
+  });
+  ok("16.15 re-consenting updates the stored scope",
+     grantAfter.scope?.includes("gmail.send") === true, grantAfter.scope);
+  ok("16.15b and the fresh access token with it", grantAfter.access_token === "fresh");
+  // The claim is that it is UNCHANGED, so compare against what was there rather than
+  // against a value this check invented.
+  ok("16.15c but a response with no refresh token leaves the good one alone",
+     grantAfter.refresh_token === grantBefore.refresh_token, grantAfter.refresh_token);
 
   // The button says why it cannot send, rather than failing once pressed.
   await A.page.goto(`/events/${xmas.id}`);

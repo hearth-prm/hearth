@@ -31,7 +31,14 @@ export function DeleteForm({
   extra?: Record<string, string>;
 }) {
   return (
+    // display:flex, so the button inside is blockified.
+    //
+    // As a plain block form the button is inline-block, and its line box carries the
+    // few pixels of descender space every line of text gets. That made the form taller
+    // than the button, and beside a bare <button> sibling — "Edit" — the two no longer
+    // sat on the same line. Still block-level, so nothing about its width changes.
     <form
+      className="flex"
       action={action}
       onSubmit={(e) => {
         if (!window.confirm(confirmMessage)) e.preventDefault();

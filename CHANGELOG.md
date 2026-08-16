@@ -25,6 +25,19 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Reconnect Google" did nothing at all.** Auth.js's Prisma adapter writes an `Account`
+  row when an account is first linked and has no way to update it afterwards, so
+  re-consenting changed what Google would allow while Hearth went on reading the scope
+  list it had stored at sign-up. Every permission check reads that column, so the banner
+  could never clear however many times it was pressed — and the thank-you button stayed
+  blocked with an explanation that was true but unactionable. The stored grant is now
+  refreshed on every sign-in.
+  - A response with no `refresh_token` leaves the stored one alone. Google returns one
+    only when consent is genuinely re-prompted, and writing the absence through would
+    trade a stale scope for a broken background sync.
+
 ### Added
 
 - **Gift tracking, and a thank-you list you can email.** Mark an event as one where
@@ -174,6 +187,23 @@ that formally marks its milestone.
   right to be wary of using.
 
 ### Changed
+
+- **Setting an event's start now carries the end along with it**, the way Google Calendar
+  does. A new event gets an hour; an event somebody has already made three hours long
+  stays three hours long when its day moves, rather than having a deliberate choice
+  silently reset.
+
+- **The gift list on a contact page hides its editing controls behind a toggle.** Per-row
+  Edit and Remove on every line is clutter you learn to look past rather than use, so the
+  card reads as a list until you ask to change it. Received and given are separated, and
+  each event's presents collapse under the occasion — named, dated, and linked — so
+  fifteen things from one Christmas cannot bury everything else.
+
+- **Adding a relationship is behind a disclosure**, for the same reason: the form is
+  occasional and the list is what you came to read.
+
+- **A lone gift recipient is preselected.** At an event with one person receiving, being
+  asked to choose them for every present is a click whose answer never varies.
 
 - **The share picker no longer offers people who already have access.** Their name
   appearing in the list of candidates implied there was something left to grant, and

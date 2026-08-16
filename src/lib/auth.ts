@@ -36,6 +36,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   events: {
+    /**
+     * Keep the stored grant in step with what Google actually allows.
+     *
+     * The adapter writes an Account row once, at first link, and has no way to update
+     * it — so without this, re-consenting to add a scope changed nothing Hearth could
+     * see, and "Reconnect Google" stayed on screen for good. Best-effort like the rest
+     * of these: a failed write must not turn a valid sign-in into an error page.
+     */
+    async signIn({ user, account }) {
+      if (!user.id || account?.provider !== "google") return;
+      // grant.ts deliberately imports nothing but Prisma: this module is reachable
+      // from a client component via access.ts, so an edge to anything that pulls in
+      // googleapis would send the Node-only SDK to the browser.
+      const { persistGoogleGrant } = await import("@/lib/google/grant");
+      await persistGoogleGrant(user.id, account).catch(() => undefined);
+    },
+
     async createUser({ user }) {
       if (!user.id) return;
       // Best-effort: getUserSettings() also upserts, so a failure here (or a

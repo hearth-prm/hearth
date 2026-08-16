@@ -94,14 +94,6 @@ export function listGiftRecipients(eventId: string): Promise<GiftRecipientView[]
   });
 }
 
-/** A gift's date: its own if it has one, otherwise the day of the event it came from. */
-export function giftDate(gift: {
-  receivedOn: Date | null;
-  event: { startAt: Date } | null;
-}): Date | null {
-  return gift.receivedOn ?? gift.event?.startAt ?? null;
-}
-
 export interface ThankYouGift {
   description: string;
   notes: string | null;
