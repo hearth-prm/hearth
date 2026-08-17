@@ -81,6 +81,24 @@ that formally marks its milestone.
 
 ### Added
 
+- **Import contacts straight from Google, in place.** Pick a Google label or individual
+  contacts and Hearth adopts them: the Google contact is not moved, copied or re-created,
+  and everything already on it stays on it. A contact does **not** have to have been made
+  by Hearth to be linked to it — which is what removes the export-to-CSV, edit, re-import
+  dance.
+  - The import writes nothing to Google at all. Recording the existing `resourceName`
+    against the new Hearth contact is enough: the ordinary sync sees a link and calls
+    `updateContact` rather than `createContact`, so `hearth_id` arrives on the next sync
+    through the serialiser that already has tests, rather than through a second path.
+  - Google labels become Hearth labels, matched by name, so importing the same label
+    twice reuses it instead of making a second one.
+  - **The preview is the feature, not a courtesy.** Importing makes Hearth authoritative
+    for the field groups it manages, so the first sync afterwards would erase anything
+    the import failed to copy. The preview names, per contact, every value it will keep
+    as a custom field and every shape that will change — before you commit.
+  - Field groups Hearth does *not* manage — relations, custom dates, chat handles,
+    external ids, interests, skills — are never written by it and are unaffected.
+
 - **Gift tracking, and a thank-you list you can email.** Mark an event as one where
   presents change hands, say who they are for — more than one, since Christmas is not a
   birthday — and record what each person was given, by whom, with a note. A button then

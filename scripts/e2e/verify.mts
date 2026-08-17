@@ -689,7 +689,11 @@ try {
     new RegExp(`${n}\\s*${label}`).test(oneLine(t));
 
   await A.page.goto("/people");
-  ok("7.1 the People page offers Import", (await A.page.$$('a:has-text("Import")')).length === 1);
+  // Two now, and named by which is which: has-text is a substring match, so a bare
+  // count of "Import" was only ever right while there was one of them.
+  ok("7.1 the People page offers both imports",
+     (await A.page.$$('a[href="/people/import"]')).length === 1
+       && (await A.page.$$('a[href="/people/import/google"]')).length === 1);
   await A.page.goto("/people/import");
   ok("7.1b the import page loads with its format reference",
      (await A.page.textContent("body"))?.includes("How rows are matched") === true);
@@ -2032,6 +2036,123 @@ try {
     where: { giftId: scarf.id },
     data: { thankedAt: null, thankYouNote: null },
   });
+
+  // ---------------------------------------------------------------------------
+  section("§17 Importing from Google Contacts");
+  // ---------------------------------------------------------------------------
+  // The planner is pure, which is the point: it decides what happens to somebody's real
+  // address book, so it has to be checkable without credentials. The Google read and the
+  // round trip need real accounts — see npm run e2e:google.
+
+  const { planGoogleImport, GOOGLE_IMPORT_FIELDS } = await import("@/lib/google/import-plan");
+  const { HEARTH_ID_KEY } = await import("@/lib/google/serialize-person");
+  const { MANAGED_PERSON_FIELDS } = await import("@/lib/google/serialize-person");
+
+  const sample = [
+    {
+      resourceName: "people/c1",
+      etag: "etag-1",
+      names: [{ givenName: "Ada", middleName: "Augusta", familyName: "Lovelace",
+                honorificPrefix: "Ms" }],
+      organizations: [{ name: "Analytical Engines", title: "Mathematician",
+                        department: "Research" }],
+      emailAddresses: [
+        { value: "ada@e2e.test", type: "work", metadata: { primary: true } },
+        { value: "ada2@e2e.test", type: "home" },
+      ],
+      phoneNumbers: [{ value: "555 0100", type: "mobile" }],
+      addresses: [{ formattedValue: "1 Long Road, London", streetAddress: "1 Long Road",
+                    city: "London", type: "home" }],
+      birthdays: [{ date: { year: 1815, month: 12, day: 10 } }],
+      biographies: [{ value: "Wrote the first program." }],
+      userDefined: [{ key: "Blood type", value: "O" }],
+      memberships: [
+        { contactGroupMembership: { contactGroupResourceName: "contactGroups/friends" } },
+      ],
+    },
+    {
+      resourceName: "people/c2",
+      names: [{ givenName: "Already", familyName: "Linked" }],
+      userDefined: [{ key: HEARTH_ID_KEY, value: "some-hearth-id" }],
+    },
+    {
+      resourceName: "people/c3",
+      // No name at all: an email is the only thing identifying the row.
+      emailAddresses: [{ value: "nameless@e2e.test" }],
+      birthdays: [{ date: { month: 4, day: 1 } }],
+    },
+  ];
+
+  const gPlan = planGoogleImport(sample, {
+    linkedResourceNames: new Set(["people/c2"]),
+  });
+
+  const ada = gPlan.contacts.find((c) => c.resourceName === "people/c1")!;
+  ok("17.1 core fields are read into Hearth's own columns",
+     ada.columns.givenName === "Ada" && ada.columns.familyName === "Lovelace"
+       && ada.columns.organization === "Analytical Engines"
+       && ada.columns.jobTitle === "Mathematician"
+       && ada.columns.notes === "Wrote the first program."
+       && ada.columns.birthday === "1815-12-10",
+     ada.columns);
+  ok("17.1b every email, phone, url and address becomes a contact point",
+     ada.contactPoints.filter((p) => p.kind === "EMAIL").length === 2
+       && ada.contactPoints.some((p) => p.kind === "PHONE")
+       && ada.contactPoints.some((p) => p.kind === "ADDRESS"),
+     ada.contactPoints.map((p) => `${p.kind}:${p.value}`));
+  ok("17.1c and Google's primary flag comes with them",
+     ada.contactPoints.find((p) => p.value === "ada@e2e.test")?.isPrimary === true);
+  ok("17.1d with their Google type kept as the label",
+     ada.contactPoints.find((p) => p.value === "555 0100")?.label === "mobile");
+
+  // The point of the feature: data inside a group Hearth overwrites, with no column of
+  // its own, is rescued rather than left to be deleted by the first sync.
+  const keys = ada.rescued.map((r) => r.key);
+  ok("17.2 a middle name is rescued, having nowhere else to go",
+     keys.includes("middle_name"), keys);
+  ok("17.2b as are a name prefix and a department",
+     keys.includes("name_prefix") && keys.includes("department"), keys);
+  ok("17.2c and an existing Google custom field, which a push would otherwise replace",
+     ada.rescued.some((r) => r.label === "Blood type" && r.value === "O"), keys);
+  ok("17.2d but never hearth_id, which is Hearth's own bookkeeping",
+     !ada.rescued.some((r) => r.label === HEARTH_ID_KEY));
+  ok("17.2e each rescue says why, per contact rather than in the abstract",
+     ada.rescued.every((r) => r.reason.length > 0));
+
+  ok("17.3 memberships are reported so Google labels can become Hearth ones",
+     ada.groupIds.includes("contactGroups/friends"));
+
+  const linkedContact = gPlan.contacts.find((c) => c.resourceName === "people/c2")!;
+  ok("17.4 a contact already linked is reported, not silently skipped",
+     linkedContact.action === "linked"
+       && linkedContact.existingHearthId === "some-hearth-id",
+     linkedContact.action);
+  ok("17.4b and does not count towards what would be imported",
+     gPlan.counts.import === 2 && gPlan.counts.linked === 1,
+     gPlan.counts);
+
+  const nameless = gPlan.contacts.find((c) => c.resourceName === "people/c3")!;
+  ok("17.5 a contact with no name is still identifiable",
+     nameless.displayName === "nameless@e2e.test", nameless.displayName);
+  ok("17.5b and a birthday with no year is reported rather than guessed",
+     nameless.columns.birthday === null
+       && nameless.reasons.some((r) => r.includes("no year")),
+     nameless.reasons);
+
+  // Every group Hearth overwrites must be one the import reads, or the first sync
+  // deletes data nobody took a copy of. This is the check that would fail if somebody
+  // added a field to MANAGED_PERSON_FIELDS and forgot the import.
+  const readFields = new Set<string>(GOOGLE_IMPORT_FIELDS);
+  const unread = MANAGED_PERSON_FIELDS.filter((f) => !readFields.has(f));
+  ok("17.6 the import reads every field group Hearth later overwrites",
+     unread.length === 0, unread);
+
+  await A.page.goto("/people/import/google");
+  ok("17.7 the page explains that contacts stay where they are",
+     ((await A.page.textContent("body")) ?? "").includes("stay exactly where they are"));
+  await A.page.goto("/people");
+  ok("17.7b and is reachable from the people list",
+     (await A.page.$('a[href="/people/import/google"]')) !== null);
 
 } finally {
   await h.stop();

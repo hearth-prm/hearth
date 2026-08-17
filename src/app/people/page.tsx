@@ -90,8 +90,11 @@ export default async function PeoplePage({
         description={total === 1 ? "1 contact" : `${total.toLocaleString()} contacts`}
         action={
           <div className="flex items-center gap-2">
+            <Link href="/people/import/google" className={btnSecondary}>
+              Import from Google
+            </Link>
             <Link href="/people/import" className={btnSecondary}>
-              Import
+              Import CSV
             </Link>
             <Link href="/people/new" className={btnPrimary}>
               New contact
