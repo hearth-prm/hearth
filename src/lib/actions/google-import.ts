@@ -170,10 +170,23 @@ async function importOne(
     data: {
       ownerId: userId,
       givenName: contact.columns.givenName,
+      middleName: contact.columns.middleName,
       familyName: contact.columns.familyName,
+      honorificPrefix: contact.columns.honorificPrefix,
+      honorificSuffix: contact.columns.honorificSuffix,
+      phoneticGivenName: contact.columns.phoneticGivenName,
+      phoneticMiddleName: contact.columns.phoneticMiddleName,
+      phoneticFamilyName: contact.columns.phoneticFamilyName,
       nickname: contact.columns.nickname,
       organization: contact.columns.organization,
       jobTitle: contact.columns.jobTitle,
+      orgDepartment: contact.columns.orgDepartment,
+      orgJobDescription: contact.columns.orgJobDescription,
+      orgSymbol: contact.columns.orgSymbol,
+      orgDomain: contact.columns.orgDomain,
+      orgLocation: contact.columns.orgLocation,
+      orgPhoneticName: contact.columns.orgPhoneticName,
+      orgType: contact.columns.orgType,
       notes: contact.columns.notes,
       birthday: contact.columns.birthday
         ? new Date(`${contact.columns.birthday}T00:00:00.000Z`)

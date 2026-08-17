@@ -2105,19 +2105,50 @@ try {
   ok("17.1d with their Google type kept as the label",
      ada.contactPoints.find((p) => p.value === "555 0100")?.label === "mobile");
 
-  // The point of the feature: data inside a group Hearth overwrites, with no column of
-  // its own, is rescued rather than left to be deleted by the first sync.
+  // Name parts and organisation detail have columns of their own now, so they keep
+  // their shape instead of arriving as "Middle name: Augusta" in the custom fields.
+  ok("17.2 name parts land in real columns, not custom fields",
+     ada.columns.middleName === "Augusta"
+       && ada.columns.honorificPrefix === "Ms",
+     ada.columns);
+  ok("17.2b as does the rest of the organisation",
+     ada.columns.orgDepartment === "Research", ada.columns.orgDepartment);
+
   const keys = ada.rescued.map((r) => r.key);
-  ok("17.2 a middle name is rescued, having nowhere else to go",
-     keys.includes("middle_name"), keys);
-  ok("17.2b as are a name prefix and a department",
-     keys.includes("name_prefix") && keys.includes("department"), keys);
-  ok("17.2c and an existing Google custom field, which a push would otherwise replace",
+  ok("17.2c nothing with a column of its own is rescued any more",
+     !keys.includes("middle_name") && !keys.includes("department"), keys);
+  ok("17.2d what genuinely has nowhere to sit still is",
      ada.rescued.some((r) => r.label === "Blood type" && r.value === "O"), keys);
-  ok("17.2d but never hearth_id, which is Hearth's own bookkeeping",
+  ok("17.2e but never hearth_id, which is Hearth's own bookkeeping",
      !ada.rescued.some((r) => r.label === HEARTH_ID_KEY));
-  ok("17.2e each rescue says why, per contact rather than in the abstract",
+  ok("17.2f and each rescue says why, per contact rather than in the abstract",
      ada.rescued.every((r) => r.reason.length > 0));
+
+  // The half that matters: what Hearth sends back. A part missing here is a part the
+  // next sync deletes from a contact it has just adopted.
+  const { serializePerson } = await import("@/lib/google/serialize-person");
+  const round = serializePerson({
+    id: "p1", ownerId: A.id, givenName: "Ada", middleName: "Augusta",
+    familyName: "Lovelace", honorificPrefix: "Ms", honorificSuffix: null,
+    phoneticGivenName: "AY-da", phoneticMiddleName: null, phoneticFamilyName: null,
+    nickname: null, organization: "Analytical Engines", jobTitle: "Mathematician",
+    orgDepartment: "Research", orgJobDescription: null, orgSymbol: null,
+    orgDomain: null, orgLocation: "London", orgPhoneticName: null, orgType: "work",
+    birthday: null, notes: null, displayName: "Ada Lovelace", custom: {},
+    addToGoogle: true, linkedUserId: null,
+    createdAt: new Date(0), updatedAt: new Date(0),
+    contactPoints: [],
+  });
+  ok("17.2g the middle name and title go back to Google as part of the name",
+     round.person.names?.[0]?.middleName === "Augusta"
+       && round.person.names?.[0]?.honorificPrefix === "Ms"
+       && round.person.names?.[0]?.phoneticGivenName === "AY-da",
+     round.person.names?.[0]);
+  ok("17.2h and the department goes back on the organisation",
+     round.person.organizations?.[0]?.department === "Research"
+       && round.person.organizations?.[0]?.location === "London"
+       && round.person.organizations?.[0]?.type === "work",
+     round.person.organizations?.[0]);
 
   ok("17.3 memberships are reported so Google labels can become Hearth ones",
      ada.groupIds.includes("contactGroups/friends"));

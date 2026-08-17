@@ -334,6 +334,32 @@ model Person {
   birthday     DateTime? @db.Date
   notes        String?   @db.Text
 
+  /// The rest of a Google name.
+  ///
+  /// Real columns rather than custom fields, because Hearth manages the `names` group
+  /// and replaces it wholesale on every push — so a middle name it did not store was a
+  /// middle name it deleted, on the next sync, from the contact it had just imported.
+  middleName         String?
+  honorificPrefix    String?
+  honorificSuffix    String?
+  phoneticGivenName  String?
+  phoneticMiddleName String?
+  phoneticFamilyName String?
+
+  /// The rest of the primary organisation, for the same reason.
+  ///
+  /// One organisation, not a list: Hearth has only ever sent one, so nothing regresses,
+  /// and `organization`/`jobTitle` stay where every core-field, CSV and search path
+  /// already expects them. A contact with two employers still loses the second — noted
+  /// rather than pretended away.
+  orgDepartment     String?
+  orgJobDescription String?
+  orgSymbol         String?
+  orgDomain         String?
+  orgLocation       String?
+  orgPhoneticName   String?
+  orgType           String?
+
   /// Denormalised "Given Family" (or nickname/org fallback) for sort + search.
   displayName String @default("")
 

@@ -79,6 +79,24 @@ that formally marks its milestone.
   of one-line rows is more ink than the rows. They return while editing, where each row
   grows a form and needs the separation.
 
+### Fixed
+
+- **Hearth was deleting parts of every contact it synced.** `names` and `organizations`
+  are both groups Hearth manages, and Google replaces a managed group wholesale on each
+  push — but the serialiser only ever sent a first name, a last name, and
+  `{name, title}`. So a middle name, a title like Dr or Ms, a phonetic reading, a
+  department: present in Google, unknown to Hearth, and gone on the next sync.
+  - There are real columns for all of them now — six for the rest of a Google name,
+    seven for the rest of the organisation — and the serialiser sends them, which is the
+    half that actually stops the loss. They appear in the contact form, the list-view
+    columns and the Google field-mapping table automatically, because core fields and
+    user-defined ones are merged into one registry.
+  - The Google import stores them as themselves rather than rescuing them into custom
+    fields, so a middle name returns to Google as a middle name instead of reappearing as
+    `Middle name: Augusta` among the custom fields.
+  - One contact still keeps one organisation. Hearth has only ever sent one, so nothing
+    regresses, and the import now says so per contact when Google holds more.
+
 ### Added
 
 - **Import contacts straight from Google, in place.** Pick a Google label or individual

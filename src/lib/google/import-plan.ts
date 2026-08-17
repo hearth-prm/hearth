@@ -77,10 +77,23 @@ export interface PlannedContact {
   existingHearthId: string | null;
   columns: {
     givenName: string | null;
+    middleName: string | null;
     familyName: string | null;
+    honorificPrefix: string | null;
+    honorificSuffix: string | null;
+    phoneticGivenName: string | null;
+    phoneticMiddleName: string | null;
+    phoneticFamilyName: string | null;
     nickname: string | null;
     organization: string | null;
     jobTitle: string | null;
+    orgDepartment: string | null;
+    orgJobDescription: string | null;
+    orgSymbol: string | null;
+    orgDomain: string | null;
+    orgLocation: string | null;
+    orgPhoneticName: string | null;
+    orgType: string | null;
     notes: string | null;
     birthday: string | null;
   };
@@ -208,17 +221,11 @@ export function planGoogleImport(
     };
 
     // --- data inside a managed group with nowhere to sit ---------------------
-    rescue(
-      "Middle name",
-      clean(name?.middleName),
-      "Hearth stores a given and family name only, so this returns to Google as a custom field rather than part of the name.",
-    );
-    rescue("Name prefix", clean(name?.honorificPrefix), "No Hearth column; kept as a custom field.");
-    rescue("Name suffix", clean(name?.honorificSuffix), "No Hearth column; kept as a custom field.");
-    rescue("Phonetic name", clean(name?.phoneticFullName), "No Hearth column; kept as a custom field.");
-    rescue("Department", clean(org?.department), "No Hearth column; kept as a custom field.");
-    rescue("Job description", clean(org?.jobDescription), "No Hearth column; kept as a custom field.");
-
+    //
+    // Name parts and organisation detail used to be rescued into custom fields here.
+    // They have columns of their own now, so they keep their shape: a middle name goes
+    // back to Google as a middle name rather than reappearing as "Middle name: John" in
+    // the custom fields. What remains below is what genuinely has nowhere to sit.
     for (const entry of userDefined) {
       if (entry.key === HEARTH_ID_KEY) continue;
       rescue(
@@ -252,6 +259,12 @@ export function planGoogleImport(
           "Address kept as one line; Hearth has no separate street, city and postcode.",
         );
       }
+    }
+
+    if ((person.organizations ?? []).length > 1) {
+      reasons.push(
+        "Only the first organisation is kept; Hearth stores one per contact and the rest will be dropped on the next sync.",
+      );
     }
 
     const birthdayDate = person.birthdays?.find((b) => b.date)?.date;
@@ -288,7 +301,20 @@ export function planGoogleImport(
       existingHearthId,
       columns: {
         givenName,
+        middleName: clean(name?.middleName),
         familyName,
+        honorificPrefix: clean(name?.honorificPrefix),
+        honorificSuffix: clean(name?.honorificSuffix),
+        phoneticGivenName: clean(name?.phoneticGivenName),
+        phoneticMiddleName: clean(name?.phoneticMiddleName),
+        phoneticFamilyName: clean(name?.phoneticFamilyName),
+        orgDepartment: clean(org?.department),
+        orgJobDescription: clean(org?.jobDescription),
+        orgSymbol: clean(org?.symbol),
+        orgDomain: clean(org?.domain),
+        orgLocation: clean(org?.location),
+        orgPhoneticName: clean(org?.phoneticName),
+        orgType: clean(org?.type),
         nickname: clean(person.nicknames?.[0]?.value),
         organization: clean(org?.name),
         // Google keeps a job title on the organisation and an occupation apart from

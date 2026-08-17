@@ -79,13 +79,29 @@ export function serializePerson(
   const given = clean(person.givenName);
   const family = clean(person.familyName);
 
+  // Every part Google keeps, not merely the two Hearth used to store.
+  //
+  // This group is replaced wholesale on each push, so a part left out here is a part
+  // deleted from the contact — which is exactly what used to happen to middle names and
+  // phonetic readings on the first sync after an import.
+  const nameParts = {
+    givenName: given,
+    middleName: clean(person.middleName),
+    familyName: family,
+    honorificPrefix: clean(person.honorificPrefix),
+    honorificSuffix: clean(person.honorificSuffix),
+    phoneticGivenName: clean(person.phoneticGivenName),
+    phoneticMiddleName: clean(person.phoneticMiddleName),
+    phoneticFamilyName: clean(person.phoneticFamilyName),
+  };
+
   // Google renders a contact with no name at all as a blank row, so fall back to
   // the display name Hearth already computes (which itself falls back to
   // nickname, then organisation). Names are never disableable.
   const names: GooglePerson["names"] =
     given || family
-      ? [{ givenName: given, familyName: family }]
-      : [{ givenName: clean(person.displayName) ?? "Unnamed contact" }];
+      ? [nameParts]
+      : [{ ...nameParts, givenName: clean(person.displayName) ?? "Unnamed contact" }];
 
   // --- accumulators for mapped custom fields ---------------------------
   //
@@ -151,6 +167,16 @@ export function serializePerson(
     }
   }
 
+  const orgDetail = {
+    department: clean(person.orgDepartment),
+    jobDescription: clean(person.orgJobDescription),
+    symbol: clean(person.orgSymbol),
+    domain: clean(person.orgDomain),
+    location: clean(person.orgLocation),
+    phoneticName: clean(person.orgPhoneticName),
+    type: clean(person.orgType),
+  };
+
   const nickname = core("nickname") ? clean(person.nickname) : undefined;
   const organization = core("organization") ? clean(person.organization) : undefined;
   const jobTitle = core("jobTitle") ? clean(person.jobTitle) : undefined;
@@ -167,8 +193,12 @@ export function serializePerson(
       ...(nickname ? [{ value: nickname }] : []),
       ...extraNicknames.map((value) => ({ value })),
     ],
+    // Same reasoning as names: the group is replaced, so everything Hearth knows about
+    // the organisation has to travel with it or be lost.
     organizations:
-      organization || jobTitle ? [{ name: organization, title: jobTitle }] : [],
+      organization || jobTitle || orgDetail.department || orgDetail.jobDescription
+        ? [{ name: organization, title: jobTitle, ...orgDetail }]
+        : [],
     // @db.Date columns come back as an instant at UTC midnight, so the components
     // must be read in UTC or the date shifts a day west of Greenwich.
     birthdays: birthday
