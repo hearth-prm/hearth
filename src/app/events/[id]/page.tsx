@@ -35,8 +35,7 @@ import {
   GiftForm,
   GiftEditForm,
   GiftRecipientForm,
-  GiftStatus,
-  ThankYouButton,
+  ThankYouControl,
 } from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
 import { canSendMail } from "@/lib/google/mail";
@@ -45,8 +44,7 @@ import {
   addGiftRecipient,
   removeGift,
   removeGiftRecipient,
-  sendThankYou,
-  setGiftThanked,
+  sendThankYouNote,
   updateGift,
 } from "@/lib/actions/gifts";
 import { DeleteForm } from "@/components/delete-form";
@@ -116,23 +114,6 @@ export default async function EventPage({
 
   // Anyone readable can be a giver; recipients are drawn from the gift list, which is
   // what makes "who is this for" a decision made once rather than per present.
-  // Which gift recipients can actually be emailed. Gathered here so the button can say
-  // why it is disabled rather than failing once pressed.
-  const recipientEmails = new Set(
-    (
-      await prisma.person.findMany({
-        where: {
-          AND: [
-            readablePeopleWhere(user.id),
-            { giftEvents: { some: { eventId: event.id } } },
-            { contactPoints: { some: { kind: "EMAIL" } } },
-          ],
-        },
-        select: { id: true },
-      })
-    ).map((p) => p.id),
-  );
-
   const giverChoices = await prisma.person.findMany({
     where: readablePeopleWhere(user.id),
     orderBy: { displayName: "asc" },
@@ -341,11 +322,15 @@ export default async function EventPage({
                                       {gift.notes}
                                     </span>
                                   ) : null}
-                                  <GiftStatus
+                                  <ThankYouControl
+                                    action={sendThankYouNote}
                                     giftId={gift.id}
-                                    reminderSent={Boolean(gift.reminderSentAt)}
+                                    giftDescription={gift.description}
+                                    giverName={gift.giver.displayName}
+                                    giverEmail={gift.giver.email}
                                     thanked={Boolean(gift.thankedAt)}
-                                    onToggle={setGiftThanked}
+                                    thankYouNote={gift.thankYouNote}
+                                    canSend={mailAllowed}
                                     canEdit={canEdit}
                                   />
                                 </span>
@@ -376,20 +361,6 @@ export default async function EventPage({
                           </ul>
                         ) : null}
 
-                        {/* Nothing outstanding means nothing to remind about, so the
-                            button goes rather than sitting there disabled. */}
-                        {theirs.some((g) => !g.thankedAt) ? (
-                          <div className="mt-3">
-                            <ThankYouButton
-                              action={sendThankYou}
-                              recipientId={entry.personId}
-                              recipientName={entry.person.displayName}
-                              eventId={event.id}
-                              canSend={mailAllowed}
-                              hasEmail={recipientEmails.has(entry.personId)}
-                            />
-                          </div>
-                        ) : null}
                       </li>
                     );
                   })}

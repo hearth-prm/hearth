@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db";
 import { readableGiftsWhere } from "@/lib/access";
-import { primaryEmail } from "@/lib/people";
 
 /**
  * Reading gifts.
@@ -27,9 +26,10 @@ export interface GiftView {
   description: string;
   notes: string | null;
   receivedOn: Date | null;
-  reminderSentAt: Date | null;
   thankedAt: Date | null;
-  giver: { id: string; displayName: string };
+  thankYouNote: string | null;
+  /** email is null when there is nowhere to send a thank-you. */
+  giver: { id: string; displayName: string; email: string | null };
   recipient: { id: string; displayName: string };
   event: { id: string; title: string; startAt: Date } | null;
 }
@@ -43,19 +43,56 @@ const giftSelect = {
   description: true,
   notes: true,
   receivedOn: true,
-  reminderSentAt: true,
   thankedAt: true,
-  giver: { select: { id: true, displayName: true } },
+  thankYouNote: true,
+  giver: {
+    select: {
+      id: true,
+      displayName: true,
+      contactPoints: {
+        where: { kind: "EMAIL" as const },
+        orderBy: [{ isPrimary: "desc" as const }, { order: "asc" as const }],
+        take: 1,
+        select: { value: true },
+      },
+    },
+  },
   recipient: { select: { id: true, displayName: true } },
   event: { select: { id: true, title: true, startAt: true } },
 };
 
-export function listGiftsForEvent(userId: string, eventId: string): Promise<GiftView[]> {
-  return prisma.gift.findMany({
-    where: { AND: [readableGiftsWhere(userId), { eventId }] },
-    select: giftSelect,
-    orderBy: [{ recipient: { displayName: "asc" } }, { createdAt: "asc" }],
-  });
+/**
+ * Flatten the giver's single email out of its row.
+ *
+ * Done here rather than in each page so "can this gift be thanked for" is one question
+ * with one answer, asked where the gift is read.
+ */
+type GiftRow = Omit<GiftView, "giver"> & {
+  giver: { id: string; displayName: string; contactPoints: { value: string }[] };
+};
+
+function toView(rows: GiftRow[]): GiftView[] {
+  return rows.map((row) => ({
+    ...row,
+    giver: {
+      id: row.giver.id,
+      displayName: row.giver.displayName,
+      email: row.giver.contactPoints[0]?.value ?? null,
+    },
+  }));
+}
+
+export async function listGiftsForEvent(
+  userId: string,
+  eventId: string,
+): Promise<GiftView[]> {
+  return toView(
+    await prisma.gift.findMany({
+      where: { AND: [readableGiftsWhere(userId), { eventId }] },
+      select: giftSelect,
+      orderBy: [{ recipient: { displayName: "asc" } }, { createdAt: "asc" }],
+    }),
+  );
 }
 
 /**
@@ -65,17 +102,22 @@ export function listGiftsForEvent(userId: string, eventId: string): Promise<Gift
  * direction flag: "gifts involving this person" is one predicate, and the caller sorts
  * them into given and received by comparing ids.
  */
-export function listGiftsForPerson(userId: string, personId: string): Promise<GiftView[]> {
-  return prisma.gift.findMany({
-    where: {
-      AND: [
-        readableGiftsWhere(userId),
-        { OR: [{ giverId: personId }, { recipientId: personId }] },
-      ],
-    },
-    select: giftSelect,
-    orderBy: [{ receivedOn: "desc" }, { createdAt: "desc" }],
-  });
+export async function listGiftsForPerson(
+  userId: string,
+  personId: string,
+): Promise<GiftView[]> {
+  return toView(
+    await prisma.gift.findMany({
+      where: {
+        AND: [
+          readableGiftsWhere(userId),
+          { OR: [{ giverId: personId }, { recipientId: personId }] },
+        ],
+      },
+      select: giftSelect,
+      orderBy: [{ receivedOn: "desc" }, { createdAt: "desc" }],
+    }),
+  );
 }
 
 export interface GiftRecipientView {
@@ -93,73 +135,5 @@ export function listGiftRecipients(eventId: string): Promise<GiftRecipientView[]
       person: { select: { id: true, displayName: true } },
     },
     orderBy: { person: { displayName: "asc" } },
-  });
-}
-
-export interface ThankYouGift {
-  description: string;
-  notes: string | null;
-  /** The occasion it came from, when the list spans more than one. */
-  occasion: string | null;
-  giverName: string;
-  giverEmail: string | null;
-  giverPhone: string | null;
-  giverAddress: string | null;
-}
-
-/**
- * Everything the thank-you note needs, for one recipient.
- *
- * Only gifts still unthanked. A reminder listing presents the reader has already written
- * about is worse than no reminder: it is a list they have to re-check rather than act on.
- *
- * An absent eventId means every outstanding gift, not merely the ones belonging to no
- * event — that is the contact page's case, where the question is "what does this person
- * still owe thanks for" across every occasion at once.
- *
- * The givers' contact details are fetched here rather than in the mail builder so the
- * access check stays in one place: the gifts are scoped, and only givers reached
- * through a scoped gift are looked up.
- */
-export async function thankYouList(
-  userId: string,
-  recipientId: string,
-  eventId: string | null,
-): Promise<ThankYouGift[]> {
-  const gifts = await prisma.gift.findMany({
-    where: {
-      AND: [
-        readableGiftsWhere(userId),
-        { recipientId },
-        { thankedAt: null },
-        ...(eventId ? [{ eventId }] : []),
-      ],
-    },
-    include: {
-      event: { select: { title: true } },
-      giver: {
-        select: {
-          displayName: true,
-          contactPoints: {
-            orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
-            select: { kind: true, value: true, isPrimary: true, order: true },
-          },
-        },
-      },
-    },
-    orderBy: [{ giver: { displayName: "asc" } }, { createdAt: "asc" }],
-  });
-
-  return gifts.map((gift) => {
-    const points = gift.giver.contactPoints;
-    return {
-      description: gift.description,
-      notes: gift.notes,
-      occasion: gift.event?.title ?? null,
-      giverName: gift.giver.displayName,
-      giverEmail: primaryEmail(points.filter((p) => p.kind === "EMAIL")) ?? null,
-      giverPhone: points.find((p) => p.kind === "PHONE")?.value ?? null,
-      giverAddress: points.find((p) => p.kind === "ADDRESS")?.value ?? null,
-    };
   });
 }

@@ -1681,22 +1681,20 @@ try {
   // The thank-you note, built without a mailbox. These are pure functions precisely so
   // the wording a person will actually read can be checked without sending anything.
   const mail = buildThankYouMail({
-    to: "kid@e2e.test",
-    recipientName: "Gift Kid",
-    occasion: "Gift Test Xmas",
-    gifts: [{
-      description: "A blue scarf", notes: "Hand-knitted", giverName: "Gift Auntie",
-      giverEmail: "auntie@e2e.test", giverPhone: null, giverAddress: null,
-      occasion: "Gift Test Xmas",
-    }],
+    to: "auntie@e2e.test",
+    giftDescription: "blue scarf",
+    message: "Dear Auntie,\n\nThank you for the <lovely> scarf.\nIt fits.",
   });
-  ok("16.8 the note names the gift, the giver and how to reach them",
-     mail.text.includes("A blue scarf") && mail.text.includes("Gift Auntie")
-       && mail.text.includes("auntie@e2e.test"), mail.text);
-  ok("16.8b and carries the note through to the reader",
-     mail.text.includes("Hand-knitted") && mail.html.includes("Hand-knitted"));
-  ok("16.8c with the occasion in the subject",
-     mail.subject.includes("Gift Test Xmas"), mail.subject);
+  ok("16.8 the note is the sender's own words, with nothing added around them",
+     mail.text === "Dear Auntie,\n\nThank you for the <lovely> scarf.\nIt fits.",
+     mail.text);
+  ok("16.8b and says what it is about before it is opened",
+     mail.subject === "Thank you for the blue scarf", mail.subject);
+  ok("16.8c paragraphs survive, and typed angle brackets stay text",
+     mail.html.includes("<p>Dear Auntie,</p>")
+       && mail.html.includes("&lt;lovely&gt;")
+       && mail.html.includes("It fits."),
+     mail.html);
 
   const raw = buildMessage(mail);
   ok("16.9 the message is base64url, which is what Gmail accepts",
@@ -1705,7 +1703,7 @@ try {
   ok("16.9b it is multipart with both a plain and an HTML part",
      decoded.includes("multipart/alternative")
        && decoded.includes("text/plain") && decoded.includes("text/html"));
-  const accented = buildMessage({ ...mail, subject: "Thank-you list for Zoë" });
+  const accented = buildMessage({ ...mail, subject: "Thank you, Zoë" });
   ok("16.9c and a subject with an accent is encoded rather than mangled",
      Buffer.from(accented, "base64url").toString("utf8").includes("=?UTF-8?B?"));
 
@@ -1809,65 +1807,85 @@ try {
 
   // The button says why it cannot send, rather than failing once pressed.
   await A.page.goto(`/events/${xmas.id}`);
-  const giftPage = (await A.page.textContent("body")) ?? "";
-  ok("16.10 a recipient with no email is told so, not left to press and fail",
-     giftPage.includes("Gift Kid has no email address"), true);
-  ok("16.10b and the button says what it sends",
-     giftPage.includes("Send thank you reminders"), true);
+  await openGifts();
+  // Writing the thank-you here is the record of it: Hearth sends it, so nothing has to
+  // be ticked afterwards and nothing can go stale.
+  // Matched with the text engine, not textContent("body").
+  //
+  // Next inlines the RSC payload in a <script>, and a client component's props go with
+  // it — so thanked={false} put the literal `"thanked":false` in the body text and a
+  // scan for the word found it. The text engine skips script and style, so it sees what
+  // a reader sees. The positive checks below use it for the same reason: a badge test
+  // that can be satisfied by serialised props is not testing the badge.
+  const shows = async (text: string) => (await A.page.$$(`text="${text}"`)).length;
 
-  // "Reminder sent" and "thanked" are two facts, and only a person can supply the
-  // second. Sending must not claim it on their behalf, or the outstanding list empties
-  // itself the moment you ask to be reminded about it.
+  ok("16.10 a gift not yet thanked for offers to write one",
+     (await shows("write thank you")) >= 1);
+  ok("16.10b and does not claim it has been", (await shows("thanked")) === 0);
+
   const scarf = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
-  ok("16.19 sending is not the same as having thanked anyone",
+  ok("16.19 nothing is marked thanked until something is sent",
      scarf.thankedAt === null, scarf.thankedAt);
 
-  // Driven through the browser, not by calling the action: it reaches requireUser,
-  // which reaches headers(), which does not exist outside a request. The same reason
-  // orientRelationship was extracted for §13.
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
-  await A.page.click('input[aria-label="Thanked"]');
-  await waitForDb("the tick to be stored", async () =>
-    (await prisma.gift.findFirst({ where: { id: scarf.id } }))?.thankedAt !== null);
-  ok("16.19b ticking thanked records it",
-     (await prisma.gift.findFirst({ where: { id: scarf.id } }))?.thankedAt !== null);
+  await A.page.click('button:has-text("write thank you")');
+  await A.page.waitForSelector("dialog[open] textarea", { timeout: 10_000 });
+  ok("16.19b the control opens a modal to write in", true);
+  ok("16.19c naming who it goes to, and from where",
+     ((await A.page.textContent("dialog[open]")) ?? "").includes("auntie@e2e.test"));
 
-  const { thankYouList } = await import("@/lib/gifts");
-  ok("16.19c and a reminder then skips that gift",
-     (await thankYouList(A.id, kid.id, xmas.id)).length === 0);
+  // The send will fail — the suite holds no real Google grant — and that is the case
+  // worth checking. A refused send must keep the words and leave the gift unthanked,
+  // which is not free: React resets an uncontrolled form once its action settles,
+  // failure included, so the note would otherwise vanish from an empty box.
+  await A.page.fill("dialog[open] textarea", "Thank you for the scarf.");
+  await A.page.click('dialog[open] button:has-text("Send thank you")');
+  await A.page.waitForSelector('dialog[open] [role="status"]', { timeout: 30_000 })
+    .catch(() => {});
+  ok("16.19d a send that fails says so instead of closing quietly",
+     (await A.page.$('dialog[open]')) !== null
+       && ((await A.page.textContent('dialog[open] [role="status"]')) ?? "").length > 0,
+     await A.page.textContent('dialog[open] [role="status"]').catch(() => null));
+  ok("16.19e and the modal still holds what was written",
+     (await A.page.inputValue("dialog[open] textarea")) === "Thank you for the scarf.",
+     await A.page.inputValue("dialog[open] textarea").catch(() => null));
+  ok("16.19f with the gift not marked thanked by a send that never landed",
+     (await prisma.gift.findFirstOrThrow({ where: { id: scarf.id } })).thankedAt === null);
+  await A.page.keyboard.press("Escape");
 
-  // Direct writes from here: the control is proven, and the rest is about what the
-  // pages do with the state rather than how it got there.
-  const setThanked = async (thanked: boolean) => {
-    await prisma.gift.update({
-      where: { id: scarf.id },
-      data: { thankedAt: thanked ? new Date() : null },
-    });
-  };
+  // Without permission to send there is nothing to open: the control refuses up front
+  // rather than letting someone write a note that cannot go anywhere.
+  await prisma.account.updateMany({
+    where: { userId: A.id, provider: "google" },
+    data: { scope: "openid email" },
+  });
+  await A.page.reload();
+  await openGifts();
+  ok("16.19g with no permission to send, the control is refused up front",
+     await A.page.isDisabled('button:has-text("write thank you")'));
+  await prisma.account.updateMany({
+    where: { userId: A.id, provider: "google" },
+    data: { scope: "openid email https://www.googleapis.com/auth/gmail.send" },
+  });
 
+  // A sent thank-you replaces the control outright: there is nothing left to do.
+  await prisma.gift.update({
+    where: { id: scarf.id },
+    data: { thankedAt: new Date(), thankYouNote: "Thank you for the scarf." },
+  });
   await A.page.goto(`/events/${xmas.id}`);
-  const allThanked = (await A.page.textContent("body")) ?? "";
-  ok("16.19d with nothing outstanding the button goes, rather than sitting disabled",
-     !allThanked.includes("Send thank you reminders"), true);
-  ok("16.19e and the row says so", allThanked.includes("thanked"));
-
-  await setThanked(false);
-  await A.page.goto(`/events/${xmas.id}`);
-  ok("16.19f unticking brings the reminder back",
-     ((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"));
-
-  // The contact page offers the same reminder, across every occasion at once.
+  await openGifts();
+  ok("16.20 once sent, the row reads thanked", (await shows("thanked")) >= 1);
+  ok("16.20b and stops offering to write one",
+     (await shows("write thank you")) === 0);
   await A.page.goto(`/people/${kid.id}`);
-  ok("16.20 a contact with outstanding thanks is offered the reminder",
-     ((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"));
-  await setThanked(true);
-  await A.page.goto(`/people/${kid.id}`);
-  ok("16.20b and is not once everything is ticked",
-     !((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"),
-     true);
-  await setThanked(false);
-
+  ok("16.20c the same on the contact page, for what they received",
+     (await shows("thanked")) >= 1);
+  await prisma.gift.update({
+    where: { id: scarf.id },
+    data: { thankedAt: null, thankYouNote: null },
+  });
 
 } finally {
   await h.stop();

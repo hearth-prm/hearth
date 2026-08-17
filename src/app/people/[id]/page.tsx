@@ -10,7 +10,7 @@ import {
   loadRelationshipTypes,
   relationshipPeriod,
 } from "@/lib/relationships";
-import { CONTACT_KIND_LABELS, primaryEmail } from "@/lib/people";
+import { CONTACT_KIND_LABELS } from "@/lib/people";
 import { getUserSettings } from "@/lib/settings";
 import { dateOnlyToInput, formatDateOnly, formatInstant } from "@/lib/time";
 import {
@@ -40,8 +40,7 @@ import { listGiftsForPerson } from "@/lib/gifts";
 import {
   addGift,
   removeGift,
-  sendThankYou,
-  setGiftThanked,
+  sendThankYouNote,
   updateGift,
 } from "@/lib/actions/gifts";
 import { canSendMail } from "@/lib/google/mail";
@@ -400,16 +399,13 @@ export default async function PersonPage({
           <GiftsCard
             gifts={gifts}
             personId={person.id}
-            personName={person.displayName}
             people={giftPeople}
             canEdit={canEdit}
             addAction={addGift}
             updateAction={updateGift}
             removeAction={removeGift}
-            thankedAction={setGiftThanked}
-            sendAction={sendThankYou}
+            sendAction={sendThankYouNote}
             canSend={mailAllowed}
-            hasEmail={Boolean(primaryEmail(person.contactPoints))}
           />
 
           <Card>

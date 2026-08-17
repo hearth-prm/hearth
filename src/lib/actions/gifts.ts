@@ -4,15 +4,11 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
   filterReadablePeopleIds,
-  readableEventsWhere,
-  readablePeopleWhere,
   requireUserForAction,
   requireWritableEvent,
   requireWritablePerson,
   writableGiftsWhere,
 } from "@/lib/access";
-import { primaryEmail } from "@/lib/people";
-import { thankYouList } from "@/lib/gifts";
 import { buildThankYouMail } from "@/lib/thank-you";
 import { canSendMail, sendMail } from "@/lib/google/mail";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
@@ -169,67 +165,54 @@ export async function addGiftRecipient(
 }
 
 /**
- * Toggle whether a gift's thank-you has been written.
+ * Write a thank-you to the giver, and record that it went.
  *
- * The one fact Hearth cannot observe for itself, which is exactly why it is a checkbox
- * rather than something inferred from the reminder having been sent.
+ * The note is sent AS the signed-in user, to the person who gave the gift. That is the
+ * inversion this replaced: Hearth used to email the recipient a list so they could go
+ * and write thank-yous somewhere else, which is a reminder rather than a thank-you.
+ *
+ * thankedAt is set only after the send returns, and there is no checkbox anywhere:
+ * Hearth did the sending, so it knows, and a mark you have to remember to tick is a mark
+ * that goes stale. The note is kept so the record says what was said.
  */
-export async function setGiftThanked(giftId: string, thanked: boolean): Promise<void> {
-  const user = await requireUserForAction();
-
-  const existing = await prisma.gift.findFirst({
-    where: { AND: [{ id: giftId }, writableGiftsWhere(user.id)] },
-    select: { id: true, eventId: true, recipientId: true },
-  });
-  if (!existing) return;
-
-  await prisma.gift.update({
-    where: { id: existing.id },
-    data: { thankedAt: thanked ? new Date() : null },
-  });
-
-  revalidatePath(
-    existing.eventId ? `/events/${existing.eventId}` : `/people/${existing.recipientId}`,
-  );
-  revalidatePath(`/people/${existing.recipientId}`);
-}
-
-/**
- * Email one recipient a reminder of what they still owe thanks for.
- *
- * Records that a reminder was SENT, not that anyone was thanked — the second is the
- * recipient's to confirm, and inferring it here would empty the outstanding list the
- * moment you asked for a reminder about it.
- *
- * Marked only once the send has actually returned. Doing it first would be the more
- * convenient order and would quietly mark a list that never left.
- */
-export async function sendThankYou(
+export async function sendThankYouNote(
   _prev: ActionState,
   form: FormData,
 ): Promise<ActionState> {
   try {
     const user = await requireUserForAction();
-    const recipientId = readString(form, "recipientId");
-    const eventId = readString(form, "eventId") || null;
+    const giftId = readString(form, "giftId");
+    const message = readString(form, "message").trim();
 
-    const recipient = await prisma.person.findFirst({
-      where: { AND: [{ id: recipientId }, readablePeopleWhere(user.id)] },
+    if (!message) return actionError("Write something first.");
+
+    const gift = await prisma.gift.findFirst({
+      where: { AND: [{ id: giftId }, writableGiftsWhere(user.id)] },
       select: {
-        displayName: true,
-        contactPoints: {
-          where: { kind: "EMAIL" },
-          orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
-          select: { kind: true, value: true, isPrimary: true },
+        id: true,
+        description: true,
+        eventId: true,
+        recipientId: true,
+        giver: {
+          select: {
+            id: true,
+            displayName: true,
+            contactPoints: {
+              where: { kind: "EMAIL" },
+              orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
+              take: 1,
+              select: { value: true },
+            },
+          },
         },
       },
     });
-    if (!recipient) return actionError("That person was not found.");
+    if (!gift) return actionError("That gift was not found.");
 
-    const to = primaryEmail(recipient.contactPoints);
+    const to = gift.giver.contactPoints[0]?.value;
     if (!to) {
       return actionError(
-        `${recipient.displayName} has no email address, so there is nowhere to send it.`,
+        `${gift.giver.displayName} has no email address, so there is nowhere to send it.`,
       );
     }
 
@@ -239,44 +222,21 @@ export async function sendThankYou(
       );
     }
 
-    const gifts = await thankYouList(user.id, recipientId, eventId);
-    if (gifts.length === 0) {
-      return actionError("Every gift for them is already marked as thanked.");
-    }
-
-    const event = eventId
-      ? await prisma.event.findFirst({
-          where: { AND: [{ id: eventId }, readableEventsWhere(user.id)] },
-          select: { title: true },
-        })
-      : null;
-
     await sendMail(
       user.id,
-      buildThankYouMail({
-        to,
-        recipientName: recipient.displayName,
-        occasion: event?.title ?? null,
-        gifts,
-      }),
+      buildThankYouMail({ to, giftDescription: gift.description, message }),
     );
 
-    // The same set the note listed: still-unthanked gifts, narrowed to one occasion
-    // only when one was named.
-    await prisma.gift.updateMany({
-      where: {
-        AND: [
-          writableGiftsWhere(user.id),
-          { recipientId },
-          { thankedAt: null },
-          ...(eventId ? [{ eventId }] : []),
-        ],
-      },
-      data: { reminderSentAt: new Date() },
+    await prisma.gift.update({
+      where: { id: gift.id },
+      data: { thankedAt: new Date(), thankYouNote: message },
     });
 
-    revalidatePath(eventId ? `/events/${eventId}` : `/people/${recipientId}`);
-    return actionOk(`Reminder sent to ${to}.`);
+    revalidatePath(
+      gift.eventId ? `/events/${gift.eventId}` : `/people/${gift.recipientId}`,
+    );
+    revalidatePath(`/people/${gift.giver.id}`);
+    return actionOk(`Sent to ${to}.`);
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);

@@ -848,14 +848,13 @@ model Gift {
   notes       String? @db.Text
   /// For a one-off. Gifts at an event take their date from the event.
   receivedOn  DateTime? @db.Date
-  /// Set when a reminder listing this gift was emailed to its recipient.
+  /// Set when the thank-you was actually sent to the giver, from here.
   ///
-  /// Distinct from thankedAt on purpose: Hearth knows it sent a reminder, and only the
-  /// person can say whether they actually wrote the note. Collapsing the two would mean
-  /// pressing send marked the job done, and the outstanding list would empty itself.
-  reminderSentAt DateTime?
-  /// Set by hand when the thank-you has actually been written.
-  thankedAt      DateTime?
+  /// Hearth can be certain of this because it did the sending — which is why there is
+  /// no checkbox and nothing to remember to tick. Writing the note IS the record.
+  thankedAt     DateTime?
+  /// What was said, kept so the record is a thank-you rather than only a date.
+  thankYouNote  String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

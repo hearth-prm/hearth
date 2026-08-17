@@ -9,8 +9,7 @@ import { DeleteForm } from "@/components/delete-form";
 import {
   GiftForm,
   GiftEditForm,
-  GiftStatus,
-  ThankYouButton,
+  ThankYouControl,
   type PickablePerson,
 } from "@/components/gift-forms";
 import { Card } from "@/components/ui";
@@ -33,24 +32,19 @@ export function GiftsCard({
   addAction,
   updateAction,
   removeAction,
-  thankedAction,
   sendAction,
   canSend,
-  hasEmail,
-  personName,
 }: {
   gifts: readonly GiftView[];
   personId: string;
-  personName: string;
   people: readonly PickablePerson[];
   canEdit: boolean;
   addAction: Action;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
-  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
+  /** Sends one written thank-you to one giver. */
   sendAction: Action;
   canSend: boolean;
-  hasEmail: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   // Open when there is something to read. Controlled rather than left to the element,
@@ -63,8 +57,6 @@ export function GiftsCard({
   // note on the Gift model for why there is no direction column to consult.
   const received = gifts.filter((g) => g.recipientId === personId);
   const given = gifts.filter((g) => g.giverId === personId);
-  // Only what they were GIVEN can be owed thanks for; nothing they gave away is.
-  const outstanding = received.filter((g) => !g.thankedAt).length;
 
   return (
     <Card>
@@ -131,7 +123,8 @@ export function GiftsCard({
             otherSide="from"
             showControls={showControls}
             canEdit={canEdit}
-            thankedAction={thankedAction}
+            sendAction={sendAction}
+            canSend={canSend}
             updateAction={updateAction}
             removeAction={removeAction}
           />
@@ -147,24 +140,13 @@ export function GiftsCard({
             otherSide="to"
             showControls={showControls}
             canEdit={false}
-            thankedAction={thankedAction}
+            sendAction={sendAction}
+            canSend={canSend}
             updateAction={updateAction}
             removeAction={removeAction}
           />
         </div>
       )}
-
-      {outstanding > 0 ? (
-        <div className="border-t border-neutral-100 px-5 py-3 dark:border-neutral-800/60">
-          <ThankYouButton
-            action={sendAction}
-            recipientId={personId}
-            recipientName={personName}
-            canSend={canSend}
-            hasEmail={hasEmail}
-          />
-        </div>
-      ) : null}
 
       {showControls ? (
         <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
@@ -196,7 +178,8 @@ function GiftGroup({
   otherSide,
   showControls,
   canEdit,
-  thankedAction,
+  sendAction,
+  canSend,
   updateAction,
   removeAction,
 }: {
@@ -204,9 +187,10 @@ function GiftGroup({
   gifts: readonly GiftView[];
   otherSide: "from" | "to";
   showControls: boolean;
-  /** Whether these rows carry the thanked control; false for gifts they gave. */
+  /** Whether these rows offer the thank-you control; false for gifts they gave. */
   canEdit: boolean;
-  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
+  sendAction: Action;
+  canSend: boolean;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -230,7 +214,8 @@ function GiftGroup({
               otherSide={otherSide}
               showControls={showControls}
               canEdit={canEdit}
-              thankedAction={thankedAction}
+              sendAction={sendAction}
+              canSend={canSend}
               updateAction={updateAction}
               removeAction={removeAction}
             />
@@ -278,7 +263,8 @@ function GiftGroup({
                 otherSide={otherSide}
                 showControls={showControls}
                 canEdit={canEdit}
-                thankedAction={thankedAction}
+                sendAction={sendAction}
+                canSend={canSend}
                 updateAction={updateAction}
                 removeAction={removeAction}
               />
@@ -322,7 +308,8 @@ function GiftLine({
   otherSide,
   showControls,
   canEdit,
-  thankedAction,
+  sendAction,
+  canSend,
   updateAction,
   removeAction,
 }: {
@@ -330,7 +317,8 @@ function GiftLine({
   otherSide: "from" | "to";
   showControls: boolean;
   canEdit: boolean;
-  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
+  sendAction: Action;
+  canSend: boolean;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -354,12 +342,17 @@ function GiftLine({
             {formatDateOnly(gift.receivedOn)}
           </span>
         ) : null}
+        {/* Only what they RECEIVED can be thanked for. */}
         {otherSide === "from" ? (
-          <GiftStatus
+          <ThankYouControl
+            action={sendAction}
             giftId={gift.id}
-            reminderSent={Boolean(gift.reminderSentAt)}
+            giftDescription={gift.description}
+            giverName={gift.giver.displayName}
+            giverEmail={gift.giver.email}
             thanked={Boolean(gift.thankedAt)}
-            onToggle={thankedAction}
+            thankYouNote={gift.thankYouNote}
+            canSend={canSend}
             canEdit={canEdit}
           />
         ) : null}

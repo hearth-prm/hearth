@@ -40,18 +40,23 @@ that formally marks its milestone.
 
 ### Changed
 
-- **"Thanked" is now something you tick, and separate from whether a reminder was sent.**
-  The two were one column, set when the email went out — so pressing send marked the job
-  done and the outstanding list emptied itself. Hearth can only know it sent a reminder;
-  only a person can say the note was actually written.
-  - A gift shows **reminder sent** and **thanked** as separate marks, and reminders skip
-    anything already ticked. Once everything for a recipient is ticked, the button goes
-    rather than sitting there disabled.
-  - **Existing data becomes "reminder sent"**, because that is what it recorded. The new
-    thanked mark starts empty for everyone.
-  - The contact page offers the same reminder, covering every occasion at once — the
-    question there is what this person still owes thanks for, not what about Christmas —
-    so each line names the event it came from when the list spans more than one.
+- **Write the thank-you in Hearth and send it to whoever gave the gift.** Each gift a
+  person received carries a **write thank you** link; it opens a box, and the note goes
+  from your own address to the giver's. Once it has gone the link becomes a **thanked**
+  mark, and hovering it shows what you said.
+  - This replaces reminder emails and the tick that went with them. Hearth used to mail
+    the *recipient* a list of gifts and giver addresses so they could go and write notes
+    somewhere else — a reminder, not a thank-you — and then relied on somebody
+    remembering to tick a box afterwards.
+  - There is no checkbox now because there is nothing left to guess: Hearth did the
+    sending, so it knows. A mark you have to remember to set is a mark that goes stale.
+  - **The note is sent exactly as written** — no template, no signature, no footer. A
+    thank-you that visibly came out of a contact manager is a worse thank-you. The box
+    shows a suggested opening as a *placeholder* rather than prefilled text, since
+    anything actually in it can be sent unread.
+  - A send that fails keeps the note and the box open. React resets an uncontrolled form
+    once its action settles — failure included — so this needed doing deliberately;
+    otherwise a refusal from Google would have thrown away what you had written.
 
 - **The guest list has no rules between rows while reading.** A line per person on a list
   of one-line rows is more ink than the rows. They return while editing, where each row

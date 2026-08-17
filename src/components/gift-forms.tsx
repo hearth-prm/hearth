@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -20,61 +20,135 @@ export interface PickablePerson {
 type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
 
 /**
- * Whether the thank-you has been written, and whether we nagged about it.
+ * Write a thank-you for one gift, and send it to whoever gave it.
  *
- * Two separate facts shown side by side: Hearth knows it sent a reminder, and only the
- * person can say whether they actually wrote the note. The checkbox is the only way the
- * second one can ever become true.
+ * A native <dialog>, opened with showModal(): it traps focus, closes on Escape, and
+ * renders above everything without a z-index argument — all of which a div pretending
+ * to be a modal has to reimplement, usually incompletely.
+ *
+ * Once sent there is nothing left to do, so the control is replaced by a plain mark
+ * rather than staying available. Hearth did the sending, so it knows this for certain,
+ * which is why nothing here has to be ticked by hand.
  */
-export function GiftStatus({
+export function ThankYouControl({
+  action,
   giftId,
-  reminderSent,
+  giftDescription,
+  giverName,
+  giverEmail,
   thanked,
-  onToggle,
+  thankYouNote,
+  canSend,
   canEdit,
 }: {
+  action: Action;
   giftId: string;
-  reminderSent: boolean;
+  giftDescription: string;
+  giverName: string;
+  giverEmail: string | null;
   thanked: boolean;
-  onToggle: (giftId: string, thanked: boolean) => Promise<void>;
+  thankYouNote: string | null;
+  canSend: boolean;
   canEdit: boolean;
 }) {
-  const [checked, setChecked] = useState(thanked);
-  const [saving, startSaving] = useTransition();
+  const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
+  const dialog = useRef<HTMLDialogElement>(null);
+  // Controlled, and that is not a style choice: React resets an uncontrolled form once
+  // its action settles, failure included — so a send Google refused would throw away
+  // the note and leave an empty box. Holding the text here means a retry starts from
+  // what was written rather than from nothing.
+  const [message, setMessage] = useState("");
+
+  // Close once the send has reported success. Watching state rather than the click
+  // means the dialog stays open, with the message still in it, if the send failed.
+  useEffect(() => {
+    if (state.ok) {
+      dialog.current?.close();
+      setMessage("");
+    }
+  }, [state.ok]);
+
+  if (thanked) {
+    return (
+      <span
+        className="ml-1 text-xs text-emerald-700 dark:text-emerald-400"
+        title={thankYouNote ?? undefined}
+      >
+        thanked
+      </span>
+    );
+  }
+
+  if (!canEdit) return null;
+
+  const blocked = !giverEmail
+    ? `${giverName} has no email address.`
+    : !canSend
+      ? "Reconnect Google in Settings to allow Hearth to send mail."
+      : null;
 
   return (
-    <span className="ml-1 inline-flex items-center gap-2 align-middle">
-      {reminderSent ? (
-        <span className="text-xs text-amber-700 dark:text-amber-400">reminder sent</span>
-      ) : null}
-      {checked ? (
-        <span className="text-xs text-emerald-700 dark:text-emerald-400">thanked</span>
-      ) : null}
-      {canEdit ? (
-        <label
-          className="inline-flex items-center gap-1 text-xs text-neutral-400"
-          title="Tick once the thank-you has been written. Reminders skip these."
-        >
-          <input
-            type="checkbox"
-            aria-label="Thanked"
-            checked={checked}
-            disabled={saving}
-            onChange={(e) => {
-              const next = e.target.checked;
-              // Optimistic: the tick is the feedback, and waiting for a round trip to
-              // move a checkbox reads as the click not having registered.
-              setChecked(next);
-              startSaving(async () => {
-                await onToggle(giftId, next).catch(() => setChecked(!next));
-              });
-            }}
-            className="size-3.5 rounded border-neutral-300 dark:border-neutral-600"
+    <>
+      <button
+        type="button"
+        onClick={() => dialog.current?.showModal()}
+        disabled={Boolean(blocked)}
+        title={blocked ?? `Sends to ${giverEmail}, from your own address.`}
+        className="ml-1 text-xs text-accent-700 underline hover:text-accent-800 disabled:no-underline disabled:opacity-50 dark:text-accent-400"
+      >
+        write thank you
+      </button>
+
+      <dialog
+        ref={dialog}
+        // Clicking the backdrop closes it. The dialog element reports those clicks as
+        // landing on itself, since the backdrop is its pseudo-element rather than a
+        // child, so the target check is what tells the two apart.
+        onClick={(e) => {
+          if (e.target === dialog.current) dialog.current?.close();
+        }}
+        className="w-full max-w-lg rounded-xl border border-neutral-200 bg-white p-0 text-neutral-900 shadow-xl backdrop:bg-black/40 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+      >
+        <form action={formAction} className="space-y-3 p-5">
+          <div>
+            <h2 className="text-sm font-semibold">Thank {giverName}</h2>
+            <p className={helpClass}>
+              For {giftDescription}. Sent from your own address to {giverEmail}.
+            </p>
+          </div>
+
+          <FormMessage ok={state.ok} message={state.message} />
+          <input type="hidden" name="giftId" value={giftId} />
+
+          <textarea
+            name="message"
+            rows={8}
+            required
+            autoFocus
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            aria-label="Your thank-you"
+            placeholder={`Dear ${giverName},\n\nThank you so much for the ${giftDescription}…`}
+            className={inputClass}
           />
-          thanked
-        </label>
-      ) : null}
-    </span>
+          {/* A placeholder, not a prefilled draft: whatever is in the box can be sent
+              unread, and words Hearth put there are not the sender's. */}
+
+          <div className="flex items-center gap-2">
+            <SubmitButton className={btnPrimary} pendingLabel="Sending…">
+              Send thank you
+            </SubmitButton>
+            <button
+              type="button"
+              onClick={() => dialog.current?.close()}
+              className={btnSecondary}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </>
   );
 }
 
@@ -342,58 +416,3 @@ export function GiftRecipientForm({
   );
 }
 
-/**
- * Remind one person what they still owe thanks for.
- *
- * Disabled with a reason rather than hidden when it cannot work: a button that vanishes
- * when a permission is missing leaves nothing to explain why, and "nothing happened" is
- * the least useful failure a feature can have.
- *
- * The exception is having nothing outstanding, which is not a failure at all. The caller
- * omits the button entirely then, since there is nothing to fix and nothing to say.
- */
-export function ThankYouButton({
-  action,
-  recipientId,
-  recipientName,
-  eventId,
-  canSend,
-  hasEmail,
-}: {
-  action: Action;
-  recipientId: string;
-  recipientName: string;
-  eventId?: string;
-  canSend: boolean;
-  hasEmail: boolean;
-}) {
-  const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
-
-  // Ordered most specific first. A reason that is about THIS recipient is the one they
-  // can act on from here; "reconnect Google" is true of every row at once and is
-  // already stated in Settings, which is where it gets fixed.
-  //
-  // "Nothing outstanding" is not among them: that is not a failure to explain but a
-  // reason for the button not to exist, so the caller leaves it out entirely.
-  const blocked = !hasEmail
-    ? `${recipientName} has no email address.`
-    : !canSend
-      ? "Reconnect Google in Settings to allow Hearth to send mail."
-      : null;
-
-  return (
-    <form action={formAction} className="space-y-1.5">
-      <FormMessage ok={state.ok} message={state.message} />
-      <input type="hidden" name="recipientId" value={recipientId} />
-      {eventId ? <input type="hidden" name="eventId" value={eventId} /> : null}
-      <SubmitButton
-        className={btnSecondary}
-        pendingLabel="Sending…"
-        disabled={Boolean(blocked)}
-      >
-        Send thank you reminders
-      </SubmitButton>
-      {blocked ? <p className={helpClass}>{blocked}</p> : null}
-    </form>
-  );
-}
