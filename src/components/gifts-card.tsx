@@ -34,9 +34,12 @@ export function GiftsCard({
   removeAction,
   sendAction,
   canSend,
+  myCardId,
 }: {
   gifts: readonly GiftView[];
   personId: string;
+  /** The reader's own contact card, or null if they have none. */
+  myCardId: string | null;
   people: readonly PickablePerson[];
   canEdit: boolean;
   addAction: Action;
@@ -122,7 +125,7 @@ export function GiftsCard({
             gifts={received}
             otherSide="from"
             showControls={showControls}
-            canEdit={canEdit}
+            myCardId={myCardId}
             sendAction={sendAction}
             canSend={canSend}
             updateAction={updateAction}
@@ -139,7 +142,7 @@ export function GiftsCard({
             gifts={given}
             otherSide="to"
             showControls={showControls}
-            canEdit={false}
+            myCardId={myCardId}
             sendAction={sendAction}
             canSend={canSend}
             updateAction={updateAction}
@@ -177,7 +180,7 @@ function GiftGroup({
   gifts,
   otherSide,
   showControls,
-  canEdit,
+  myCardId,
   sendAction,
   canSend,
   updateAction,
@@ -187,8 +190,7 @@ function GiftGroup({
   gifts: readonly GiftView[];
   otherSide: "from" | "to";
   showControls: boolean;
-  /** Whether these rows offer the thank-you control; false for gifts they gave. */
-  canEdit: boolean;
+  myCardId: string | null;
   sendAction: Action;
   canSend: boolean;
   updateAction: Action;
@@ -213,7 +215,7 @@ function GiftGroup({
               gift={gift}
               otherSide={otherSide}
               showControls={showControls}
-              canEdit={canEdit}
+              myCardId={myCardId}
               sendAction={sendAction}
               canSend={canSend}
               updateAction={updateAction}
@@ -262,7 +264,7 @@ function GiftGroup({
                 gift={gift}
                 otherSide={otherSide}
                 showControls={showControls}
-                canEdit={canEdit}
+                myCardId={myCardId}
                 sendAction={sendAction}
                 canSend={canSend}
                 updateAction={updateAction}
@@ -307,7 +309,7 @@ function GiftLine({
   gift,
   otherSide,
   showControls,
-  canEdit,
+  myCardId,
   sendAction,
   canSend,
   updateAction,
@@ -316,7 +318,7 @@ function GiftLine({
   gift: GiftView;
   otherSide: "from" | "to";
   showControls: boolean;
-  canEdit: boolean;
+  myCardId: string | null;
   sendAction: Action;
   canSend: boolean;
   updateAction: Action;
@@ -342,7 +344,8 @@ function GiftLine({
             {formatDateOnly(gift.receivedOn)}
           </span>
         ) : null}
-        {/* Only what they RECEIVED can be thanked for. */}
+        {/* Only what they received, and only when "they" is the reader: on somebody
+            else's page these are their thanks to write, not yours. */}
         {otherSide === "from" ? (
           <ThankYouControl
             action={sendAction}
@@ -353,7 +356,7 @@ function GiftLine({
             thanked={Boolean(gift.thankedAt)}
             thankYouNote={gift.thankYouNote}
             canSend={canSend}
-            canEdit={canEdit}
+            yours={gift.recipientId === myCardId}
           />
         ) : null}
         {gift.notes ? (

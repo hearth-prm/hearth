@@ -39,7 +39,7 @@ export function ThankYouControl({
   thanked,
   thankYouNote,
   canSend,
-  canEdit,
+  yours,
 }: {
   action: Action;
   giftId: string;
@@ -49,7 +49,14 @@ export function ThankYouControl({
   thanked: boolean;
   thankYouNote: string | null;
   canSend: boolean;
-  canEdit: boolean;
+  /**
+   * Whether this gift was given to the person reading.
+   *
+   * The note is sent from their address and signed by nobody else, so offering it on a
+   * gift somebody else received would mean writing a stranger a thank-you as the wrong
+   * person. Being able to edit a contact is not licence to speak as them.
+   */
+  yours: boolean;
 }) {
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -79,7 +86,7 @@ export function ThankYouControl({
     );
   }
 
-  if (!canEdit) return null;
+  if (!yours) return null;
 
   const blocked = !giverEmail
     ? `${giverName} has no email address.`

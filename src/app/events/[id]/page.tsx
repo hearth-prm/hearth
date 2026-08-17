@@ -39,6 +39,7 @@ import {
 } from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
 import { canSendMail } from "@/lib/google/mail";
+import { contactCardIdFor } from "@/lib/household";
 import {
   addGift,
   addGiftRecipient,
@@ -106,10 +107,14 @@ export default async function EventPage({
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
-  const [gifts, giftRecipients, mailAllowed] = await Promise.all([
+  const [gifts, giftRecipients, mailAllowed, myCardId] = await Promise.all([
     listGiftsForEvent(user.id, event.id),
     listGiftRecipients(event.id),
     canSendMail(user.id),
+    // Which of these people is the reader. Ownership cannot answer that — you own the
+    // contacts of everyone you have recorded — and it is what decides whose thanks
+    // these are to write.
+    contactCardIdFor(user.id),
   ]);
 
   // Anyone readable can be a giver; recipients are drawn from the gift list, which is
@@ -331,7 +336,7 @@ export default async function EventPage({
                                     thanked={Boolean(gift.thankedAt)}
                                     thankYouNote={gift.thankYouNote}
                                     canSend={mailAllowed}
-                                    canEdit={canEdit}
+                                    yours={gift.recipientId === myCardId}
                                   />
                                 </span>
                                 {canEdit ? (

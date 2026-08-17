@@ -193,6 +193,7 @@ export async function sendThankYouNote(
         description: true,
         eventId: true,
         recipientId: true,
+        recipient: { select: { linkedUserId: true } },
         giver: {
           select: {
             id: true,
@@ -208,6 +209,14 @@ export async function sendThankYouNote(
       },
     });
     if (!gift) return actionError("That gift was not found.");
+
+    // Only your own thanks. The note goes from YOUR address, so writing one for a gift
+    // somebody else received sends a stranger a thank-you signed by the wrong person —
+    // and being able to edit their contact is no licence to speak as them. Checked here
+    // and not only in the UI: a control that is merely hidden is not a control.
+    if (gift.recipient.linkedUserId !== user.id) {
+      return actionError("You can only write thank-yous for gifts you received.");
+    }
 
     const to = gift.giver.contactPoints[0]?.value;
     if (!to) {

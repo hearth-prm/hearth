@@ -54,6 +54,12 @@ that formally marks its milestone.
     thank-you that visibly came out of a contact manager is a worse thank-you. The box
     shows a suggested opening as a *placeholder* rather than prefilled text, since
     anything actually in it can be sent unread.
+  - **Only for gifts you received.** The note goes from your address and is signed by
+    nobody else, so writing one for a gift somebody else was given would send a stranger
+    a thank-you from the wrong person. Being able to edit a contact is not licence to
+    speak as them — and since ownership is exactly what does *not* distinguish the two
+    (you own the contacts of everyone you have recorded), the test is the household
+    contact card. Enforced in the action, not only by hiding the link.
   - A send that fails keeps the note and the box open. React resets an uncontrolled form
     once its action settles — failure included — so this needed doing deliberately;
     otherwise a refusal from Google would have thrown away what you had written.

@@ -1550,9 +1550,11 @@ try {
       timeZone: "UTC", allDay: true,
     },
   });
-  const kid = await prisma.person.create({
-    data: { ownerId: A.id, displayName: "Gift Kid", givenName: "Gift", familyName: "Kid" },
-  });
+  // A's own contact card stands in for the reader: a thank-you is only ever yours to
+  // write, so the gift recipient in these checks has to be A themselves.
+  const { contactCardIdFor } = await import("@/lib/household");
+  const myCardId = await contactCardIdFor(A.id);
+  const kid = await prisma.person.findFirstOrThrow({ where: { id: myCardId ?? "" } });
   const auntie = await prisma.person.create({
     data: { ownerId: A.id, displayName: "Gift Auntie", givenName: "Gift", familyName: "Auntie",
       contactPoints: { create: [{ kind: "EMAIL", value: "auntie@e2e.test", isPrimary: true, order: 0 }] } },
@@ -1824,6 +1826,22 @@ try {
   ok("16.10b and does not claim it has been", (await shows("thanked")) === 0);
 
   const scarf = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
+  // Somebody else's thanks are not yours to write, however much of their record you
+  // may edit. Checked in the action and not only in the UI: hiding a control is not
+  // the same as refusing it.
+  const karen = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Karen Nother", givenName: "Karen", familyName: "Nother" },
+  });
+  const notMine = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: auntie.id, recipientId: karen.id,
+      description: "A candle", eventId: xmas.id,
+    },
+  });
+  await A.page.goto(`/people/${karen.id}`);
+  ok("16.18b a gift somebody else received offers no thank-you to write",
+     (await A.page.$$('text="write thank you"')).length === 0, notMine.id);
+
   ok("16.19 nothing is marked thanked until something is sent",
      scarf.thankedAt === null, scarf.thankedAt);
 

@@ -44,6 +44,7 @@ import {
   updateGift,
 } from "@/lib/actions/gifts";
 import { canSendMail } from "@/lib/google/mail";
+import { contactCardIdFor } from "@/lib/household";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
@@ -106,6 +107,7 @@ export default async function PersonPage({
     ownerLabels,
     gifts,
     mailAllowed,
+    myCardId,
   ] = await Promise.all([
       loadRegistry(person.ownerId, "PERSON"),
       loadRelationshipsFor(person.ownerId, person.id),
@@ -133,6 +135,8 @@ export default async function PersonPage({
       // Gifts in both directions; the split into given and received happens below.
       listGiftsForPerson(user.id, person.id),
       canSendMail(user.id),
+      // See the note on the event page: this decides whose thanks are whose.
+      contactCardIdFor(user.id),
     ]);
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
@@ -399,6 +403,7 @@ export default async function PersonPage({
           <GiftsCard
             gifts={gifts}
             personId={person.id}
+            myCardId={myCardId}
             people={giftPeople}
             canEdit={canEdit}
             addAction={addGift}
