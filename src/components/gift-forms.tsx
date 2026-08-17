@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -18,6 +18,65 @@ export interface PickablePerson {
 }
 
 type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
+
+/**
+ * Whether the thank-you has been written, and whether we nagged about it.
+ *
+ * Two separate facts shown side by side: Hearth knows it sent a reminder, and only the
+ * person can say whether they actually wrote the note. The checkbox is the only way the
+ * second one can ever become true.
+ */
+export function GiftStatus({
+  giftId,
+  reminderSent,
+  thanked,
+  onToggle,
+  canEdit,
+}: {
+  giftId: string;
+  reminderSent: boolean;
+  thanked: boolean;
+  onToggle: (giftId: string, thanked: boolean) => Promise<void>;
+  canEdit: boolean;
+}) {
+  const [checked, setChecked] = useState(thanked);
+  const [saving, startSaving] = useTransition();
+
+  return (
+    <span className="ml-1 inline-flex items-center gap-2 align-middle">
+      {reminderSent ? (
+        <span className="text-xs text-amber-700 dark:text-amber-400">reminder sent</span>
+      ) : null}
+      {checked ? (
+        <span className="text-xs text-emerald-700 dark:text-emerald-400">thanked</span>
+      ) : null}
+      {canEdit ? (
+        <label
+          className="inline-flex items-center gap-1 text-xs text-neutral-400"
+          title="Tick once the thank-you has been written. Reminders skip these."
+        >
+          <input
+            type="checkbox"
+            aria-label="Thanked"
+            checked={checked}
+            disabled={saving}
+            onChange={(e) => {
+              const next = e.target.checked;
+              // Optimistic: the tick is the feedback, and waiting for a round trip to
+              // move a checkbox reads as the click not having registered.
+              setChecked(next);
+              startSaving(async () => {
+                await onToggle(giftId, next).catch(() => setChecked(!next));
+              });
+            }}
+            className="size-3.5 rounded border-neutral-300 dark:border-neutral-600"
+          />
+          thanked
+        </label>
+      ) : null}
+    </span>
+  );
+}
 
 /**
  * Record a gift.
@@ -284,11 +343,14 @@ export function GiftRecipientForm({
 }
 
 /**
- * Email one person their list.
+ * Remind one person what they still owe thanks for.
  *
- * Disabled with a reason rather than hidden when it cannot work. A button that vanishes
+ * Disabled with a reason rather than hidden when it cannot work: a button that vanishes
  * when a permission is missing leaves nothing to explain why, and "nothing happened" is
  * the least useful failure a feature can have.
+ *
+ * The exception is having nothing outstanding, which is not a failure at all. The caller
+ * omits the button entirely then, since there is nothing to fix and nothing to say.
  */
 export function ThankYouButton({
   action,
@@ -297,7 +359,6 @@ export function ThankYouButton({
   eventId,
   canSend,
   hasEmail,
-  giftCount,
 }: {
   action: Action;
   recipientId: string;
@@ -305,20 +366,20 @@ export function ThankYouButton({
   eventId?: string;
   canSend: boolean;
   hasEmail: boolean;
-  giftCount: number;
 }) {
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
 
   // Ordered most specific first. A reason that is about THIS recipient is the one they
   // can act on from here; "reconnect Google" is true of every row at once and is
   // already stated in Settings, which is where it gets fixed.
+  //
+  // "Nothing outstanding" is not among them: that is not a failure to explain but a
+  // reason for the button not to exist, so the caller leaves it out entirely.
   const blocked = !hasEmail
     ? `${recipientName} has no email address.`
-    : giftCount === 0
-      ? "Nothing recorded for them yet."
-      : !canSend
-        ? "Reconnect Google in Settings to allow Hearth to send mail."
-        : null;
+    : !canSend
+      ? "Reconnect Google in Settings to allow Hearth to send mail."
+      : null;
 
   return (
     <form action={formAction} className="space-y-1.5">
@@ -330,7 +391,7 @@ export function ThankYouButton({
         pendingLabel="Sending…"
         disabled={Boolean(blocked)}
       >
-        Email {recipientName} their list
+        Send thank you reminders
       </SubmitButton>
       {blocked ? <p className={helpClass}>{blocked}</p> : null}
     </form>

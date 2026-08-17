@@ -6,7 +6,13 @@ import type { ActionState } from "@/lib/actions/types";
 import type { GiftView } from "@/lib/gifts";
 import { dateOnlyToInput, formatDateOnly } from "@/lib/time";
 import { DeleteForm } from "@/components/delete-form";
-import { GiftForm, GiftEditForm, type PickablePerson } from "@/components/gift-forms";
+import {
+  GiftForm,
+  GiftEditForm,
+  GiftStatus,
+  ThankYouButton,
+  type PickablePerson,
+} from "@/components/gift-forms";
 import { Card } from "@/components/ui";
 
 type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
@@ -27,14 +33,24 @@ export function GiftsCard({
   addAction,
   updateAction,
   removeAction,
+  thankedAction,
+  sendAction,
+  canSend,
+  hasEmail,
+  personName,
 }: {
   gifts: readonly GiftView[];
   personId: string;
+  personName: string;
   people: readonly PickablePerson[];
   canEdit: boolean;
   addAction: Action;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
+  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
+  sendAction: Action;
+  canSend: boolean;
+  hasEmail: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   // Open when there is something to read. Controlled rather than left to the element,
@@ -47,6 +63,8 @@ export function GiftsCard({
   // note on the Gift model for why there is no direction column to consult.
   const received = gifts.filter((g) => g.recipientId === personId);
   const given = gifts.filter((g) => g.giverId === personId);
+  // Only what they were GIVEN can be owed thanks for; nothing they gave away is.
+  const outstanding = received.filter((g) => !g.thankedAt).length;
 
   return (
     <Card>
@@ -112,6 +130,8 @@ export function GiftsCard({
             gifts={received}
             otherSide="from"
             showControls={showControls}
+            canEdit={canEdit}
+            thankedAction={thankedAction}
             updateAction={updateAction}
             removeAction={removeAction}
           />
@@ -120,16 +140,31 @@ export function GiftsCard({
           {received.length > 0 && given.length > 0 ? (
             <hr className="my-3 border-neutral-200 dark:border-neutral-800" />
           ) : null}
+          {/* Status is about thanks owed, so it belongs only to what came in. */}
           <GiftGroup
             heading="Given"
             gifts={given}
             otherSide="to"
             showControls={showControls}
+            canEdit={false}
+            thankedAction={thankedAction}
             updateAction={updateAction}
             removeAction={removeAction}
           />
         </div>
       )}
+
+      {outstanding > 0 ? (
+        <div className="border-t border-neutral-100 px-5 py-3 dark:border-neutral-800/60">
+          <ThankYouButton
+            action={sendAction}
+            recipientId={personId}
+            recipientName={personName}
+            canSend={canSend}
+            hasEmail={hasEmail}
+          />
+        </div>
+      ) : null}
 
       {showControls ? (
         <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
@@ -160,6 +195,8 @@ function GiftGroup({
   gifts,
   otherSide,
   showControls,
+  canEdit,
+  thankedAction,
   updateAction,
   removeAction,
 }: {
@@ -167,6 +204,9 @@ function GiftGroup({
   gifts: readonly GiftView[];
   otherSide: "from" | "to";
   showControls: boolean;
+  /** Whether these rows carry the thanked control; false for gifts they gave. */
+  canEdit: boolean;
+  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -189,6 +229,8 @@ function GiftGroup({
               gift={gift}
               otherSide={otherSide}
               showControls={showControls}
+              canEdit={canEdit}
+              thankedAction={thankedAction}
               updateAction={updateAction}
               removeAction={removeAction}
             />
@@ -197,7 +239,9 @@ function GiftGroup({
       ) : null}
 
       {byEvent.map((group) => (
-        <details key={group.id} className="group mt-1">
+        // Indented to sit under the heading, so its own rows land a further step in
+        // and the nesting reads as nesting rather than as one flat list.
+        <details key={group.id} className="group mt-1 pl-5.5">
           <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-sm marker:content-none">
             <svg
               viewBox="0 0 24 24"
@@ -233,6 +277,8 @@ function GiftGroup({
                 gift={gift}
                 otherSide={otherSide}
                 showControls={showControls}
+                canEdit={canEdit}
+                thankedAction={thankedAction}
                 updateAction={updateAction}
                 removeAction={removeAction}
               />
@@ -275,12 +321,16 @@ function GiftLine({
   gift,
   otherSide,
   showControls,
+  canEdit,
+  thankedAction,
   updateAction,
   removeAction,
 }: {
   gift: GiftView;
   otherSide: "from" | "to";
   showControls: boolean;
+  canEdit: boolean;
+  thankedAction: (giftId: string, thanked: boolean) => Promise<void>;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -304,10 +354,14 @@ function GiftLine({
             {formatDateOnly(gift.receivedOn)}
           </span>
         ) : null}
-        {gift.thankedAt ? (
-          <span className="ml-1 text-xs text-emerald-700 dark:text-emerald-400">
-            thanked
-          </span>
+        {otherSide === "from" ? (
+          <GiftStatus
+            giftId={gift.id}
+            reminderSent={Boolean(gift.reminderSentAt)}
+            thanked={Boolean(gift.thankedAt)}
+            onToggle={thankedAction}
+            canEdit={canEdit}
+          />
         ) : null}
         {gift.notes ? (
           <span className="block text-xs text-neutral-500 dark:text-neutral-400">

@@ -10,7 +10,7 @@ import {
   loadRelationshipTypes,
   relationshipPeriod,
 } from "@/lib/relationships";
-import { CONTACT_KIND_LABELS } from "@/lib/people";
+import { CONTACT_KIND_LABELS, primaryEmail } from "@/lib/people";
 import { getUserSettings } from "@/lib/settings";
 import { dateOnlyToInput, formatDateOnly, formatInstant } from "@/lib/time";
 import {
@@ -37,7 +37,14 @@ import { RelationshipEditForm } from "@/components/relationship-edit-form";
 import { GiftsCard } from "@/components/gifts-card";
 import { Disclosure } from "@/components/disclosure";
 import { listGiftsForPerson } from "@/lib/gifts";
-import { addGift, removeGift, updateGift } from "@/lib/actions/gifts";
+import {
+  addGift,
+  removeGift,
+  sendThankYou,
+  setGiftThanked,
+  updateGift,
+} from "@/lib/actions/gifts";
+import { canSendMail } from "@/lib/google/mail";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
@@ -90,8 +97,17 @@ export default async function PersonPage({
   // shared contact's custom values are keyed by the owner's field definitions, so
   // reading them through the viewer's registry would render nothing — or, worse,
   // whatever happened to share a key name.
-  const [defs, relationships, types, settings, others, myShares, ownerLabels, gifts] =
-    await Promise.all([
+  const [
+    defs,
+    relationships,
+    types,
+    settings,
+    others,
+    myShares,
+    ownerLabels,
+    gifts,
+    mailAllowed,
+  ] = await Promise.all([
       loadRegistry(person.ownerId, "PERSON"),
       loadRelationshipsFor(person.ownerId, person.id),
       loadRelationshipTypes(person.ownerId),
@@ -117,6 +133,7 @@ export default async function PersonPage({
       }),
       // Gifts in both directions; the split into given and received happens below.
       listGiftsForPerson(user.id, person.id),
+      canSendMail(user.id),
     ]);
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
@@ -383,11 +400,16 @@ export default async function PersonPage({
           <GiftsCard
             gifts={gifts}
             personId={person.id}
+            personName={person.displayName}
             people={giftPeople}
             canEdit={canEdit}
             addAction={addGift}
             updateAction={updateGift}
             removeAction={removeGift}
+            thankedAction={setGiftThanked}
+            sendAction={sendThankYou}
+            canSend={mailAllowed}
+            hasEmail={Boolean(primaryEmail(person.contactPoints))}
           />
 
           <Card>

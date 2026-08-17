@@ -1687,6 +1687,7 @@ try {
     gifts: [{
       description: "A blue scarf", notes: "Hand-knitted", giverName: "Gift Auntie",
       giverEmail: "auntie@e2e.test", giverPhone: null, giverAddress: null,
+      occasion: "Gift Test Xmas",
     }],
   });
   ok("16.8 the note names the gift, the giver and how to reach them",
@@ -1811,6 +1812,61 @@ try {
   const giftPage = (await A.page.textContent("body")) ?? "";
   ok("16.10 a recipient with no email is told so, not left to press and fail",
      giftPage.includes("Gift Kid has no email address"), true);
+  ok("16.10b and the button says what it sends",
+     giftPage.includes("Send thank you reminders"), true);
+
+  // "Reminder sent" and "thanked" are two facts, and only a person can supply the
+  // second. Sending must not claim it on their behalf, or the outstanding list empties
+  // itself the moment you ask to be reminded about it.
+  const scarf = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
+  ok("16.19 sending is not the same as having thanked anyone",
+     scarf.thankedAt === null, scarf.thankedAt);
+
+  // Driven through the browser, not by calling the action: it reaches requireUser,
+  // which reaches headers(), which does not exist outside a request. The same reason
+  // orientRelationship was extracted for §13.
+  await A.page.goto(`/events/${xmas.id}`);
+  await openGifts();
+  await A.page.click('input[aria-label="Thanked"]');
+  await waitForDb("the tick to be stored", async () =>
+    (await prisma.gift.findFirst({ where: { id: scarf.id } }))?.thankedAt !== null);
+  ok("16.19b ticking thanked records it",
+     (await prisma.gift.findFirst({ where: { id: scarf.id } }))?.thankedAt !== null);
+
+  const { thankYouList } = await import("@/lib/gifts");
+  ok("16.19c and a reminder then skips that gift",
+     (await thankYouList(A.id, kid.id, xmas.id)).length === 0);
+
+  // Direct writes from here: the control is proven, and the rest is about what the
+  // pages do with the state rather than how it got there.
+  const setThanked = async (thanked: boolean) => {
+    await prisma.gift.update({
+      where: { id: scarf.id },
+      data: { thankedAt: thanked ? new Date() : null },
+    });
+  };
+
+  await A.page.goto(`/events/${xmas.id}`);
+  const allThanked = (await A.page.textContent("body")) ?? "";
+  ok("16.19d with nothing outstanding the button goes, rather than sitting disabled",
+     !allThanked.includes("Send thank you reminders"), true);
+  ok("16.19e and the row says so", allThanked.includes("thanked"));
+
+  await setThanked(false);
+  await A.page.goto(`/events/${xmas.id}`);
+  ok("16.19f unticking brings the reminder back",
+     ((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"));
+
+  // The contact page offers the same reminder, across every occasion at once.
+  await A.page.goto(`/people/${kid.id}`);
+  ok("16.20 a contact with outstanding thanks is offered the reminder",
+     ((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"));
+  await setThanked(true);
+  await A.page.goto(`/people/${kid.id}`);
+  ok("16.20b and is not once everything is ticked",
+     !((await A.page.textContent("body")) ?? "").includes("Send thank you reminders"),
+     true);
+  await setThanked(false);
 
 
 } finally {

@@ -27,6 +27,7 @@ export interface GiftView {
   description: string;
   notes: string | null;
   receivedOn: Date | null;
+  reminderSentAt: Date | null;
   thankedAt: Date | null;
   giver: { id: string; displayName: string };
   recipient: { id: string; displayName: string };
@@ -42,6 +43,7 @@ const giftSelect = {
   description: true,
   notes: true,
   receivedOn: true,
+  reminderSentAt: true,
   thankedAt: true,
   giver: { select: { id: true, displayName: true } },
   recipient: { select: { id: true, displayName: true } },
@@ -97,6 +99,8 @@ export function listGiftRecipients(eventId: string): Promise<GiftRecipientView[]
 export interface ThankYouGift {
   description: string;
   notes: string | null;
+  /** The occasion it came from, when the list spans more than one. */
+  occasion: string | null;
   giverName: string;
   giverEmail: string | null;
   giverPhone: string | null;
@@ -105,6 +109,13 @@ export interface ThankYouGift {
 
 /**
  * Everything the thank-you note needs, for one recipient.
+ *
+ * Only gifts still unthanked. A reminder listing presents the reader has already written
+ * about is worse than no reminder: it is a list they have to re-check rather than act on.
+ *
+ * An absent eventId means every outstanding gift, not merely the ones belonging to no
+ * event — that is the contact page's case, where the question is "what does this person
+ * still owe thanks for" across every occasion at once.
  *
  * The givers' contact details are fetched here rather than in the mail builder so the
  * access check stays in one place: the gifts are scoped, and only givers reached
@@ -120,10 +131,12 @@ export async function thankYouList(
       AND: [
         readableGiftsWhere(userId),
         { recipientId },
-        eventId ? { eventId } : { eventId: null },
+        { thankedAt: null },
+        ...(eventId ? [{ eventId }] : []),
       ],
     },
     include: {
+      event: { select: { title: true } },
       giver: {
         select: {
           displayName: true,
@@ -142,6 +155,7 @@ export async function thankYouList(
     return {
       description: gift.description,
       notes: gift.notes,
+      occasion: gift.event?.title ?? null,
       giverName: gift.giver.displayName,
       giverEmail: primaryEmail(points.filter((p) => p.kind === "EMAIL")) ?? null,
       giverPhone: points.find((p) => p.kind === "PHONE")?.value ?? null,

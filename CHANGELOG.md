@@ -38,6 +38,25 @@ that formally marks its milestone.
     only when consent is genuinely re-prompted, and writing the absence through would
     trade a stale scope for a broken background sync.
 
+### Changed
+
+- **"Thanked" is now something you tick, and separate from whether a reminder was sent.**
+  The two were one column, set when the email went out — so pressing send marked the job
+  done and the outstanding list emptied itself. Hearth can only know it sent a reminder;
+  only a person can say the note was actually written.
+  - A gift shows **reminder sent** and **thanked** as separate marks, and reminders skip
+    anything already ticked. Once everything for a recipient is ticked, the button goes
+    rather than sitting there disabled.
+  - **Existing data becomes "reminder sent"**, because that is what it recorded. The new
+    thanked mark starts empty for everyone.
+  - The contact page offers the same reminder, covering every occasion at once — the
+    question there is what this person still owes thanks for, not what about Christmas —
+    so each line names the event it came from when the list spans more than one.
+
+- **The guest list has no rules between rows while reading.** A line per person on a list
+  of one-line rows is more ink than the rows. They return while editing, where each row
+  grows a form and needs the separation.
+
 ### Added
 
 - **Gift tracking, and a thank-you list you can email.** Mark an event as one where

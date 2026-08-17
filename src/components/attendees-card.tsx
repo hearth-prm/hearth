@@ -32,6 +32,10 @@ export interface AttendeeView {
  * Update button, permanently — four controls per person, on a list whose usual purpose
  * is to be read. They are behind an Edit toggle now, the same as the gifts card: the
  * common visit wants to know who was there and what they said, not to change it.
+ *
+ * There is no rule between guests while reading, either: a line per person on a list of
+ * one-line rows is more ink than the rows themselves. The rules come back while editing,
+ * where every row grows a form and genuinely needs separating from the next.
  */
 export function AttendeesCard({
   attendees,
@@ -80,9 +84,15 @@ export function AttendeesCard({
           No one linked yet.
         </p>
       ) : (
-        <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+        <ul
+          className={
+            showControls
+              ? "divide-y divide-neutral-100 dark:divide-neutral-800/60"
+              : "py-1"
+          }
+        >
           {attendees.map((a) => (
-            <li key={a.id} className={showControls ? "px-5 py-4" : "px-5 py-2.5"}>
+            <li key={a.id} className={showControls ? "px-5 py-4" : "px-5 py-1"}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0 text-sm">
                   <Link

@@ -169,10 +169,40 @@ export async function addGiftRecipient(
 }
 
 /**
- * Email one recipient the list of what they were given, and who to thank.
+ * Toggle whether a gift's thank-you has been written.
  *
- * Marks the gifts as thanked only once the send has actually returned. Doing it first
- * would be the more convenient order and would quietly mark a list that never left.
+ * The one fact Hearth cannot observe for itself, which is exactly why it is a checkbox
+ * rather than something inferred from the reminder having been sent.
+ */
+export async function setGiftThanked(giftId: string, thanked: boolean): Promise<void> {
+  const user = await requireUserForAction();
+
+  const existing = await prisma.gift.findFirst({
+    where: { AND: [{ id: giftId }, writableGiftsWhere(user.id)] },
+    select: { id: true, eventId: true, recipientId: true },
+  });
+  if (!existing) return;
+
+  await prisma.gift.update({
+    where: { id: existing.id },
+    data: { thankedAt: thanked ? new Date() : null },
+  });
+
+  revalidatePath(
+    existing.eventId ? `/events/${existing.eventId}` : `/people/${existing.recipientId}`,
+  );
+  revalidatePath(`/people/${existing.recipientId}`);
+}
+
+/**
+ * Email one recipient a reminder of what they still owe thanks for.
+ *
+ * Records that a reminder was SENT, not that anyone was thanked — the second is the
+ * recipient's to confirm, and inferring it here would empty the outstanding list the
+ * moment you asked for a reminder about it.
+ *
+ * Marked only once the send has actually returned. Doing it first would be the more
+ * convenient order and would quietly mark a list that never left.
  */
 export async function sendThankYou(
   _prev: ActionState,
@@ -210,7 +240,9 @@ export async function sendThankYou(
     }
 
     const gifts = await thankYouList(user.id, recipientId, eventId);
-    if (gifts.length === 0) return actionError("There are no gifts to list yet.");
+    if (gifts.length === 0) {
+      return actionError("Every gift for them is already marked as thanked.");
+    }
 
     const event = eventId
       ? await prisma.event.findFirst({
@@ -229,19 +261,22 @@ export async function sendThankYou(
       }),
     );
 
+    // The same set the note listed: still-unthanked gifts, narrowed to one occasion
+    // only when one was named.
     await prisma.gift.updateMany({
       where: {
         AND: [
           writableGiftsWhere(user.id),
           { recipientId },
-          eventId ? { eventId } : { eventId: null },
+          { thankedAt: null },
+          ...(eventId ? [{ eventId }] : []),
         ],
       },
-      data: { thankedAt: new Date() },
+      data: { reminderSentAt: new Date() },
     });
 
     revalidatePath(eventId ? `/events/${eventId}` : `/people/${recipientId}`);
-    return actionOk(`Sent to ${to}.`);
+    return actionOk(`Reminder sent to ${to}.`);
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);

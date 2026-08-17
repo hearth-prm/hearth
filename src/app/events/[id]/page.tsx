@@ -31,7 +31,13 @@ import {
 } from "@/components/ui";
 import { SyncBadge } from "@/components/sync-badge";
 import { AttendeesCard } from "@/components/attendees-card";
-import { GiftForm, GiftEditForm, GiftRecipientForm, ThankYouButton } from "@/components/gift-forms";
+import {
+  GiftForm,
+  GiftEditForm,
+  GiftRecipientForm,
+  GiftStatus,
+  ThankYouButton,
+} from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
 import { canSendMail } from "@/lib/google/mail";
 import {
@@ -40,6 +46,7 @@ import {
   removeGift,
   removeGiftRecipient,
   sendThankYou,
+  setGiftThanked,
   updateGift,
 } from "@/lib/actions/gifts";
 import { DeleteForm } from "@/components/delete-form";
@@ -334,11 +341,13 @@ export default async function EventPage({
                                       {gift.notes}
                                     </span>
                                   ) : null}
-                                  {gift.thankedAt ? (
-                                    <span className="ml-1 text-xs text-emerald-700 dark:text-emerald-400">
-                                      thanked
-                                    </span>
-                                  ) : null}
+                                  <GiftStatus
+                                    giftId={gift.id}
+                                    reminderSent={Boolean(gift.reminderSentAt)}
+                                    thanked={Boolean(gift.thankedAt)}
+                                    onToggle={setGiftThanked}
+                                    canEdit={canEdit}
+                                  />
                                 </span>
                                 {canEdit ? (
                                   <span className="flex shrink-0 items-center gap-3">
@@ -367,17 +376,20 @@ export default async function EventPage({
                           </ul>
                         ) : null}
 
-                        <div className="mt-3">
-                          <ThankYouButton
-                            action={sendThankYou}
-                            recipientId={entry.personId}
-                            recipientName={entry.person.displayName}
-                            eventId={event.id}
-                            canSend={mailAllowed}
-                            hasEmail={recipientEmails.has(entry.personId)}
-                            giftCount={theirs.length}
-                          />
-                        </div>
+                        {/* Nothing outstanding means nothing to remind about, so the
+                            button goes rather than sitting there disabled. */}
+                        {theirs.some((g) => !g.thankedAt) ? (
+                          <div className="mt-3">
+                            <ThankYouButton
+                              action={sendThankYou}
+                              recipientId={entry.personId}
+                              recipientName={entry.person.displayName}
+                              eventId={event.id}
+                              canSend={mailAllowed}
+                              hasEmail={recipientEmails.has(entry.personId)}
+                            />
+                          </div>
+                        ) : null}
                       </li>
                     );
                   })}

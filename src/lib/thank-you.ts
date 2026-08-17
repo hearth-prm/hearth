@@ -53,8 +53,11 @@ export function buildThankYouMail({
     "",
     ...gifts.map((gift) => {
       const details = contactLine(gift);
+      // Named per line only when the list is not already about one occasion, so a
+      // single-event reminder does not repeat its own title on every row.
+      const where = !occasion && gift.occasion ? ` (${gift.occasion})` : "";
       return [
-        `• ${gift.description} — from ${gift.giverName}`,
+        `• ${gift.description}${where} — from ${gift.giverName}`,
         details ? `  ${details}` : null,
         gift.notes ? `  (${gift.notes})` : null,
       ]
@@ -70,9 +73,10 @@ export function buildThankYouMail({
     "<ul>",
     ...gifts.map((gift) => {
       const details = contactLine(gift);
+      const where = !occasion && gift.occasion ? ` (${escapeHtml(gift.occasion)})` : "";
       return [
         "<li>",
-        `<strong>${escapeHtml(gift.description)}</strong> — from ${escapeHtml(gift.giverName)}`,
+        `<strong>${escapeHtml(gift.description)}</strong>${where} — from ${escapeHtml(gift.giverName)}`,
         details ? `<br><span style="color:#666">${escapeHtml(details)}</span>` : "",
         gift.notes ? `<br><em>${escapeHtml(gift.notes)}</em>` : "",
         "</li>",
