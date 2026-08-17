@@ -7,7 +7,7 @@ import type { GiftView } from "@/lib/gifts";
 import { dateOnlyToInput, formatDateOnly } from "@/lib/time";
 import { DeleteForm } from "@/components/delete-form";
 import { GiftForm, GiftEditForm, type PickablePerson } from "@/components/gift-forms";
-import { Card, CardHeader } from "@/components/ui";
+import { Card } from "@/components/ui";
 
 type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
 
@@ -37,6 +37,10 @@ export function GiftsCard({
   removeAction: (form: FormData) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  // Open when there is something to read. Controlled rather than left to the element,
+  // because pressing Edit has to be able to open it: revealing controls inside a
+  // collapsed section would look like the button had done nothing.
+  const [open, setOpen] = useState(gifts.length > 0);
   const showControls = canEdit && editing;
 
   // One row read from either end; which name to show is the only difference. See the
@@ -46,26 +50,57 @@ export function GiftsCard({
 
   return (
     <Card>
-      <CardHeader
-        title="Gifts"
-        description="What they were given, and what they gave."
-        action={
-          canEdit ? (
+      <details
+        open={open}
+        onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+        className="group"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 marker:content-none">
+          <div className="flex min-w-0 items-center gap-2">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-3.5 shrink-0 text-neutral-400 transition-transform group-open:rotate-90"
+              aria-hidden
+            >
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                Gifts
+              </h2>
+              <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                What they were given, and what they gave.
+              </p>
+            </div>
+          </div>
+          {canEdit ? (
             <button
               type="button"
-              onClick={() => setEditing((v) => !v)}
+              onClick={(e) => {
+                // Inside a <summary>, so the click would otherwise toggle the section
+                // as well — closing it at the very moment it grew controls.
+                e.preventDefault();
+                e.stopPropagation();
+                setEditing((v) => !v);
+                setOpen(true);
+              }}
               aria-pressed={editing}
               // "Edit" alone is ambiguous in a card header — the page has several —
               // so the accessible name says what it edits.
               aria-label={editing ? "Done editing gifts" : "Edit gifts"}
-              className="text-xs text-neutral-500 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+              className="shrink-0 text-xs text-neutral-500 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
             >
               {editing ? "Done" : "Edit"}
             </button>
-          ) : null
-        }
-      />
+          ) : null}
+        </summary>
 
+        <div className="border-t border-neutral-200 dark:border-neutral-800">
       {gifts.length === 0 ? (
         <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
           Nothing recorded yet.
@@ -106,6 +141,8 @@ export function GiftsCard({
           />
         </div>
       ) : null}
+        </div>
+      </details>
     </Card>
   );
 }
@@ -145,7 +182,7 @@ function GiftGroup({
       </h3>
 
       {loose.length > 0 ? (
-        <ul className="mt-1">
+        <ul className="mt-1 pl-5.5">
           {loose.map((gift) => (
             <GiftLine
               key={gift.id}

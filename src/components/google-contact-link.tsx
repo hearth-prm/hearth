@@ -15,16 +15,29 @@ import { Badge, DetailRow } from "@/components/ui";
 export function GoogleContactLink({
   resourceName,
   addToGoogle,
+  compact = false,
 }: {
   resourceName: string | null;
   addToGoogle: boolean;
+  /**
+   * Match the surrounding rows.
+   *
+   * Without it this rendered the wide two-column DetailRow while every row around it in
+   * the Record card was compact — so its value sat in the second column and it was the
+   * one line on the card that did not start at the left edge.
+   */
+  compact?: boolean;
 }) {
   if (!addToGoogle) {
-    return <DetailRow label="Google contact">Not synced</DetailRow>;
+    return (
+      <DetailRow compact={compact} label="Google contact">
+        Not synced
+      </DetailRow>
+    );
   }
   if (!resourceName) {
     return (
-      <DetailRow label="Google contact">
+      <DetailRow compact={compact} label="Google contact">
         <Badge tone="amber">Not created yet</Badge>
       </DetailRow>
     );
@@ -35,7 +48,7 @@ export function GoogleContactLink({
   const id = resourceName.replace(/^people\//, "");
 
   return (
-    <DetailRow label="Google contact">
+    <DetailRow compact={compact} label="Google contact">
       <a
         href={`https://contacts.google.com/person/${encodeURIComponent(id)}`}
         target="_blank"

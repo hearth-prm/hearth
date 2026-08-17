@@ -1724,8 +1724,11 @@ try {
   );
   ok("16.12 event gifts group under the occasion, linked by name",
      groupTitle?.trim() === "Gift Test Xmas", groupTitle);
+  // The summary holding the link, not "a summary anywhere inside a details that
+  // contains it": the gifts card is itself a <details> wrapping these groups, so the
+  // looser form matches the card's own header first and reads the wrong text.
   const groupSummary = await A.page.textContent(
-    `details:has(a[href="/events/${xmas.id}"]) summary`,
+    `summary:has(a[href="/events/${xmas.id}"])`,
   );
   ok("16.12b and the group is dated", (groupSummary ?? "").includes("2026"), groupSummary);
 

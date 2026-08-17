@@ -207,6 +207,12 @@ that formally marks its milestone.
   it is the one of the two with a control in it rather than status. The gift section
   opens by itself once something is recorded.
 
+- **The contact page's gift list is collapsible too**, and its rows line up under their
+  heading whether or not they belong to an event. An event's date now follows its name on
+  one line in the Events card, and the Google contact row in Record starts at the left
+  edge like every other row on that card — it was the only one rendered by a component
+  rather than inline, and the only one that had not been told to use the compact layout.
+
 - **A guest's email sits on the same line as their name.** Two lines per person was half
   the height of the list, for a value most rows repeat the shape of.
 

@@ -310,7 +310,9 @@ export default async function EventPage({
                         </div>
 
                         {theirs.length > 0 ? (
-                          <ul className="mt-2 space-y-1.5">
+                          // Indented under the recipient they belong to, matching how
+                          // the contact page sets gift rows in from their heading.
+                          <ul className="mt-1.5 space-y-1 pl-5">
                             {theirs.map((gift) => (
                               <li key={gift.id} className="flex flex-wrap items-start justify-between gap-2 text-sm">
                                 <span className="min-w-0">

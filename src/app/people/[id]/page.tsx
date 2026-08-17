@@ -399,18 +399,18 @@ export default async function PersonPage({
             ) : (
               <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
                 {person.eventAttendances.map((a) => (
-                  <li key={a.id} className="px-5 py-3">
+                  <li key={a.id} className="px-5 py-2 text-sm">
                     <Link
                       href={`/events/${a.event.id}`}
-                      className="text-sm font-medium text-accent-700 hover:underline dark:text-accent-400"
+                      className="font-medium text-accent-700 hover:underline dark:text-accent-400"
                     >
                       {a.event.title}
-                    </Link>
-                    <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                    </Link>{" "}
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
                       {formatInstant(a.event.startAt, a.event.timeZone, {
                         withTime: !a.event.allDay,
                       })}
-                    </p>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -528,6 +528,7 @@ export default async function PersonPage({
                 {formatInstant(person.updatedAt, settings.timeZone)}
               </DetailRow>
               <GoogleContactLink
+                compact
                 resourceName={mySync?.googleResourceName ?? null}
                 addToGoogle={person.addToGoogle}
               />
