@@ -140,6 +140,13 @@ model UserSettings {
   /// IANA zone used when creating events and rendering times.
   timeZone            String  @default("UTC")
 
+  /// Lets the head of the household write this user's thank-yous for them.
+  ///
+  /// Off by default and given by the user themselves, because a thank-you is signed by
+  /// whoever sends it: this is permission to speak for somebody, which only they can
+  /// grant. It exists so a parent can write a small child's notes.
+  allowHeadThankYous  Boolean @default(false)
+
   /// light | dark | system. "system" stores nothing on the html element and lets
   /// prefers-color-scheme decide, which is why it is a third value rather than a
   /// boolean: "follow my machine" is a real preference, not the absence of one.
@@ -356,7 +363,7 @@ model Person {
   labels            PersonLabel[]
   photos            PersonPhoto[]
   giftsGiven        Gift[]          @relation("GiftGiver")
-  giftsReceived     Gift[]          @relation("GiftRecipient")
+  giftsReceived     GiftRecipient[] @relation("GiftRecipient")
   giftEvents        EventGiftRecipient[]
 
   @@index([linkedUserId])
@@ -842,30 +849,48 @@ model Gift {
 
   eventId     String?
   giverId     String
-  recipientId String
 
   description String
   notes       String? @db.Text
   /// For a one-off. Gifts at an event take their date from the event.
   receivedOn  DateTime? @db.Date
-  /// Set when the thank-you was actually sent to the giver, from here.
-  ///
-  /// Hearth can be certain of this because it did the sending — which is why there is
-  /// no checkbox and nothing to remember to tick. Writing the note IS the record.
-  thankedAt     DateTime?
-  /// What was said, kept so the record is a thank-you rather than only a date.
-  thankYouNote  String?   @db.Text
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   owner     User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   event     Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  giver     Person @relation("GiftGiver", fields: [giverId], references: [id], onDelete: Cascade)
-  recipient Person @relation("GiftRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  giver      Person          @relation("GiftGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  /// Who it was for. More than one, because a big present is often given to several
+  /// people at once — a holiday for the children is one gift and one thank-you, not one
+  /// per child.
+  recipients GiftRecipient[]
 
   @@index([eventId])
   @@index([giverId])
-  @@index([recipientId])
   @@index([ownerId])
+}
+
+/// One of the people a gift was for, and their own thanks for it.
+///
+/// Thanking lives here rather than on Gift because a present shared between two children
+/// earns two notes, one from each of them: the obligation is personal even when the
+/// present was not. Recording it on the gift would let either child's note discharge the
+/// other's.
+model GiftRecipient {
+  giftId   String
+  personId String
+
+  /// Set when THIS person's thank-you was sent to the giver, from here.
+  ///
+  /// Hearth can be certain of it because it did the sending, which is why there is no
+  /// checkbox and nothing to remember to tick. Writing the note is the record.
+  thankedAt    DateTime?
+  /// What they said, kept so the record is a thank-you rather than only a date.
+  thankYouNote String?   @db.Text
+
+  gift   Gift   @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  person Person @relation("GiftRecipient", fields: [personId], references: [id], onDelete: Cascade)
+
+  @@id([giftId, personId])
+  @@index([personId])
 }

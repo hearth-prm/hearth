@@ -106,22 +106,6 @@ export async function reconcileCardShares(tx: Prisma.TransactionClient = prisma)
  * The first user to sign in becomes head of household, because somebody has to own the
  * cards and on a fresh install there is exactly one candidate.
  */
-/**
- * The contact card representing this user, if they have one.
- *
- * Answers "which of these people is me", which is what decides whether a thank-you is
- * yours to write. Ownership cannot answer it: you own the contacts of everyone you have
- * ever recorded, so owning Karen's card is precisely the thing that must not let you
- * write as Karen.
- */
-export async function contactCardIdFor(userId: string): Promise<string | null> {
-  const card = await prisma.person.findFirst({
-    where: { linkedUserId: userId },
-    select: { id: true },
-  });
-  return card?.id ?? null;
-}
-
 export async function ensureContactCard(userId: string): Promise<void> {
   await prisma.$transaction(async (tx) => {
     const user = await tx.user.findUnique({

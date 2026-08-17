@@ -34,12 +34,9 @@ export function GiftsCard({
   removeAction,
   sendAction,
   canSend,
-  myCardId,
 }: {
   gifts: readonly GiftView[];
   personId: string;
-  /** The reader's own contact card, or null if they have none. */
-  myCardId: string | null;
   people: readonly PickablePerson[];
   canEdit: boolean;
   addAction: Action;
@@ -58,7 +55,7 @@ export function GiftsCard({
 
   // One row read from either end; which name to show is the only difference. See the
   // note on the Gift model for why there is no direction column to consult.
-  const received = gifts.filter((g) => g.recipientId === personId);
+  const received = gifts.filter((g) => g.recipients.some((r) => r.id === personId));
   const given = gifts.filter((g) => g.giverId === personId);
 
   return (
@@ -124,8 +121,8 @@ export function GiftsCard({
             heading="Received"
             gifts={received}
             otherSide="from"
+            personId={personId}
             showControls={showControls}
-            myCardId={myCardId}
             sendAction={sendAction}
             canSend={canSend}
             updateAction={updateAction}
@@ -141,8 +138,8 @@ export function GiftsCard({
             heading="Given"
             gifts={given}
             otherSide="to"
+            personId={personId}
             showControls={showControls}
-            myCardId={myCardId}
             sendAction={sendAction}
             canSend={canSend}
             updateAction={updateAction}
@@ -179,8 +176,8 @@ function GiftGroup({
   heading,
   gifts,
   otherSide,
+  personId,
   showControls,
-  myCardId,
   sendAction,
   canSend,
   updateAction,
@@ -189,8 +186,9 @@ function GiftGroup({
   heading: string;
   gifts: readonly GiftView[];
   otherSide: "from" | "to";
+  /** The contact whose page this is; whose thanks each row is about. */
+  personId: string;
   showControls: boolean;
-  myCardId: string | null;
   sendAction: Action;
   canSend: boolean;
   updateAction: Action;
@@ -214,8 +212,8 @@ function GiftGroup({
               key={gift.id}
               gift={gift}
               otherSide={otherSide}
+              personId={personId}
               showControls={showControls}
-              myCardId={myCardId}
               sendAction={sendAction}
               canSend={canSend}
               updateAction={updateAction}
@@ -263,8 +261,8 @@ function GiftGroup({
                 key={gift.id}
                 gift={gift}
                 otherSide={otherSide}
+                personId={personId}
                 showControls={showControls}
-                myCardId={myCardId}
                 sendAction={sendAction}
                 canSend={canSend}
                 updateAction={updateAction}
@@ -308,8 +306,8 @@ function groupByEvent(gifts: readonly GiftView[]): EventGroup[] {
 function GiftLine({
   gift,
   otherSide,
+  personId,
   showControls,
-  myCardId,
   sendAction,
   canSend,
   updateAction,
@@ -317,26 +315,35 @@ function GiftLine({
 }: {
   gift: GiftView;
   otherSide: "from" | "to";
+  personId: string;
   showControls: boolean;
-  myCardId: string | null;
   sendAction: Action;
   canSend: boolean;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
-  const other = otherSide === "from" ? gift.giver : gift.recipient;
+  // Going out, a gift may have been for several people at once, so the other end is a
+  // list rather than a name.
+  const others = otherSide === "from" ? [gift.giver] : gift.recipients;
+  // Whose thanks this row is about: the contact whose page this is.
+  const forRecipient = gift.recipients.find((r) => r.id === personId);
 
   return (
     <li className="flex flex-wrap items-start justify-between gap-x-3 py-0.5 text-sm">
       <span className="min-w-0">
         {gift.description}{" "}
         <span className="text-neutral-500 dark:text-neutral-400">{otherSide}</span>{" "}
-        <Link
-          href={`/people/${other.id}`}
-          className="text-accent-700 hover:underline dark:text-accent-400"
-        >
-          {other.displayName}
-        </Link>
+        {others.map((person, i) => (
+          <span key={person.id}>
+            {i > 0 ? <span className="text-neutral-400">{", "}</span> : null}
+            <Link
+              href={`/people/${person.id}`}
+              className="text-accent-700 hover:underline dark:text-accent-400"
+            >
+              {person.displayName}
+            </Link>
+          </span>
+        ))}
         {/* Only a gift with no event needs its date spelled out; an event gift has
             the occasion's date on the group above it. */}
         {!gift.event && gift.receivedOn ? (
@@ -344,19 +351,20 @@ function GiftLine({
             {formatDateOnly(gift.receivedOn)}
           </span>
         ) : null}
-        {/* Only what they received, and only when "they" is the reader: on somebody
-            else's page these are their thanks to write, not yours. */}
-        {otherSide === "from" ? (
+        {/* Only what they received, and scoped to them: this page is about one person,
+            so a present shared with somebody else shows only this person's thanks. */}
+        {otherSide === "from" && forRecipient ? (
           <ThankYouControl
             action={sendAction}
             giftId={gift.id}
+            recipientId={forRecipient.id}
             giftDescription={gift.description}
             giverName={gift.giver.displayName}
             giverEmail={gift.giver.email}
-            thanked={Boolean(gift.thankedAt)}
-            thankYouNote={gift.thankYouNote}
+            thanked={Boolean(forRecipient.thankedAt)}
+            thankYouNote={forRecipient.thankYouNote}
             canSend={canSend}
-            yours={gift.recipientId === myCardId}
+            yours={forRecipient.canThank}
           />
         ) : null}
         {gift.notes ? (

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { readableGiftsWhere } from "@/lib/access";
+import { readableGiftsWhere, thankableCardIds } from "@/lib/access";
 
 /**
  * Reading gifts.
@@ -18,19 +18,32 @@ import { readableGiftsWhere } from "@/lib/access";
  * and two pages' worth of that ran the Next build worker out of heap. An explicit
  * interface is checked once, at the query, and the pages then read a plain shape.
  */
+export interface GiftRecipientView {
+  id: string;
+  displayName: string;
+  thankedAt: Date | null;
+  thankYouNote: string | null;
+  /** Whether the reader may write this person's thanks; see thankableCardIds. */
+  canThank: boolean;
+}
+
 export interface GiftView {
   id: string;
   eventId: string | null;
   giverId: string;
-  recipientId: string;
   description: string;
   notes: string | null;
   receivedOn: Date | null;
-  thankedAt: Date | null;
-  thankYouNote: string | null;
   /** email is null when there is nowhere to send a thank-you. */
   giver: { id: string; displayName: string; email: string | null };
-  recipient: { id: string; displayName: string };
+  /**
+   * Everyone it was for, each with their own thanks.
+   *
+   * A present shared between two children earns two notes, so the state belongs to the
+   * pair rather than to the gift — and `canThank` is per person for the same reason:
+   * you may be entitled to write for one recipient and not the other.
+   */
+  recipients: GiftRecipientView[];
   event: { id: string; title: string; startAt: Date } | null;
 }
 
@@ -39,12 +52,9 @@ const giftSelect = {
   id: true,
   eventId: true,
   giverId: true,
-  recipientId: true,
   description: true,
   notes: true,
   receivedOn: true,
-  thankedAt: true,
-  thankYouNote: true,
   giver: {
     select: {
       id: true,
@@ -57,7 +67,14 @@ const giftSelect = {
       },
     },
   },
-  recipient: { select: { id: true, displayName: true } },
+  recipients: {
+    select: {
+      thankedAt: true,
+      thankYouNote: true,
+      person: { select: { id: true, displayName: true } },
+    },
+    orderBy: { person: { displayName: "asc" as const } },
+  },
   event: { select: { id: true, title: true, startAt: true } },
 };
 
@@ -67,11 +84,16 @@ const giftSelect = {
  * Done here rather than in each page so "can this gift be thanked for" is one question
  * with one answer, asked where the gift is read.
  */
-type GiftRow = Omit<GiftView, "giver"> & {
+type GiftRow = Omit<GiftView, "giver" | "recipients"> & {
   giver: { id: string; displayName: string; contactPoints: { value: string }[] };
+  recipients: {
+    thankedAt: Date | null;
+    thankYouNote: string | null;
+    person: { id: string; displayName: string };
+  }[];
 };
 
-function toView(rows: GiftRow[]): GiftView[] {
+function toView(rows: GiftRow[], mayThankFor: Set<string>): GiftView[] {
   return rows.map((row) => ({
     ...row,
     giver: {
@@ -79,6 +101,15 @@ function toView(rows: GiftRow[]): GiftView[] {
       displayName: row.giver.displayName,
       email: row.giver.contactPoints[0]?.value ?? null,
     },
+    // Decided once, here, from the same set the action checks — so the control offered
+    // and the control accepted can never disagree.
+    recipients: row.recipients.map((r) => ({
+      id: r.person.id,
+      displayName: r.person.displayName,
+      thankedAt: r.thankedAt,
+      thankYouNote: r.thankYouNote,
+      canThank: mayThankFor.has(r.person.id),
+    })),
   }));
 }
 
@@ -86,13 +117,15 @@ export async function listGiftsForEvent(
   userId: string,
   eventId: string,
 ): Promise<GiftView[]> {
-  return toView(
-    await prisma.gift.findMany({
+  const [rows, mayThankFor] = await Promise.all([
+    prisma.gift.findMany({
       where: { AND: [readableGiftsWhere(userId), { eventId }] },
       select: giftSelect,
-      orderBy: [{ recipient: { displayName: "asc" } }, { createdAt: "asc" }],
+      orderBy: { createdAt: "asc" },
     }),
-  );
+    thankableCardIds(userId),
+  ]);
+  return toView(rows, mayThankFor);
 }
 
 /**
@@ -106,27 +139,37 @@ export async function listGiftsForPerson(
   userId: string,
   personId: string,
 ): Promise<GiftView[]> {
-  return toView(
-    await prisma.gift.findMany({
+  const [rows, mayThankFor] = await Promise.all([
+    prisma.gift.findMany({
       where: {
         AND: [
           readableGiftsWhere(userId),
-          { OR: [{ giverId: personId }, { recipientId: personId }] },
+          {
+            OR: [
+              { giverId: personId },
+              { recipients: { some: { personId } } },
+            ],
+          },
         ],
       },
       select: giftSelect,
       orderBy: [{ receivedOn: "desc" }, { createdAt: "desc" }],
     }),
-  );
+    thankableCardIds(userId),
+  ]);
+  return toView(rows, mayThankFor);
 }
 
-export interface GiftRecipientView {
+/** Somebody named as a recipient of gifts at an event — not a gift's own recipient. */
+export interface EventGiftRecipientView {
   eventId: string;
   personId: string;
   person: { id: string; displayName: string };
 }
 
-export function listGiftRecipients(eventId: string): Promise<GiftRecipientView[]> {
+export function listGiftRecipients(
+  eventId: string,
+): Promise<EventGiftRecipientView[]> {
   return prisma.eventGiftRecipient.findMany({
     where: { eventId },
     select: {

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import {
   filterReadablePeopleIds,
   requireUserForAction,
+  thankableCardIds,
   requireWritableEvent,
   requireWritablePerson,
   writableGiftsWhere,
@@ -27,16 +28,19 @@ import { inputToDateOnly } from "@/lib/time";
 
 async function checkPair(
   userId: string,
-  recipientId: string,
+  recipientIds: string[],
   giverId: string,
 ): Promise<ActionState | null> {
-  if (!recipientId) return actionError("Choose who received it.");
+  if (recipientIds.length === 0) return actionError("Choose who received it.");
   if (!giverId) return actionError("Choose who gave it.");
-  if (recipientId === giverId) {
+  if (recipientIds.includes(giverId)) {
     return actionError("A gift needs two different people.");
   }
-  // Throws if the recipient is not writable.
-  await requireWritablePerson(userId, recipientId);
+  // Every recipient, not merely one: the gift is written onto all of their records, so
+  // permission for one is not permission for the rest. Throws if any is not writable.
+  for (const recipientId of recipientIds) {
+    await requireWritablePerson(userId, recipientId);
+  }
   const seen = await filterReadablePeopleIds(userId, [giverId]);
   if (seen.length !== 1) return actionError("That person was not found.");
   return null;
@@ -46,9 +50,10 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
   try {
     const user = await requireUserForAction();
 
-    const recipientId = readString(form, "recipientId");
+    // Several checkboxes share the name, so read them all.
+    const recipientIds = [...new Set(form.getAll("recipientId").map(String).filter(Boolean))];
     const giverId = readString(form, "giverId");
-    const bad = await checkPair(user.id, recipientId, giverId);
+    const bad = await checkPair(user.id, recipientIds, giverId);
     if (bad) return bad;
 
     const description = readString(form, "description");
@@ -62,7 +67,7 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
         ownerId: user.id,
         eventId,
         giverId,
-        recipientId,
+        recipients: { create: recipientIds.map((personId) => ({ personId })) },
         description,
         notes: readString(form, "notes") || null,
         // An event gift takes its date from the event, so the column stays null and
@@ -71,7 +76,8 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
       },
     });
 
-    revalidatePath(eventId ? `/events/${eventId}` : `/people/${recipientId}`);
+    if (eventId) revalidatePath(`/events/${eventId}`);
+    for (const personId of recipientIds) revalidatePath(`/people/${personId}`);
     revalidatePath(`/people/${giverId}`);
     return actionOk("Gift recorded.");
   } catch (err) {
@@ -87,7 +93,12 @@ export async function updateGift(_prev: ActionState, form: FormData): Promise<Ac
 
     const existing = await prisma.gift.findFirst({
       where: { AND: [{ id }, writableGiftsWhere(user.id)] },
-      select: { id: true, eventId: true, giverId: true, recipientId: true },
+      select: {
+        id: true,
+        eventId: true,
+        giverId: true,
+        recipients: { select: { personId: true, thankedAt: true } },
+      },
     });
     if (!existing) return actionError("That gift was not found.");
 
@@ -105,10 +116,7 @@ export async function updateGift(_prev: ActionState, form: FormData): Promise<Ac
       },
     });
 
-    revalidatePath(
-      existing.eventId ? `/events/${existing.eventId}` : `/people/${existing.recipientId}`,
-    );
-    revalidatePath(`/people/${existing.giverId}`);
+    revalidateGift(existing);
     return actionOk("Gift updated.");
   } catch (err) {
     if (isFrameworkError(err)) throw err;
@@ -122,16 +130,28 @@ export async function removeGift(form: FormData): Promise<void> {
 
   const existing = await prisma.gift.findFirst({
     where: { AND: [{ id }, writableGiftsWhere(user.id)] },
-    select: { id: true, eventId: true, giverId: true, recipientId: true },
+    select: {
+      id: true,
+      eventId: true,
+      giverId: true,
+      recipients: { select: { personId: true } },
+    },
   });
   if (!existing) return;
 
   await prisma.gift.delete({ where: { id: existing.id } });
+  revalidateGift(existing);
+}
 
-  revalidatePath(
-    existing.eventId ? `/events/${existing.eventId}` : `/people/${existing.recipientId}`,
-  );
-  revalidatePath(`/people/${existing.giverId}`);
+/** Every page a gift appears on: its event, its giver, and each of its recipients. */
+function revalidateGift(gift: {
+  eventId: string | null;
+  giverId: string;
+  recipients: { personId: string }[];
+}): void {
+  if (gift.eventId) revalidatePath(`/events/${gift.eventId}`);
+  revalidatePath(`/people/${gift.giverId}`);
+  for (const r of gift.recipients) revalidatePath(`/people/${r.personId}`);
 }
 
 export async function addGiftRecipient(
@@ -182,6 +202,9 @@ export async function sendThankYouNote(
   try {
     const user = await requireUserForAction();
     const giftId = readString(form, "giftId");
+    // Which recipient is thanking. A shared present earns a note from each of them, so
+    // "thank you for this gift" is not a complete instruction on its own.
+    const recipientId = readString(form, "thankAs");
     const message = readString(form, "message").trim();
 
     if (!message) return actionError("Write something first.");
@@ -192,8 +215,7 @@ export async function sendThankYouNote(
         id: true,
         description: true,
         eventId: true,
-        recipientId: true,
-        recipient: { select: { linkedUserId: true } },
+        recipients: { select: { personId: true } },
         giver: {
           select: {
             id: true,
@@ -210,12 +232,18 @@ export async function sendThankYouNote(
     });
     if (!gift) return actionError("That gift was not found.");
 
-    // Only your own thanks. The note goes from YOUR address, so writing one for a gift
-    // somebody else received sends a stranger a thank-you signed by the wrong person —
-    // and being able to edit their contact is no licence to speak as them. Checked here
-    // and not only in the UI: a control that is merely hidden is not a control.
-    if (gift.recipient.linkedUserId !== user.id) {
-      return actionError("You can only write thank-yous for gifts you received.");
+    // Only thanks you are entitled to send. The note goes from YOUR address, so writing
+    // one for a gift somebody else received sends a stranger a thank-you signed by the
+    // wrong person — and being able to edit their contact is no licence to speak as them.
+    // Checked here and not only in the UI: a control that is merely hidden is not one.
+    const mine = gift.recipients.find((r) => r.personId === recipientId);
+    if (!mine) return actionError("That person did not receive this gift.");
+
+    const mayThankFor = await thankableCardIds(user.id);
+    if (!mayThankFor.has(recipientId)) {
+      return actionError(
+        "That thank-you is not yours to write. The person it belongs to can allow the head of the household to write it for them, in their settings.",
+      );
     }
 
     const to = gift.giver.contactPoints[0]?.value;
@@ -236,15 +264,12 @@ export async function sendThankYouNote(
       buildThankYouMail({ to, giftDescription: gift.description, message }),
     );
 
-    await prisma.gift.update({
-      where: { id: gift.id },
+    await prisma.giftRecipient.update({
+      where: { giftId_personId: { giftId: gift.id, personId: recipientId } },
       data: { thankedAt: new Date(), thankYouNote: message },
     });
 
-    revalidatePath(
-      gift.eventId ? `/events/${gift.eventId}` : `/people/${gift.recipientId}`,
-    );
-    revalidatePath(`/people/${gift.giver.id}`);
+    revalidateGift({ ...gift, giverId: gift.giver.id });
     return actionOk(`Sent to ${to}.`);
   } catch (err) {
     if (isFrameworkError(err)) throw err;

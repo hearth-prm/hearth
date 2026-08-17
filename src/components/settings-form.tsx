@@ -22,6 +22,7 @@ export interface CalendarOption {
 export interface SettingsValues {
   syncContactsEnabled: boolean;
   syncSharedContacts: boolean;
+  allowHeadThankYous: boolean;
   sendInvites: boolean;
   syncCalendarEnabled: boolean;
   defaultAddToGoogle: boolean;
@@ -238,6 +239,14 @@ export function SettingsForm({
           {state.errors?.timeZone ? (
             <p className={errorClass}>{state.errors.timeZone}</p>
           ) : null}
+        </div>
+        <div className="border-t border-neutral-100 px-5 py-5 dark:border-neutral-800/60">
+          <Toggle
+            name="allowHeadThankYous"
+            label="Let the head of the household write my thank-yous"
+            help="A thank-you is signed by whoever sends it, so nobody can take this on your behalf — it is yours to give. Useful for a child whose notes a parent writes."
+            defaultChecked={values.allowHeadThankYous}
+          />
         </div>
       </Card>
 

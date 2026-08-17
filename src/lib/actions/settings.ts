@@ -38,6 +38,7 @@ export async function updateSettings(
       inviteAttendees: readCheckbox(form, "inviteAttendees"),
       importRsvps: readCheckbox(form, "importRsvps"),
       sendInvites: readCheckbox(form, "sendInvites"),
+      allowHeadThankYous: readCheckbox(form, "allowHeadThankYous"),
       googleCalendarId,
       placesProvider,
       timeZone,

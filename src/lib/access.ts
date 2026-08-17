@@ -144,11 +144,49 @@ export function writableEventsWhere(userId: string): Prisma.EventWhereInput {
  * to the list of what she gave a household you have no access to.
  */
 export function readableGiftsWhere(userId: string): Prisma.GiftWhereInput {
-  return { recipient: readablePeopleWhere(userId) };
+  return { recipients: { some: { person: readablePeopleWhere(userId) } } };
 }
 
 export function writableGiftsWhere(userId: string): Prisma.GiftWhereInput {
-  return { recipient: writablePeopleWhere(userId) };
+  return { recipients: { some: { person: writablePeopleWhere(userId) } } };
+}
+
+/**
+ * Whose thank-yous this user may write.
+ *
+ * Returns contact-card ids, not people: a thank-you is signed by whoever sends it, so
+ * the question is never "whose record may I edit" — you may edit the contacts of
+ * everyone you have ever recorded — but "who am I entitled to speak for".
+ *
+ * Two answers qualify. Your own card, always. And the card of any user who has ticked
+ * *allow the head of household to write my thank-yous*, if you are that head — which is
+ * how a parent writes a small child's notes. The permission is granted by the person
+ * being spoken for and by nobody else, which is why it is read from their settings
+ * rather than from the head's.
+ *
+ * A contact who is not a user of this install therefore has nobody to write for them,
+ * and that is intended rather than an omission: thank-yous are sent by the people using
+ * Hearth. A recipient who needs one written has an account.
+ */
+export async function thankableCardIds(userId: string): Promise<Set<string>> {
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isHeadOfHousehold: true, contactCard: { select: { id: true } } },
+  });
+
+  const ids = new Set<string>();
+  if (me?.contactCard) ids.add(me.contactCard.id);
+  if (!me?.isHeadOfHousehold) return ids;
+
+  const delegated = await prisma.person.findMany({
+    where: {
+      linkedUserId: { not: null },
+      linkedUser: { settings: { allowHeadThankYous: true } },
+    },
+    select: { id: true },
+  });
+  for (const person of delegated) ids.add(person.id);
+  return ids;
 }
 
 /** Deleting is the owner's alone, whatever has been shared. */

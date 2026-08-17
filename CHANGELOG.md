@@ -54,6 +54,17 @@ that formally marks its milestone.
     thank-you that visibly came out of a contact manager is a worse thank-you. The box
     shows a suggested opening as a *placeholder* rather than prefilled text, since
     anything actually in it can be sent unread.
+  - **A gift can be for several people**, because a big present often is — a holiday for
+    the children is one gift, not one each. Each recipient owes their own note, though:
+    one child thanking does not discharge the other's, which is why the thanks are
+    recorded against the recipient rather than the gift.
+  - **A user can let the head of the household write their thank-yous** (Settings →
+    Preferences). Off by default, and given by that user rather than taken by the head —
+    a note is signed by whoever sends it, so this is permission to speak for somebody and
+    only they can grant it. It exists so a parent can write a small child's notes.
+  - Thank-yous are sent by the people using Hearth, for themselves or for a user who has
+    asked them to. A recipient who is not a user of the install has nobody to write for
+    them, by design.
   - **Only for gifts you received.** The note goes from your address and is signed by
     nobody else, so writing one for a gift somebody else was given would send a stranger
     a thank-you from the wrong person. Being able to edit a contact is not licence to

@@ -1552,9 +1552,7 @@ try {
   });
   // A's own contact card stands in for the reader: a thank-you is only ever yours to
   // write, so the gift recipient in these checks has to be A themselves.
-  const { contactCardIdFor } = await import("@/lib/household");
-  const myCardId = await contactCardIdFor(A.id);
-  const kid = await prisma.person.findFirstOrThrow({ where: { id: myCardId ?? "" } });
+  const kid = await prisma.person.findFirstOrThrow({ where: { linkedUserId: A.id } });
   const auntie = await prisma.person.create({
     data: { ownerId: A.id, displayName: "Gift Auntie", givenName: "Gift", familyName: "Auntie",
       contactPoints: { create: [{ kind: "EMAIL", value: "auntie@e2e.test", isPrimary: true, order: 0 }] } },
@@ -1590,16 +1588,22 @@ try {
   await openGifts();
   await A.page.click('button:has-text("Record a gift")');
   await A.page.selectOption('select[name="giverId"]', auntie.id);
-  await A.page.selectOption('select[name="recipientId"]', kid.id);
+  // Checkboxes now, and this one arrives pre-ticked as the only candidate — check()
+  // is idempotent, so it states the intent either way.
+  await A.page.check(`input[name="recipientId"][value="${kid.id}"]`);
   await A.page.fill('input[name="description"]', "A blue scarf");
   await A.page.fill('textarea[name="notes"]', "Hand-knitted");
   await A.page.click('button:has-text("Save gift")');
   await waitForDb("the gift to be recorded", async () =>
     (await prisma.gift.count({ where: { eventId: xmas.id } })) === 1);
-  const recorded = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
+  const recorded = await prisma.gift.findFirstOrThrow({
+    where: { eventId: xmas.id },
+    include: { recipients: true },
+  });
   ok("16.4 a gift records what it was, who gave it and who got it",
      recorded.description === "A blue scarf" && recorded.giverId === auntie.id
-       && recorded.recipientId === kid.id, recorded.description);
+       && recorded.recipients.map((r) => r.personId).includes(kid.id),
+     recorded.description);
   ok("16.4b including a note of its own", recorded.notes === "Hand-knitted", recorded.notes);
   ok("16.4c and no date, since the event already answers when",
      recorded.receivedOn === null, recorded.receivedOn);
@@ -1635,16 +1639,19 @@ try {
 
   // …and is overridable, which is the whole point: this one goes the other way.
   await A.page.selectOption('select[name="giverId"]', kid.id);
-  await A.page.selectOption('select[name="recipientId"]', auntie.id);
+  await A.page.check(`input[name="recipientId"][value="${auntie.id}"]`);
+  await A.page.uncheck(`input[name="recipientId"][value="${kid.id}"]`).catch(() => {});
   await A.page.fill('input[name="description"]', "A thank-you plant");
   await A.page.fill('input[name="receivedOn"]', "2026-07-04");
   await A.page.click('button:has-text("Save gift")');
   await waitForDb("the one-off to be recorded", async () =>
-    (await prisma.gift.count({ where: { eventId: null, recipientId: auntie.id } })) === 1);
+    (await prisma.gift.count({
+      where: { eventId: null, recipients: { some: { personId: auntie.id } } },
+    })) === 1);
   // findFirst, not findFirstOrThrow: a wait that gave up should fail one check, not
   // throw and take every check after it down with it.
   const oneOff = await prisma.gift.findFirst({
-    where: { eventId: null, recipientId: auntie.id },
+    where: { eventId: null, recipients: { some: { personId: auntie.id } } },
   });
   ok("16.6b a gift needs no event, and keeps a date of its own",
      oneOff?.eventId === null
@@ -1738,7 +1745,7 @@ try {
   await openGifts();
   await A.page.click('button:has-text("Record a gift")');
   ok("16.13 a lone gift recipient is preselected",
-     (await A.page.inputValue('select[name="recipientId"]')) === kid.id);
+     await A.page.isChecked(`input[name="recipientId"][value="${kid.id}"]`));
 
   // Moving the start carries the end with it, keeping the event's length.
   await A.page.goto("/events/new");
@@ -1780,6 +1787,114 @@ try {
   const guestsEditing = (await A.page.textContent("body")) ?? "";
   ok("16.16b and shows role, RSVP and the invite box when it is",
      guestsEditing.includes("Invite in Google") && guestsEditing.includes("Role"));
+
+  // A big present is one gift for several people, not one gift each — so it earns one
+  // thank-you and shows on every recipient's page.
+  const twin = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Gift Twin", givenName: "Gift", familyName: "Twin" },
+  });
+  const shared = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: auntie.id, description: "A week in Wales",
+      eventId: xmas.id,
+      recipients: { create: [{ personId: kid.id }, { personId: twin.id }] },
+    },
+    include: { recipients: true },
+  });
+  ok("16.21 one gift can be for several people",
+     shared.recipients.length === 2, shared.recipients.length);
+  ok("16.21d and each of them owes their own thanks",
+     shared.recipients.every((r) => r.thankedAt === null));
+
+  // One recipient thanking must not discharge the other's obligation.
+  await prisma.giftRecipient.update({
+    where: { giftId_personId: { giftId: shared.id, personId: kid.id } },
+    data: { thankedAt: new Date(), thankYouNote: "Thanks for Wales!" },
+  });
+  const afterOne = await prisma.giftRecipient.findMany({ where: { giftId: shared.id } });
+  ok("16.21e one recipient thanking leaves the other still owing",
+     afterOne.filter((r) => r.thankedAt !== null).length === 1,
+     afterOne.map((r) => r.thankedAt));
+  // Twin is a contact, not a user of this install, so nobody holds their signature —
+  // and a note has to be signed by somebody. Their share of the present is recorded and
+  // visible, and no one is offered the chance to thank for it. Intended: thank-yous are
+  // sent by the people using Hearth, for themselves or for a user who asked them to.
+  await A.page.goto(`/people/${twin.id}`);
+  ok("16.21f a recipient who is not a user of this install has nobody to write for them",
+     (await A.page.$$('text="write thank you"')).length === 0);
+
+  // Put the shared present back to unthanked. This section sits above §16.10, which
+  // asserts that nothing on the event page claims to have been thanked for yet — so a
+  // mark left behind here fails a check further down that is testing something else.
+  await prisma.giftRecipient.updateMany({
+    where: { giftId: shared.id },
+    data: { thankedAt: null, thankYouNote: null },
+  });
+
+  await A.page.goto(`/people/${twin.id}`);
+  ok("16.21b and shows on each of their pages",
+     (await A.page.$$('text="A week in Wales"')).length >= 1);
+  await A.page.goto(`/people/${kid.id}`);
+  ok("16.21c including the other recipient's",
+     (await A.page.$$('text="A week in Wales"')).length >= 1);
+
+  // Delegation: the head of household may write for a user who has asked them to.
+  const karenUser = await h.signIn("karen@e2e.test", "Karen User");
+  // signIn writes the User row directly, so Auth.js's createUser event never runs and
+  // no card appears by itself. ensureContactCard is already in scope from §12 — this
+  // file is one long block — so it is called rather than imported again.
+  await ensureContactCard(karenUser.id);
+  const karenCard = await prisma.person.findFirstOrThrow({
+    where: { linkedUserId: karenUser.id },
+  });
+  const karensGift = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: auntie.id, description: "A mug",
+      recipients: { create: [{ personId: karenCard.id }] },
+    },
+  });
+  const { thankableCardIds } = await import("@/lib/access");
+  const { listGiftsForPerson } = await import("@/lib/gifts");
+
+  // Asked of whoever actually holds the role rather than of A on the assumption they
+  // still do — the head is elected, and one day something here will hand it over.
+  const head = await prisma.user.findFirstOrThrow({ where: { isHeadOfHousehold: true } });
+  const notHead = [A.id, B.id].find((id) => id !== head.id)!;
+
+  ok("16.22 nobody may write another user's thanks by default",
+     !(await thankableCardIds(head.id)).has(karenCard.id));
+
+  await prisma.userSettings.updateMany({
+    where: { userId: karenUser.id },
+    data: { allowHeadThankYous: true },
+  });
+  ok("16.22b once they allow it, the head of the household may",
+     (await thankableCardIds(head.id)).has(karenCard.id), karensGift.id);
+  ok("16.22c but nobody else, however much of the record they can edit",
+     !(await thankableCardIds(notHead)).has(karenCard.id));
+
+  await prisma.userSettings.updateMany({
+    where: { userId: karenUser.id },
+    data: { allowHeadThankYous: false },
+  });
+  ok("16.22d and it is withdrawn the moment they turn it off",
+     !(await thankableCardIds(head.id)).has(karenCard.id));
+
+  // Delegation reaches a share of a shared present, not only a gift of one's own.
+  await prisma.userSettings.updateMany({
+    where: { userId: karenUser.id },
+    data: { allowHeadThankYous: true },
+  });
+  await prisma.giftRecipient.create({
+    data: { giftId: shared.id, personId: karenCard.id },
+  });
+  const withKaren = await listGiftsForPerson(head.id, karenCard.id);
+  const karensShare = withKaren.find((g) => g.id === shared.id);
+  ok("16.22e the head may write a delegated user's share of a shared present",
+     karensShare?.recipients.find((r) => r.id === karenCard.id)?.canThank === true,
+     karensShare?.recipients.map((r) => [r.displayName, r.canThank]));
+  ok("16.22f while a co-recipient who delegated nothing stays untouched",
+     karensShare?.recipients.find((r) => r.id === twin.id)?.canThank === false);
 
   // Reconnecting has to mean something. The adapter writes an Account row once and
   // never again, so without persistGoogleGrant a new scope never reached the column
@@ -1825,7 +1940,10 @@ try {
      (await shows("write thank you")) >= 1);
   ok("16.10b and does not claim it has been", (await shows("thanked")) === 0);
 
-  const scarf = await prisma.gift.findFirstOrThrow({ where: { eventId: xmas.id } });
+  const scarf = await prisma.gift.findFirstOrThrow({
+    where: { eventId: xmas.id },
+    include: { recipients: true },
+  });
   // Somebody else's thanks are not yours to write, however much of their record you
   // may edit. Checked in the action and not only in the UI: hiding a control is not
   // the same as refusing it.
@@ -1834,8 +1952,8 @@ try {
   });
   const notMine = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: auntie.id, recipientId: karen.id,
-      description: "A candle", eventId: xmas.id,
+      ownerId: A.id, giverId: auntie.id, description: "A candle", eventId: xmas.id,
+      recipients: { create: [{ personId: karen.id }] },
     },
   });
   await A.page.goto(`/people/${karen.id}`);
@@ -1843,7 +1961,7 @@ try {
      (await A.page.$$('text="write thank you"')).length === 0, notMine.id);
 
   ok("16.19 nothing is marked thanked until something is sent",
-     scarf.thankedAt === null, scarf.thankedAt);
+     scarf.recipients.every((r) => r.thankedAt === null));
 
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
@@ -1869,7 +1987,9 @@ try {
      (await A.page.inputValue("dialog[open] textarea")) === "Thank you for the scarf.",
      await A.page.inputValue("dialog[open] textarea").catch(() => null));
   ok("16.19f with the gift not marked thanked by a send that never landed",
-     (await prisma.gift.findFirstOrThrow({ where: { id: scarf.id } })).thankedAt === null);
+     (await prisma.giftRecipient.count({
+       where: { giftId: scarf.id, thankedAt: { not: null } },
+     })) === 0);
   await A.page.keyboard.press("Escape");
 
   // Without permission to send there is nothing to open: the control refuses up front
@@ -1888,20 +2008,28 @@ try {
   });
 
   // A sent thank-you replaces the control outright: there is nothing left to do.
-  await prisma.gift.update({
-    where: { id: scarf.id },
+  //
+  // Counted rather than asserted absent. This event also holds the shared present, whose
+  // recipients still owe their notes — so "no write thank you anywhere on the page" would
+  // be testing that the OTHER gift had been dealt with too. One fewer offer is the claim.
+  await A.page.goto(`/events/${xmas.id}`);
+  await openGifts();
+  const offersBefore = await shows("write thank you");
+  await prisma.giftRecipient.updateMany({
+    where: { giftId: scarf.id },
     data: { thankedAt: new Date(), thankYouNote: "Thank you for the scarf." },
   });
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
   ok("16.20 once sent, the row reads thanked", (await shows("thanked")) >= 1);
-  ok("16.20b and stops offering to write one",
-     (await shows("write thank you")) === 0);
+  ok("16.20b and that gift stops offering one",
+     (await shows("write thank you")) === offersBefore - 1,
+     `${offersBefore} -> ${await shows("write thank you")}`);
   await A.page.goto(`/people/${kid.id}`);
   ok("16.20c the same on the contact page, for what they received",
      (await shows("thanked")) >= 1);
-  await prisma.gift.update({
-    where: { id: scarf.id },
+  await prisma.giftRecipient.updateMany({
+    where: { giftId: scarf.id },
     data: { thankedAt: null, thankYouNote: null },
   });
 

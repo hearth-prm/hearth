@@ -33,6 +33,7 @@ type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
 export function ThankYouControl({
   action,
   giftId,
+  recipientId,
   giftDescription,
   giverName,
   giverEmail,
@@ -43,6 +44,8 @@ export function ThankYouControl({
 }: {
   action: Action;
   giftId: string;
+  /** Whose thanks these are. A shared present earns one note per recipient. */
+  recipientId: string;
   giftDescription: string;
   giverName: string;
   giverEmail: string | null;
@@ -126,6 +129,10 @@ export function ThankYouControl({
 
           <FormMessage ok={state.ok} message={state.message} />
           <input type="hidden" name="giftId" value={giftId} />
+          {/* Not "recipientId": the gift form's recipient checkboxes already own that
+              name, and two different meanings behind one field name is a collision
+              waiting for whoever writes the next selector. */}
+          <input type="hidden" name="thankAs" value={recipientId} />
 
           <textarea
             name="message"
@@ -198,8 +205,13 @@ export function GiftForm({
   // With one candidate there is no choice to make, so do not ask for one. At an event
   // with a single gift recipient this is the difference between two clicks per present
   // and one, and the answer would have been the same every time.
-  const soleRecipient = recipients.length === 1 ? recipients[0]!.id : undefined;
-  const recipientValue = defaultRecipientId ?? soleRecipient ?? "";
+  const checkedRecipients = new Set(
+    defaultRecipientId
+      ? [defaultRecipientId]
+      : recipients.length === 1
+        ? [recipients[0]!.id]
+        : [],
+  );
 
   if (!open) {
     return (
@@ -236,24 +248,27 @@ export function GiftForm({
         </div>
 
         <div>
-          <label htmlFor="gift-recipient" className={labelClass}>
-            To
-          </label>
-          <select
-            id="gift-recipient"
-            name="recipientId"
-            className={`${inputClass} mt-1.5`}
-            defaultValue={recipientValue}
-            required
-          >
-            {/* Only offered when there is in fact something to choose between. */}
-            {soleRecipient ? null : <option value="">Who received it…</option>}
+          <span className={labelClass}>To</span>
+          {/* Checkboxes rather than a select, because a big present is often for several
+              people at once — a holiday for the children is one gift and one thank-you,
+              not one per child. */}
+          <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 p-2 dark:border-neutral-700">
             {recipients.map((p) => (
-              <option key={p.id} value={p.id}>
+              <label
+                key={p.id}
+                className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
+              >
+                <input
+                  type="checkbox"
+                  name="recipientId"
+                  value={p.id}
+                  defaultChecked={checkedRecipients.has(p.id)}
+                  className="size-4 rounded border-neutral-300 dark:border-neutral-600"
+                />
                 {p.displayName}
-              </option>
+              </label>
             ))}
-          </select>
+          </div>
         </div>
       </div>
 

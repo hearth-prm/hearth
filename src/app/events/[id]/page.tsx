@@ -39,7 +39,6 @@ import {
 } from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
 import { canSendMail } from "@/lib/google/mail";
-import { contactCardIdFor } from "@/lib/household";
 import {
   addGift,
   addGiftRecipient,
@@ -107,14 +106,10 @@ export default async function EventPage({
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
-  const [gifts, giftRecipients, mailAllowed, myCardId] = await Promise.all([
+  const [gifts, giftRecipients, mailAllowed] = await Promise.all([
     listGiftsForEvent(user.id, event.id),
     listGiftRecipients(event.id),
     canSendMail(user.id),
-    // Which of these people is the reader. Ownership cannot answer that — you own the
-    // contacts of everyone you have recorded — and it is what decides whose thanks
-    // these are to write.
-    contactCardIdFor(user.id),
   ]);
 
   // Anyone readable can be a giver; recipients are drawn from the gift list, which is
@@ -274,7 +269,11 @@ export default async function EventPage({
               ) : (
                 <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
                   {giftRecipients.map((entry) => {
-                    const theirs = gifts.filter((g) => g.recipientId === entry.personId);
+                    // A shared present appears under each person it was for, which is right: every
+                    // one of them received it. It is still one gift and one thank-you.
+                    const theirs = gifts.filter((g) =>
+                      g.recipients.some((r) => r.id === entry.personId),
+                    );
                     return (
                       <li key={entry.personId} className="px-5 py-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -327,17 +326,29 @@ export default async function EventPage({
                                       {gift.notes}
                                     </span>
                                   ) : null}
-                                  <ThankYouControl
-                                    action={sendThankYouNote}
-                                    giftId={gift.id}
-                                    giftDescription={gift.description}
-                                    giverName={gift.giver.displayName}
-                                    giverEmail={gift.giver.email}
-                                    thanked={Boolean(gift.thankedAt)}
-                                    thankYouNote={gift.thankYouNote}
-                                    canSend={mailAllowed}
-                                    yours={gift.recipientId === myCardId}
-                                  />
+                                  {/* Scoped to the person whose section this is, so a
+                                      present shared with a sibling shows each of them
+                                      their own thanks to write. */}
+                                  {(() => {
+                                    const mine = gift.recipients.find(
+                                      (r) => r.id === entry.personId,
+                                    );
+                                    if (!mine) return null;
+                                    return (
+                                      <ThankYouControl
+                                        action={sendThankYouNote}
+                                        giftId={gift.id}
+                                        recipientId={mine.id}
+                                        giftDescription={gift.description}
+                                        giverName={gift.giver.displayName}
+                                        giverEmail={gift.giver.email}
+                                        thanked={Boolean(mine.thankedAt)}
+                                        thankYouNote={mine.thankYouNote}
+                                        canSend={mailAllowed}
+                                        yours={mine.canThank}
+                                      />
+                                    );
+                                  })()}
                                 </span>
                                 {canEdit ? (
                                   <span className="flex shrink-0 items-center gap-3">
