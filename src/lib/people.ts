@@ -51,13 +51,36 @@ export function computeDisplayName(p: PersonNameParts): string {
   );
 }
 
-export interface ContactPointInput {
+/** The parts of an address, and an email's display name. All optional. */
+export const CONTACT_DETAIL_KEYS = [
+  "poBox",
+  "streetAddress",
+  "extendedAddress",
+  "city",
+  "region",
+  "postalCode",
+  "country",
+  "countryCode",
+  "displayName",
+] as const;
+
+export type ContactDetailKey = (typeof CONTACT_DETAIL_KEYS)[number];
+
+/**
+ * Flat, not nested, and deliberately so.
+ *
+ * These objects are handed straight to Prisma as `{ create: items }`. TypeScript does not
+ * apply excess-property checks to a variable, so a nested `detail` object would compile
+ * and then fail at runtime as an unknown column. One field per column keeps the shape
+ * checkable at the point it is written.
+ */
+export type ContactPointInput = {
   kind: ContactKind;
   label: string | null;
   value: string;
   isPrimary: boolean;
   order: number;
-}
+} & Record<ContactDetailKey, string | null>;
 
 /**
  * Read the repeatable contact-point rows out of a submitted form.
@@ -76,6 +99,12 @@ export function parseContactPoints(
   const kinds = form.getAll("cp_kind").map(String);
   const labels = form.getAll("cp_label").map(String);
   const values = form.getAll("cp_value").map(String);
+  // One array per detail key, aligned by position like the three above. Every row emits
+  // every field even when empty — a row that skipped one would shift every later row's
+  // detail onto the wrong contact point, silently.
+  const details = Object.fromEntries(
+    CONTACT_DETAIL_KEYS.map((key) => [key, form.getAll(`cp_${key}`).map(String)]),
+  ) as Record<ContactDetailKey, string[]>;
 
   const items: ContactPointInput[] = [];
   const primaryTaken = new Set<string>();
@@ -109,6 +138,9 @@ export function parseContactPoints(
       value,
       isPrimary,
       order: items.length,
+      ...(Object.fromEntries(
+        CONTACT_DETAIL_KEYS.map((key) => [key, (details[key]?.[i] ?? "").trim() || null]),
+      ) as Record<ContactDetailKey, string | null>),
     });
   }
 

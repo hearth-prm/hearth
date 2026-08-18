@@ -459,6 +459,25 @@ model ContactPoint {
   isPrimary Boolean    @default(false)
   order    Int         @default(0)
 
+  /// The parts of an address, for kind = ADDRESS.
+  ///
+  /// `value` stays the one line Hearth shows and searches; these carry the structure
+  /// Google keeps beside it. Both are sent: Google builds formattedValue from the parts
+  /// when it is absent, so keeping the line means a Hearth-typed address still reads
+  /// correctly, and keeping the parts means an imported one is not flattened by the
+  /// first sync — which is what used to happen to every address Hearth touched.
+  poBox           String?
+  streetAddress   String?
+  extendedAddress String?
+  city            String?
+  region          String?
+  postalCode      String?
+  country         String?
+  countryCode     String?
+
+  /// Google's own display name for an email address, kept for the same reason.
+  displayName     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

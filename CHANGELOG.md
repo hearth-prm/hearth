@@ -94,6 +94,15 @@ that formally marks its milestone.
   - The Google import stores them as themselves rather than rescuing them into custom
     fields, so a middle name returns to Google as a middle name instead of reappearing as
     `Middle name: Augusta` among the custom fields.
+  - **Addresses keep their parts too.** Street, extra line, city, region, postcode,
+    country, country code and PO box are stored and sent, alongside the one line Hearth
+    shows and searches — Google keeps both, and building formattedValue from the parts is
+    what it does when the line is absent. An email keeps Google's display name for the
+    same reason.
+  - The address parts are editable on the contact form, behind a disclosure on the address
+    row. They had to be: a save rewrites every contact point from the form, so parts the
+    form did not carry would have been erased by an edit to something else entirely — and
+    then flattened in Google on the next sync.
   - One contact still keeps one organisation. Hearth has only ever sent one, so nothing
     regresses, and the import now says so per contact when Google holds more.
 

@@ -215,7 +215,11 @@ export function serializePerson(
     biographies: biography ? [{ value: biography, contentType: "TEXT_PLAIN" }] : [],
     emailAddresses: [
       ...byKind("EMAIL")
-        .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
+        .map((cp) => ({
+          value: clean(cp.value),
+          type: typeOf(cp),
+          displayName: clean(cp.displayName),
+        }))
         .filter((e) => e.value !== undefined),
       ...extraEmails,
     ],
@@ -225,9 +229,23 @@ export function serializePerson(
         .filter((e) => e.value !== undefined),
       ...extraPhones,
     ],
+    // Both the line and the parts. Google builds formattedValue from the parts when it
+    // is absent, so sending only the line — which is what Hearth used to do — replaced a
+    // structured address with a flat one on every push.
     addresses: [
       ...byKind("ADDRESS")
-        .map((cp) => ({ formattedValue: clean(cp.value), type: typeOf(cp) }))
+        .map((cp) => ({
+          formattedValue: clean(cp.value),
+          type: typeOf(cp),
+          poBox: clean(cp.poBox),
+          streetAddress: clean(cp.streetAddress),
+          extendedAddress: clean(cp.extendedAddress),
+          city: clean(cp.city),
+          region: clean(cp.region),
+          postalCode: clean(cp.postalCode),
+          country: clean(cp.country),
+          countryCode: clean(cp.countryCode),
+        }))
         .filter((e) => e.formattedValue !== undefined),
       ...extraAddresses,
     ],

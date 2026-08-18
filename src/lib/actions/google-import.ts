@@ -199,13 +199,9 @@ async function importOne(
       }),
       custom,
       contactPoints: {
-        create: contact.contactPoints.map((cp) => ({
-          kind: cp.kind,
-          value: cp.value,
-          label: cp.label,
-          isPrimary: cp.isPrimary,
-          order: cp.order,
-        })),
+        // Spread, so a part added to PlannedContactPoint reaches the database without
+        // this list having to be remembered — the shape is checked at the write.
+        create: contact.contactPoints.map((cp) => ({ ...cp })),
       },
       labels: { create: labelIds.map((labelId) => ({ labelId })) },
       // The link that makes this an adoption rather than a duplicate: the next sync

@@ -51,7 +51,29 @@ export interface PlannedContactPoint {
   label: string | null;
   isPrimary: boolean;
   order: number;
+  /** Address parts and an email display name; null where Google had none. */
+  poBox: string | null;
+  streetAddress: string | null;
+  extendedAddress: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
+  countryCode: string | null;
+  displayName: string | null;
 }
+
+const NO_DETAIL = {
+  poBox: null,
+  streetAddress: null,
+  extendedAddress: null,
+  city: null,
+  region: null,
+  postalCode: null,
+  country: null,
+  countryCode: null,
+  displayName: null,
+} as const;
 
 /** Something in a managed group with no Hearth column; kept as a custom field. */
 export interface RescuedValue {
@@ -132,7 +154,14 @@ function isPrimary(entry: { metadata?: { primary?: boolean | null } | null }): b
 }
 
 function pointsOf(
-  entries: readonly { value?: string | null; type?: string | null; metadata?: { primary?: boolean | null } | null }[] | undefined,
+  entries:
+    | readonly {
+        value?: string | null;
+        type?: string | null;
+        displayName?: string | null;
+        metadata?: { primary?: boolean | null } | null;
+      }[]
+    | undefined,
   kind: ContactKind,
   startOrder: number,
 ): PlannedContactPoint[] {
@@ -142,11 +171,13 @@ function pointsOf(
     const value = clean(entry.value);
     if (!value) continue;
     out.push({
+      ...NO_DETAIL,
       kind,
       value,
       label: clean(entry.type),
       isPrimary: isPrimary(entry),
       order: order++,
+      displayName: clean(entry.displayName),
     });
   }
   return out;
@@ -162,11 +193,14 @@ function pointsOf(
  */
 function addressText(address: {
   formattedValue?: string | null;
+  poBox?: string | null;
   streetAddress?: string | null;
+  extendedAddress?: string | null;
   city?: string | null;
   region?: string | null;
   postalCode?: string | null;
   country?: string | null;
+  countryCode?: string | null;
 }): string | null {
   const formatted = clean(address.formattedValue);
   if (formatted) return formatted;
@@ -246,19 +280,24 @@ export function planGoogleImport(
     for (const address of person.addresses ?? []) {
       const text = addressText(address);
       if (!text) continue;
+      // The line AND the parts. Hearth stores both, and sends both, so an imported
+      // address is not flattened by the first sync the way it used to be.
       contactPoints.push({
+        ...NO_DETAIL,
         kind: "ADDRESS",
         value: text,
         label: clean(address.type),
         isPrimary: isPrimary(address),
         order: addressOrder++,
+        poBox: clean(address.poBox),
+        streetAddress: clean(address.streetAddress),
+        extendedAddress: clean(address.extendedAddress),
+        city: clean(address.city),
+        region: clean(address.region),
+        postalCode: clean(address.postalCode),
+        country: clean(address.country),
+        countryCode: clean(address.countryCode),
       });
-      // Only worth saying when Google actually held the pieces separately.
-      if (clean(address.streetAddress) && clean(address.formattedValue)) {
-        reasons.push(
-          "Address kept as one line; Hearth has no separate street, city and postcode.",
-        );
-      }
     }
 
     if ((person.organizations ?? []).length > 1) {

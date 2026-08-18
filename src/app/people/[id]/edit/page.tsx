@@ -43,6 +43,20 @@ export default async function EditPersonPage({
           kind: c.kind,
           label: c.label ?? "",
           value: c.value,
+          // Carried into the form so a save puts them back. Without this an edit to
+          // somebody's phone number would flatten their address on the next sync,
+          // because the form is the whole of what gets written.
+          detail: {
+            poBox: c.poBox ?? "",
+            streetAddress: c.streetAddress ?? "",
+            extendedAddress: c.extendedAddress ?? "",
+            city: c.city ?? "",
+            region: c.region ?? "",
+            postalCode: c.postalCode ?? "",
+            country: c.country ?? "",
+            countryCode: c.countryCode ?? "",
+            displayName: c.displayName ?? "",
+          },
         }))}
         addToGoogle={person.addToGoogle}
         synced={Boolean(person.googleSyncs[0]?.googleResourceName)}

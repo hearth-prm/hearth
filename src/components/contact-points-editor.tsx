@@ -3,9 +3,11 @@
 import { useState } from "react";
 import type { ContactKind } from "@prisma/client";
 import {
+  CONTACT_DETAIL_KEYS,
   CONTACT_KINDS,
   CONTACT_KIND_LABELS,
   CONTACT_LABEL_SUGGESTIONS,
+  type ContactDetailKey,
 } from "@/lib/people";
 import { btnGhost, btnSecondary, inputClass, labelClass } from "@/components/ui";
 
@@ -13,19 +15,47 @@ export interface ContactPointRow {
   kind: ContactKind;
   label: string;
   value: string;
+  /** Structured address parts and an email display name; "" when absent. */
+  detail?: Partial<Record<ContactDetailKey, string>>;
 }
+
+/** Shown for an address, in the order somebody would read one. */
+const ADDRESS_PARTS: { key: ContactDetailKey; label: string }[] = [
+  { key: "streetAddress", label: "Street" },
+  { key: "extendedAddress", label: "Extra line" },
+  { key: "city", label: "City" },
+  { key: "region", label: "Region" },
+  { key: "postalCode", label: "Postcode" },
+  { key: "country", label: "Country" },
+  { key: "countryCode", label: "Country code" },
+  { key: "poBox", label: "PO box" },
+];
 
 interface Row extends ContactPointRow {
   uid: number;
 }
 
+function detailOf(row: Row, key: ContactDetailKey): string {
+  return row.detail?.[key] ?? "";
+}
+
 /**
  * Repeatable contact-detail rows.
  *
- * Emits three parallel arrays (cp_kind / cp_label / cp_value) rather than
- * indexed names like cp[0][value]: the browser submits repeated names in
+ * Emits parallel arrays (cp_kind / cp_label / cp_value, and one per structured detail)
+ * rather than indexed names like cp[0][value]: the browser submits repeated names in
  * document order, so position alone preserves row grouping, and deleting a row
  * needs no reindexing. parseContactPoints() zips them back together.
+ *
+ * EVERY row emits EVERY field, including the address parts on a phone number, where they
+ * are hidden and empty. That is not waste — it is what keeps the arrays aligned. A row
+ * that skipped a field would shift every later row's detail onto the wrong contact point,
+ * and it would do so silently.
+ *
+ * The parts are also what stops a save from flattening an imported address. Google keeps
+ * street, city and postcode beside the one line; Hearth manages the addresses group and
+ * replaces it wholesale, so a form that did not carry the parts would erase them on the
+ * next sync — after an edit to something else entirely.
  */
 export function ContactPointsEditor({
   initial,
@@ -120,6 +150,49 @@ export function ContactPointsEditor({
           >
             Remove
           </button>
+
+          {/* Hidden for every kind that has no use for them, so the arrays stay
+              aligned; shown as real inputs for an address below. */}
+          {CONTACT_DETAIL_KEYS.filter(
+            (key) => row.kind !== "ADDRESS" || key === "displayName",
+          ).map((key) => (
+            <input
+              key={key}
+              type="hidden"
+              name={`cp_${key}`}
+              value={detailOf(row, key)}
+            />
+          ))}
+
+          {row.kind === "ADDRESS" ? (
+            <details className="w-full">
+              <summary className="cursor-pointer text-xs text-neutral-500 dark:text-neutral-400">
+                Address parts{" "}
+                {ADDRESS_PARTS.some((p) => detailOf(row, p.key)) ? "· filled in" : ""}
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {ADDRESS_PARTS.map((part) => (
+                  <label key={part.key} className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {part.label}
+                    <input
+                      name={`cp_${part.key}`}
+                      value={detailOf(row, part.key)}
+                      onChange={(e) =>
+                        patchRow(row.uid, {
+                          detail: { ...row.detail, [part.key]: e.target.value },
+                        })
+                      }
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                The line above is what Hearth shows and searches. These parts travel with
+                it to Google, which keeps both.
+              </p>
+            </details>
+          ) : null}
         </div>
       ))}
 

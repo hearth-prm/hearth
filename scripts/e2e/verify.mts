@@ -2178,6 +2178,100 @@ try {
   ok("17.6 the import reads every field group Hearth later overwrites",
      unread.length === 0, unread);
 
+  // Addresses keep their parts, in Hearth and on the way back to Google.
+  const withAddress = planGoogleImport(
+    [
+      {
+        resourceName: "people/c4",
+        names: [{ givenName: "Structured", familyName: "Address" }],
+        addresses: [
+          {
+            formattedValue: "1 Long Road, London, SW1 1AA, UK",
+            streetAddress: "1 Long Road",
+            city: "London",
+            postalCode: "SW1 1AA",
+            country: "UK",
+            countryCode: "GB",
+            type: "home",
+          },
+        ],
+        emailAddresses: [{ value: "sa@e2e.test", displayName: "Structured A" }],
+      },
+    ],
+    { linkedResourceNames: new Set<string>() },
+  );
+  const addr = withAddress.contacts[0]!.contactPoints.find((p) => p.kind === "ADDRESS")!;
+  ok("17.8 an address keeps its parts, not just its one line",
+     addr.streetAddress === "1 Long Road" && addr.city === "London"
+       && addr.postalCode === "SW1 1AA" && addr.countryCode === "GB",
+     addr);
+  ok("17.8b and the line as well, which is what Hearth shows",
+     addr.value === "1 Long Road, London, SW1 1AA, UK", addr.value);
+  ok("17.8c an email keeps Google's display name",
+     withAddress.contacts[0]!.contactPoints.find((p) => p.kind === "EMAIL")
+       ?.displayName === "Structured A");
+  ok("17.8d and nothing about an address needs rescuing any more",
+     withAddress.contacts[0]!.rescued.length === 0,
+     withAddress.contacts[0]!.rescued.map((r) => r.key));
+
+  const addrRound = serializePerson({
+    id: "p2", ownerId: A.id, givenName: "Structured", middleName: null,
+    familyName: "Address", honorificPrefix: null, honorificSuffix: null,
+    phoneticGivenName: null, phoneticMiddleName: null, phoneticFamilyName: null,
+    nickname: null, organization: null, jobTitle: null,
+    orgDepartment: null, orgJobDescription: null, orgSymbol: null, orgDomain: null,
+    orgLocation: null, orgPhoneticName: null, orgType: null,
+    birthday: null, notes: null, displayName: "Structured Address", custom: {},
+    addToGoogle: true, linkedUserId: null,
+    createdAt: new Date(0), updatedAt: new Date(0),
+    contactPoints: [
+      {
+        id: "cp1", personId: "p2", kind: "ADDRESS", label: "home",
+        value: "1 Long Road, London, SW1 1AA, UK", isPrimary: true, order: 0,
+        poBox: null, streetAddress: "1 Long Road", extendedAddress: null,
+        city: "London", region: null, postalCode: "SW1 1AA", country: "UK",
+        countryCode: "GB", displayName: null,
+        createdAt: new Date(0), updatedAt: new Date(0),
+      },
+    ],
+  });
+  const sentAddr = addrRound.person.addresses?.[0];
+  ok("17.9 the parts go back to Google, not just the flat line",
+     sentAddr?.streetAddress === "1 Long Road" && sentAddr?.city === "London"
+       && sentAddr?.postalCode === "SW1 1AA" && sentAddr?.countryCode === "GB",
+     sentAddr);
+  ok("17.9b with the line beside them, which Google keeps too",
+     sentAddr?.formattedValue === "1 Long Road, London, SW1 1AA, UK");
+
+  // The reason addresses waited for their own commit: the form is the whole of what a
+  // save writes, so parts it does not carry are parts an unrelated edit destroys.
+  const addrPerson = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Form Address", givenName: "Form", familyName: "Address",
+      contactPoints: {
+        create: [
+          { kind: "ADDRESS", value: "2 Short Road, Leeds", label: "home",
+            streetAddress: "2 Short Road", city: "Leeds", order: 0, isPrimary: true },
+          { kind: "EMAIL", value: "form@e2e.test", order: 0, isPrimary: true },
+        ],
+      },
+    },
+  });
+  await A.page.goto(`/people/${addrPerson.id}/edit`);
+  await A.page.fill('input[name="cp_value"] >> nth=1', "changed@e2e.test");
+  await A.page.click('button:has-text("Save")');
+  await waitForDb("the email change to be saved", async () =>
+    (await prisma.contactPoint.count({
+      where: { personId: addrPerson.id, value: "changed@e2e.test" },
+    })) === 1);
+  const keptAddress = await prisma.contactPoint.findFirst({
+    where: { personId: addrPerson.id, kind: "ADDRESS" },
+  });
+  ok("17.10 editing an unrelated email does not flatten the address",
+     keptAddress?.streetAddress === "2 Short Road" && keptAddress?.city === "Leeds",
+     { street: keptAddress?.streetAddress, city: keptAddress?.city });
+
+  await A.page.goto("/people/import/google");
   await A.page.goto("/people/import/google");
   ok("17.7 the page explains that contacts stay where they are",
      ((await A.page.textContent("body")) ?? "").includes("stay exactly where they are"));
