@@ -265,6 +265,12 @@ export async function syncContactsForUser(
     },
     include: {
       contactPoints: true,
+      // Loaded because they are SENT. events and relations are in
+      // MANAGED_PERSON_FIELDS now, so Google replaces those groups with whatever this
+      // push contains — and a push that forgot to load them would contain nothing,
+      // which is to say it would delete them.
+      googleEvents: { orderBy: { order: "asc" } },
+      googleRelations: { orderBy: { order: "asc" } },
       googleSyncs: { where: { userId } },
       labels: { select: { labelId: true } },
       // Both candidate photos: this account's own override, and the owner's default.

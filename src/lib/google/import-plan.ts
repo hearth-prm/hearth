@@ -43,6 +43,17 @@ export const GOOGLE_IMPORT_FIELDS = [
   "occupations",
   "userDefined",
   "memberships",
+  "imClients",
+  "sipAddresses",
+  "calendarUrls",
+  "externalIds",
+  "miscKeywords",
+  "interests",
+  "skills",
+  "locations",
+  "events",
+  "relations",
+  "genders",
 ] as const;
 
 export interface PlannedContactPoint {
@@ -52,6 +63,12 @@ export interface PlannedContactPoint {
   isPrimary: boolean;
   order: number;
   /** Address parts and an email display name; null where Google had none. */
+  protocol: string | null;
+  buildingId: string | null;
+  floor: string | null;
+  floorSection: string | null;
+  deskCode: string | null;
+  current: boolean | null;
   poBox: string | null;
   streetAddress: string | null;
   extendedAddress: string | null;
@@ -64,6 +81,12 @@ export interface PlannedContactPoint {
 }
 
 const NO_DETAIL = {
+  protocol: null,
+  buildingId: null,
+  floor: null,
+  floorSection: null,
+  deskCode: null,
+  current: null,
   poBox: null,
   streetAddress: null,
   extendedAddress: null,
@@ -117,9 +140,15 @@ export interface PlannedContact {
     orgPhoneticName: string | null;
     orgType: string | null;
     notes: string | null;
+    gender: string | null;
     birthday: string | null;
+    birthdayText: string | null;
   };
   contactPoints: PlannedContactPoint[];
+  /** Anniversaries and custom dates, with the year Google may not have. */
+  events: { label: string | null; year: number | null; month: number; day: number }[];
+  /** Google's free-text relations — a name, not a link to another contact. */
+  relations: { name: string; label: string | null }[];
   rescued: RescuedValue[];
   /** Google contact-group resource names, for turning memberships into labels. */
   groupIds: string[];
@@ -276,6 +305,48 @@ export function planGoogleImport(
       ...pointsOf(person.urls, "URL", 0),
     ];
 
+    // The value-and-type lists, each straight onto its ContactKind.
+    contactPoints.push(
+      ...pointsOf(person.sipAddresses, "SIP", 0),
+      ...pointsOf(person.externalIds, "EXTERNAL_ID", 0),
+      ...pointsOf(person.miscKeywords, "KEYWORD", 0),
+      ...pointsOf(person.interests, "INTEREST", 0),
+      ...pointsOf(person.skills, "SKILL", 0),
+      ...pointsOf(person.occupations, "OCCUPATION", 0),
+      // Google's first nickname is Hearth's `nickname` column; any others become rows,
+      // so a maiden name filed as a second nickname is not thrown away.
+      ...pointsOf((person.nicknames ?? []).slice(1), "NICKNAME", 0),
+    );
+    for (const [i, entry] of (person.calendarUrls ?? []).entries()) {
+      const value = clean(entry.url);
+      if (!value) continue;
+      contactPoints.push({
+        ...NO_DETAIL, kind: "CALENDAR", value, label: clean(entry.type),
+        isPrimary: i === 0, order: i,
+      });
+    }
+    for (const [i, entry] of (person.imClients ?? []).entries()) {
+      const value = clean(entry.username);
+      if (!value) continue;
+      contactPoints.push({
+        ...NO_DETAIL, kind: "IM", value, label: clean(entry.type),
+        isPrimary: i === 0, order: i, protocol: clean(entry.protocol),
+      });
+    }
+    for (const [i, entry] of (person.locations ?? []).entries()) {
+      const value = clean(entry.value);
+      if (!value) continue;
+      contactPoints.push({
+        ...NO_DETAIL, kind: "LOCATION", value, label: clean(entry.type),
+        isPrimary: i === 0, order: i,
+        buildingId: clean(entry.buildingId),
+        floor: clean(entry.floor),
+        floorSection: clean(entry.floorSection),
+        deskCode: clean(entry.deskCode),
+        current: entry.current ?? null,
+      });
+    }
+
     let addressOrder = 0;
     for (const address of person.addresses ?? []) {
       const text = addressText(address);
@@ -312,12 +383,19 @@ export function planGoogleImport(
         ? `${String(birthdayDate.year).padStart(4, "0")}-${String(birthdayDate.month).padStart(2, "0")}-${String(birthdayDate.day).padStart(2, "0")}`
         : null;
     if (birthdayDate && !birthday) {
-      reasons.push("Birthday has no year in Google, which Hearth cannot store.");
+      reasons.push("Birthday has no year, so it is kept as written rather than as a date.");
     }
 
     const occupations = (person.occupations ?? [])
       .map((o) => clean(o.value))
       .filter((v): v is string => Boolean(v));
+
+    // A birthday with no year is kept as prose rather than reported unstorable.
+    const birthdayText =
+      birthdayDate && !birthday
+        ? clean(person.birthdays?.find((b) => b.text)?.text) ??
+          [birthdayDate.month, birthdayDate.day].filter(Boolean).join("/")
+        : clean(person.birthdays?.find((b) => b.text)?.text);
 
     const action: ContactAction = options.linkedResourceNames.has(resourceName)
       ? "linked"
@@ -361,9 +439,22 @@ export function planGoogleImport(
         // occupation becomes the fallback rather than being dropped.
         jobTitle: clean(org?.title) ?? occupations[0] ?? null,
         notes: clean(person.biographies?.[0]?.value),
+        gender: clean(person.genders?.[0]?.value),
         birthday,
+        birthdayText,
       },
       contactPoints,
+      events: (person.events ?? [])
+        .filter((e) => e.date?.month && e.date?.day)
+        .map((e) => ({
+          label: clean(e.type),
+          year: e.date?.year ?? null,
+          month: e.date!.month!,
+          day: e.date!.day!,
+        })),
+      relations: (person.relations ?? [])
+        .map((r) => ({ name: clean(r.person), label: clean(r.type) }))
+        .filter((r): r is { name: string; label: string | null } => Boolean(r.name)),
       rescued,
       groupIds: (person.memberships ?? [])
         .map((m) => clean(m.contactGroupMembership?.contactGroupResourceName))

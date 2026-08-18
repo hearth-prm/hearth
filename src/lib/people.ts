@@ -15,6 +15,16 @@ export const CONTACT_KIND_LABELS: Record<ContactKind, string> = {
   URL: "Link",
   ADDRESS: "Address",
   SOCIAL: "Social",
+  IM: "Chat",
+  SIP: "SIP",
+  CALENDAR: "Calendar",
+  EXTERNAL_ID: "External id",
+  KEYWORD: "Keyword",
+  INTEREST: "Interest",
+  SKILL: "Skill",
+  OCCUPATION: "Occupation",
+  LOCATION: "Location",
+  NICKNAME: "Other nickname",
 };
 
 /** Suggested `label` values per kind, offered as datalist hints. */
@@ -24,6 +34,16 @@ export const CONTACT_LABEL_SUGGESTIONS: Record<ContactKind, string[]> = {
   URL: ["website", "blog", "linkedin"],
   ADDRESS: ["home", "work"],
   SOCIAL: ["linkedin", "instagram", "mastodon", "signal"],
+  IM: ["jabber", "skype", "google talk"],
+  SIP: ["work", "home"],
+  CALENDAR: ["work", "free-busy"],
+  EXTERNAL_ID: ["account", "customer", "network"],
+  KEYWORD: ["outlook billing information", "outlook directory server"],
+  INTEREST: [],
+  SKILL: [],
+  OCCUPATION: [],
+  LOCATION: ["desk", "office"],
+  NICKNAME: ["maiden name", "initials", "short name"],
 };
 
 export interface PersonNameParts {

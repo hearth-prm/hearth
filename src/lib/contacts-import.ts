@@ -76,10 +76,25 @@ export interface ImportPlan {
 
 const CORE_TEXT_COLUMNS = [
   ["givenName", COLUMNS.givenName],
+  ["middleName", COLUMNS.middleName],
   ["familyName", COLUMNS.familyName],
+  ["honorificPrefix", COLUMNS.honorificPrefix],
+  ["honorificSuffix", COLUMNS.honorificSuffix],
+  ["phoneticGivenName", COLUMNS.phoneticGivenName],
+  ["phoneticMiddleName", COLUMNS.phoneticMiddleName],
+  ["phoneticFamilyName", COLUMNS.phoneticFamilyName],
   ["nickname", COLUMNS.nickname],
   ["organization", COLUMNS.organization],
   ["jobTitle", COLUMNS.jobTitle],
+  ["orgDepartment", COLUMNS.orgDepartment],
+  ["orgJobDescription", COLUMNS.orgJobDescription],
+  ["orgSymbol", COLUMNS.orgSymbol],
+  ["orgDomain", COLUMNS.orgDomain],
+  ["orgLocation", COLUMNS.orgLocation],
+  ["orgPhoneticName", COLUMNS.orgPhoneticName],
+  ["orgType", COLUMNS.orgType],
+  ["gender", COLUMNS.gender],
+  ["birthdayText", COLUMNS.birthdayText],
   ["notes", COLUMNS.notes],
 ] as const;
 

@@ -346,6 +346,17 @@ model Person {
   phoneticMiddleName String?
   phoneticFamilyName String?
 
+  /// Google keeps a gender as free text, so Hearth does too rather than inventing an
+  /// enum somebody's real answer would not fit.
+  gender             String?
+
+  /// A birthday Google holds without a year, or as prose.
+  ///
+  /// `birthday` is a @db.Date and cannot express "the 3rd of April, year unknown", which
+  /// is how a great many contacts are actually recorded. The import used to report those
+  /// as unstorable and drop them.
+  birthdayText       String?
+
   /// The rest of the primary organisation, for the same reason.
   ///
   /// One organisation, not a list: Hearth has only ever sent one, so nothing regresses,
@@ -388,6 +399,8 @@ model Person {
   googleSyncs       PersonSync[]
   labels            PersonLabel[]
   photos            PersonPhoto[]
+  googleEvents      PersonGoogleEvent[]
+  googleRelations   PersonGoogleRelation[]
   giftsGiven        Gift[]          @relation("GiftGiver")
   giftsReceived     GiftRecipient[] @relation("GiftRecipient")
   giftEvents        EventGiftRecipient[]
@@ -444,6 +457,23 @@ enum ContactKind {
   URL
   ADDRESS
   SOCIAL
+
+  // --- the rest of what Google keeps as a list of value-and-type -------------
+  //
+  // Kinds rather than a table each: every one of these is a value with an optional
+  // type, which is exactly what ContactPoint already is — so they inherit its
+  // ordering, its primary flag and the editor that renders it. A table apiece would
+  // have been eight schemas, eight forms and eight sync paths for the same shape.
+  IM
+  SIP
+  CALENDAR
+  EXTERNAL_ID
+  KEYWORD
+  INTEREST
+  SKILL
+  OCCUPATION
+  LOCATION
+  NICKNAME
 }
 
 /// Repeatable contact details. Modelled as rows rather than columns because
@@ -477,6 +507,17 @@ model ContactPoint {
 
   /// Google's own display name for an email address, kept for the same reason.
   displayName     String?
+
+  /// Which chat network an IM handle belongs to.
+  protocol        String?
+
+  /// Where a LOCATION is, as Google files it: desk, floor, building.
+  buildingId      String?
+  floor           String?
+  floorSection    String?
+  deskCode        String?
+  /// Google marks one location as the current one.
+  current         Boolean?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -938,4 +979,50 @@ model GiftRecipient {
 
   @@id([giftId, personId])
   @@index([personId])
+}
+
+/// A date Google keeps on a contact that is not their birthday.
+///
+/// Anniversaries and custom dates. A table rather than a column because there can be
+/// several, and a nullable year because Google permits one — "our anniversary, the 12th
+/// of June" is a real entry with no year attached.
+model PersonGoogleEvent {
+  id       String @id @default(cuid())
+  personId String
+  /// Google's type: "anniversary", or whatever was typed.
+  label    String?
+  year     Int?
+  month    Int
+  day      Int
+  order    Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId, order])
+}
+
+/// Google's own "relations" — a person's name typed as free text, with a type.
+///
+/// Deliberately NOT Hearth's Relationship, which links two contacts that both exist and
+/// reads correctly from either end. Google's is a string: "Jane" as somebody's spouse,
+/// whether or not Jane is in the address book. Conflating them would either invent
+/// contacts for names or throw the names away.
+model PersonGoogleRelation {
+  id       String @id @default(cuid())
+  personId String
+  /// The name as Google holds it.
+  name     String
+  /// "spouse", "child", or whatever was typed.
+  label    String?
+  order    Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId, order])
 }

@@ -16,11 +16,26 @@ import { cleanCell } from "@/lib/csv";
 export const COLUMNS = {
   id: "Hearth ID",
   givenName: "Given name",
+  middleName: "Middle name",
   familyName: "Family name",
+  honorificPrefix: "Title",
+  honorificSuffix: "Suffix",
+  phoneticGivenName: "Given name (phonetic)",
+  phoneticMiddleName: "Middle name (phonetic)",
+  phoneticFamilyName: "Family name (phonetic)",
   nickname: "Nickname",
   organization: "Organisation",
   jobTitle: "Job title",
+  orgDepartment: "Department",
+  orgJobDescription: "Job description",
+  orgSymbol: "Ticker symbol",
+  orgDomain: "Organisation domain",
+  orgLocation: "Office",
+  orgPhoneticName: "Organisation (phonetic)",
+  orgType: "Organisation type",
+  gender: "Gender",
   birthday: "Birthday",
+  birthdayText: "Birthday (no year)",
   notes: "Notes",
   labels: "Labels",
   emails: "Emails",
@@ -28,6 +43,16 @@ export const COLUMNS = {
   addresses: "Addresses",
   urls: "URLs",
   social: "Social",
+  im: "Chat",
+  sip: "SIP",
+  calendar: "Calendar",
+  externalIds: "External ids",
+  keywords: "Keywords",
+  interests: "Interests",
+  skills: "Skills",
+  occupations: "Occupations",
+  locations: "Locations",
+  otherNicknames: "Other nicknames",
   addToGoogle: "Add to Google",
   owner: "Owner",
   sharedWith: "Shared with",
@@ -46,7 +71,27 @@ export const CONTACT_KIND_COLUMN: Record<ContactKind, string> = {
   ADDRESS: COLUMNS.addresses,
   URL: COLUMNS.urls,
   SOCIAL: COLUMNS.social,
+  IM: COLUMNS.im,
+  SIP: COLUMNS.sip,
+  CALENDAR: COLUMNS.calendar,
+  EXTERNAL_ID: COLUMNS.externalIds,
+  KEYWORD: COLUMNS.keywords,
+  INTEREST: COLUMNS.interests,
+  SKILL: COLUMNS.skills,
+  OCCUPATION: COLUMNS.occupations,
+  LOCATION: COLUMNS.locations,
+  NICKNAME: COLUMNS.otherNicknames,
 };
+
+/**
+ * Note on what the CSV does NOT carry: the parts of an address, and the detail on a
+ * location or chat handle.
+ *
+ * A cell holds `home|1 Long Road, London` — one line per entry — so there is nowhere to
+ * put street, city and postcode without inventing a nested format inside a CSV cell. A
+ * contact exported and re-imported keeps its address as that line and loses the parts,
+ * which is worth knowing before using CSV as a backup of imported Google contacts.
+ */
 
 /**
  * Separator between a contact point's type and its value: `home|a@b.com`.

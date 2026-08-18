@@ -9,7 +9,7 @@
  * Section numbers match the checklist so a failure here points at a specific row
  * there. Google-dependent rows are listed at the end as still-manual.
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Page } from "playwright-core";
@@ -2127,18 +2127,45 @@ try {
   // The half that matters: what Hearth sends back. A part missing here is a part the
   // next sync deletes from a contact it has just adopted.
   const { serializePerson } = await import("@/lib/google/serialize-person");
-  const round = serializePerson({
-    id: "p1", ownerId: A.id, givenName: "Ada", middleName: "Augusta",
-    familyName: "Lovelace", honorificPrefix: "Ms", honorificSuffix: null,
-    phoneticGivenName: "AY-da", phoneticMiddleName: null, phoneticFamilyName: null,
-    nickname: null, organization: "Analytical Engines", jobTitle: "Mathematician",
-    orgDepartment: "Research", orgJobDescription: null, orgSymbol: null,
-    orgDomain: null, orgLocation: "London", orgPhoneticName: null, orgType: "work",
-    birthday: null, notes: null, displayName: "Ada Lovelace", custom: {},
-    addToGoogle: true, linkedUserId: null,
+
+  /**
+   * Bare fixtures for the serializer.
+   *
+   * Built rather than written out, because every column added to Person or ContactPoint
+   * would otherwise mean editing each literal by hand — which it did, twice. A test that
+   * has to be repaired by a schema addition tells you nothing about the addition.
+   */
+  const bareContactPoint = (over: Record<string, unknown> = {}) => ({
+    id: "cp", personId: "p", kind: "EMAIL" as const, label: null, value: "x@e2e.test",
+    isPrimary: true, order: 0,
+    poBox: null, streetAddress: null, extendedAddress: null, city: null, region: null,
+    postalCode: null, country: null, countryCode: null, displayName: null,
+    protocol: null, buildingId: null, floor: null, floorSection: null, deskCode: null,
+    current: null,
     createdAt: new Date(0), updatedAt: new Date(0),
-    contactPoints: [],
+    ...over,
   });
+  const barePerson = (over: Record<string, unknown> = {}) => ({
+    id: "p", ownerId: A.id, givenName: null, middleName: null, familyName: null,
+    honorificPrefix: null, honorificSuffix: null, phoneticGivenName: null,
+    phoneticMiddleName: null, phoneticFamilyName: null, nickname: null,
+    organization: null, jobTitle: null, orgDepartment: null, orgJobDescription: null,
+    orgSymbol: null, orgDomain: null, orgLocation: null, orgPhoneticName: null,
+    orgType: null, gender: null, birthday: null, birthdayText: null, notes: null,
+    displayName: "Fixture", custom: {}, addToGoogle: true, linkedUserId: null,
+    createdAt: new Date(0), updatedAt: new Date(0),
+    contactPoints: [] as ReturnType<typeof bareContactPoint>[],
+    ...over,
+  });
+  const round = serializePerson(
+    barePerson({
+      givenName: "Ada", middleName: "Augusta", familyName: "Lovelace",
+      honorificPrefix: "Ms", phoneticGivenName: "AY-da",
+      organization: "Analytical Engines", jobTitle: "Mathematician",
+      orgDepartment: "Research", orgLocation: "London", orgType: "work",
+      displayName: "Ada Lovelace",
+    }),
+  );
   ok("17.2g the middle name and title go back to Google as part of the name",
      round.person.names?.[0]?.middleName === "Augusta"
        && round.person.names?.[0]?.honorificPrefix === "Ms"
@@ -2214,27 +2241,19 @@ try {
      withAddress.contacts[0]!.rescued.length === 0,
      withAddress.contacts[0]!.rescued.map((r) => r.key));
 
-  const addrRound = serializePerson({
-    id: "p2", ownerId: A.id, givenName: "Structured", middleName: null,
-    familyName: "Address", honorificPrefix: null, honorificSuffix: null,
-    phoneticGivenName: null, phoneticMiddleName: null, phoneticFamilyName: null,
-    nickname: null, organization: null, jobTitle: null,
-    orgDepartment: null, orgJobDescription: null, orgSymbol: null, orgDomain: null,
-    orgLocation: null, orgPhoneticName: null, orgType: null,
-    birthday: null, notes: null, displayName: "Structured Address", custom: {},
-    addToGoogle: true, linkedUserId: null,
-    createdAt: new Date(0), updatedAt: new Date(0),
-    contactPoints: [
-      {
-        id: "cp1", personId: "p2", kind: "ADDRESS", label: "home",
-        value: "1 Long Road, London, SW1 1AA, UK", isPrimary: true, order: 0,
-        poBox: null, streetAddress: "1 Long Road", extendedAddress: null,
-        city: "London", region: null, postalCode: "SW1 1AA", country: "UK",
-        countryCode: "GB", displayName: null,
-        createdAt: new Date(0), updatedAt: new Date(0),
-      },
-    ],
-  });
+  const addrRound = serializePerson(
+    barePerson({
+      givenName: "Structured", familyName: "Address", displayName: "Structured Address",
+      contactPoints: [
+        bareContactPoint({
+          kind: "ADDRESS", label: "home",
+          value: "1 Long Road, London, SW1 1AA, UK",
+          streetAddress: "1 Long Road", city: "London", postalCode: "SW1 1AA",
+          country: "UK", countryCode: "GB",
+        }),
+      ],
+    }),
+  );
   const sentAddr = addrRound.person.addresses?.[0];
   ok("17.9 the parts go back to Google, not just the flat line",
      sentAddr?.streetAddress === "1 Long Road" && sentAddr?.city === "London"
@@ -2270,6 +2289,111 @@ try {
   ok("17.10 editing an unrelated email does not flatten the address",
      keptAddress?.streetAddress === "2 Short Road" && keptAddress?.city === "Leeds",
      { street: keptAddress?.streetAddress, city: keptAddress?.city });
+
+  // The long tail: everything else Google keeps on a contact.
+  const tail = planGoogleImport(
+    [
+      {
+        resourceName: "people/c5",
+        names: [{ givenName: "Tail", familyName: "Fields" }],
+        nicknames: [{ value: "Tails" }, { value: "T" }],
+        genders: [{ value: "she/her" }],
+        birthdays: [{ date: { month: 4, day: 1 } }],
+        imClients: [{ username: "tail@chat", protocol: "jabber", type: "work" }],
+        sipAddresses: [{ value: "sip:tail@e2e.test", type: "work" }],
+        calendarUrls: [{ url: "https://cal.e2e.test/tail", type: "work" }],
+        externalIds: [{ value: "CUST-1", type: "customer" }],
+        miscKeywords: [{ value: "vip" }],
+        interests: [{ value: "birdwatching" }],
+        skills: [{ value: "welding" }],
+        occupations: [{ value: "Engineer" }],
+        locations: [{ value: "Building 3", type: "desk", floor: "2", deskCode: "2A",
+                      buildingId: "B3", current: true }],
+        events: [{ date: { month: 6, day: 12 }, type: "anniversary" }],
+        relations: [{ person: "Jane Tail", type: "spouse" }],
+      },
+    ],
+    { linkedResourceNames: new Set<string>() },
+  );
+  const t = tail.contacts[0]!;
+  const kindOf = (k: string) => t.contactPoints.filter((p) => p.kind === k);
+
+  ok("17.11 gender and a year-less birthday are stored rather than dropped",
+     t.columns.gender === "she/her" && t.columns.birthday === null
+       && t.columns.birthdayText === "4/1",
+     { gender: t.columns.gender, text: t.columns.birthdayText });
+  ok("17.11b a chat handle keeps its network",
+     kindOf("IM")[0]?.value === "tail@chat" && kindOf("IM")[0]?.protocol === "jabber",
+     kindOf("IM")[0]);
+  ok("17.11c SIP, calendar, external ids and keywords all land",
+     kindOf("SIP").length === 1 && kindOf("CALENDAR").length === 1
+       && kindOf("EXTERNAL_ID").length === 1 && kindOf("KEYWORD").length === 1);
+  ok("17.11d as do interests, skills and occupations",
+     kindOf("INTEREST")[0]?.value === "birdwatching"
+       && kindOf("SKILL")[0]?.value === "welding"
+       && kindOf("OCCUPATION")[0]?.value === "Engineer");
+  ok("17.11e a location keeps its floor and desk",
+     kindOf("LOCATION")[0]?.deskCode === "2A" && kindOf("LOCATION")[0]?.floor === "2"
+       && kindOf("LOCATION")[0]?.current === true,
+     kindOf("LOCATION")[0]);
+  ok("17.11f a second nickname becomes a row rather than being lost",
+     t.columns.nickname === "Tails" && kindOf("NICKNAME")[0]?.value === "T",
+     kindOf("NICKNAME"));
+  ok("17.11g an anniversary keeps its day and its missing year",
+     t.events[0]?.month === 6 && t.events[0]?.day === 12
+       && t.events[0]?.year === null && t.events[0]?.label === "anniversary",
+     t.events);
+  ok("17.11h a Google relation keeps the NAME, not a link to a contact",
+     t.relations[0]?.name === "Jane Tail" && t.relations[0]?.label === "spouse",
+     t.relations);
+  ok("17.11i and none of it needed rescuing into a custom field",
+     t.rescued.length === 0, t.rescued.map((r) => r.key));
+
+  // And back out again. Every one of these groups is managed now, so a group the
+  // serializer omits is a group the next push deletes.
+  const tailRound = serializePerson(
+    barePerson({
+      gender: "she/her", birthdayText: "1 April",
+      googleEvents: [{ label: "anniversary", year: null, month: 6, day: 12 }],
+      googleRelations: [{ name: "Jane Tail", label: "spouse" }],
+      contactPoints: [
+        bareContactPoint({ kind: "IM", value: "tail@chat", protocol: "jabber", label: "work" }),
+        bareContactPoint({ kind: "SIP", value: "sip:tail@e2e.test" }),
+        bareContactPoint({ kind: "CALENDAR", value: "https://cal.e2e.test/tail" }),
+        bareContactPoint({ kind: "EXTERNAL_ID", value: "CUST-1", label: "customer" }),
+        bareContactPoint({ kind: "KEYWORD", value: "vip" }),
+        bareContactPoint({ kind: "INTEREST", value: "birdwatching" }),
+        bareContactPoint({ kind: "SKILL", value: "welding" }),
+        bareContactPoint({ kind: "LOCATION", value: "Building 3", deskCode: "2A", floor: "2" }),
+        bareContactPoint({ kind: "NICKNAME", value: "T" }),
+      ],
+    }),
+  );
+  const sent = tailRound.person;
+  ok("17.12 the chat handle goes back with its network",
+     sent.imClients?.[0]?.username === "tail@chat"
+       && sent.imClients?.[0]?.protocol === "jabber",
+     sent.imClients?.[0]);
+  ok("17.12b the anniversary goes back with no year invented",
+     sent.events?.[0]?.date?.month === 6 && sent.events?.[0]?.date?.year === undefined,
+     sent.events?.[0]);
+  ok("17.12c the relation goes back as a name",
+     sent.relations?.[0]?.person === "Jane Tail", sent.relations?.[0]);
+  ok("17.12d a year-less birthday goes back as text, not a wrong date",
+     sent.birthdays?.[0]?.text === "1 April" && !sent.birthdays?.[0]?.date,
+     sent.birthdays?.[0]);
+  ok("17.12e gender, location detail and the rest all travel",
+     sent.genders?.[0]?.value === "she/her"
+       && sent.locations?.[0]?.deskCode === "2A"
+       && sent.skills?.[0]?.value === "welding"
+       && sent.interests?.[0]?.value === "birdwatching",
+     { gender: sent.genders?.[0], loc: sent.locations?.[0] });
+
+  // The sync must LOAD what it sends. events and relations are managed now, so a query
+  // that forgot them would push empty groups — deleting them from Google.
+  const syncSource = readFileSync("src/lib/sync/contacts.ts", "utf8");
+  ok("17.13 the sync loads the events and relations it is about to send",
+     syncSource.includes("googleEvents:") && syncSource.includes("googleRelations:"));
 
   await A.page.goto("/people/import/google");
   await A.page.goto("/people/import/google");

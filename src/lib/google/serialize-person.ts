@@ -38,9 +38,40 @@ export const MANAGED_PERSON_FIELDS = [
   "urls",
   "occupations",
   "userDefined",
+  // Hearth models these now, so it owns them. Until it did, they were safe from it
+  // precisely because they were absent from this list — which is the trade: preserving
+  // a structured relation or anniversary means being able to write one.
+  "imClients",
+  "sipAddresses",
+  "calendarUrls",
+  "externalIds",
+  "miscKeywords",
+  "interests",
+  "skills",
+  "locations",
+  "events",
+  "relations",
+  "genders",
 ] as const;
 
-export type PersonWithContacts = Person & { contactPoints: ContactPoint[] };
+export interface PersonGoogleEventRow {
+  label: string | null;
+  year: number | null;
+  month: number;
+  day: number;
+}
+
+export interface PersonGoogleRelationRow {
+  name: string;
+  label: string | null;
+}
+
+export type PersonWithContacts = Person & {
+  contactPoints: ContactPoint[];
+  /** Optional so existing callers need not change; absent means "send none". */
+  googleEvents?: PersonGoogleEventRow[];
+  googleRelations?: PersonGoogleRelationRow[];
+};
 
 export interface SerializeOptions {
   /** Registry entries for user-defined fields. */
@@ -187,6 +218,13 @@ export function serializePerson(
   // block, so extra array members would be written but never seen.
   const biography = [notes, ...noteLines].filter(Boolean).join("\n");
 
+  // Plain value-and-type lists. Each ContactKind maps to one Google group, and the
+  // mapping lives here rather than in a switch at every call site.
+  const valueList = (kind: ContactPoint["kind"]) =>
+    byKind(kind)
+      .map((cp) => ({ value: clean(cp.value), type: typeOf(cp) }))
+      .filter((e) => e.value !== undefined);
+
   const google: GooglePerson = {
     names,
     nicknames: [
@@ -201,6 +239,8 @@ export function serializePerson(
         : [],
     // @db.Date columns come back as an instant at UTC midnight, so the components
     // must be read in UTC or the date shifts a day west of Greenwich.
+    // A dated birthday, or the prose form for one Google holds without a year — which
+    // a @db.Date column cannot express and the import used to report as unstorable.
     birthdays: birthday
       ? [
           {
@@ -211,7 +251,9 @@ export function serializePerson(
             },
           },
         ]
-      : [],
+      : clean(person.birthdayText)
+        ? [{ text: clean(person.birthdayText) }]
+        : [],
     biographies: biography ? [{ value: biography, contentType: "TEXT_PLAIN" }] : [],
     emailAddresses: [
       ...byKind("EMAIL")
@@ -232,6 +274,47 @@ export function serializePerson(
     // Both the line and the parts. Google builds formattedValue from the parts when it
     // is absent, so sending only the line — which is what Hearth used to do — replaced a
     // structured address with a flat one on every push.
+    imClients: byKind("IM")
+      .map((cp) => ({
+        username: clean(cp.value),
+        protocol: clean(cp.protocol),
+        type: typeOf(cp),
+      }))
+      .filter((e) => e.username !== undefined),
+    sipAddresses: valueList("SIP"),
+    calendarUrls: byKind("CALENDAR")
+      .map((cp) => ({ url: clean(cp.value), type: typeOf(cp) }))
+      .filter((e) => e.url !== undefined),
+    externalIds: valueList("EXTERNAL_ID"),
+    miscKeywords: valueList("KEYWORD"),
+    interests: byKind("INTEREST")
+      .map((cp) => ({ value: clean(cp.value) }))
+      .filter((e) => e.value !== undefined),
+    skills: byKind("SKILL")
+      .map((cp) => ({ value: clean(cp.value) }))
+      .filter((e) => e.value !== undefined),
+    locations: byKind("LOCATION")
+      .map((cp) => ({
+        value: clean(cp.value),
+        type: typeOf(cp),
+        buildingId: clean(cp.buildingId),
+        floor: clean(cp.floor),
+        floorSection: clean(cp.floorSection),
+        deskCode: clean(cp.deskCode),
+        current: cp.current ?? undefined,
+      }))
+      .filter((e) => e.value !== undefined),
+    // A Google relation is a NAME as free text, not a link to another contact — see the
+    // note on PersonGoogleRelation for why Hearth's own relationships stay separate.
+    relations: (person.googleRelations ?? []).map((r) => ({
+      person: r.name,
+      type: clean(r.label),
+    })),
+    events: (person.googleEvents ?? []).map((e) => ({
+      date: { year: e.year ?? undefined, month: e.month, day: e.day },
+      type: clean(e.label),
+    })),
+    genders: clean(person.gender) ? [{ value: clean(person.gender) }] : [],
     addresses: [
       ...byKind("ADDRESS")
         .map((cp) => ({

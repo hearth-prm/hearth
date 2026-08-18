@@ -38,6 +38,45 @@ that formally marks its milestone.
     only when consent is genuinely re-prompted, and writing the absence through would
     trade a stale scope for a broken background sync.
 
+- **Hearth was deleting parts of every contact it synced.** `names` and `organizations`
+  are both groups Hearth manages, and Google replaces a managed group wholesale on each
+  push — but the serialiser only ever sent a first name, a last name, and
+  `{name, title}`. So a middle name, a title like Dr or Ms, a phonetic reading, a
+  department: present in Google, unknown to Hearth, and gone on the next sync.
+  - There are real columns for all of them now — six for the rest of a Google name,
+    seven for the rest of the organisation — and the serialiser sends them, which is the
+    half that actually stops the loss. They appear in the contact form, the list-view
+    columns and the Google field-mapping table automatically, because core fields and
+    user-defined ones are merged into one registry.
+  - The Google import stores them as themselves rather than rescuing them into custom
+    fields, so a middle name returns to Google as a middle name instead of reappearing as
+    `Middle name: Augusta` among the custom fields.
+  - **Addresses keep their parts too.** Street, extra line, city, region, postcode,
+    country, country code and PO box are stored and sent, alongside the one line Hearth
+    shows and searches — Google keeps both, and building formattedValue from the parts is
+    what it does when the line is absent. An email keeps Google's display name for the
+    same reason.
+  - The address parts are editable on the contact form, behind a disclosure on the address
+    row. They had to be: a save rewrites every contact point from the form, so parts the
+    form did not carry would have been erased by an edit to something else entirely — and
+    then flattened in Google on the next sync.
+  - **And everything else Google keeps**: gender, chat handles with their network, SIP
+    addresses, calendar URLs, external ids, keywords, interests, skills, occupations,
+    locations with their floor and desk, second and third nicknames, anniversaries, and
+    Google's own free-text relations. A birthday Google holds without a year — which a
+    date column cannot express — is kept as written instead of being reported unstorable
+    and dropped.
+  - Google's relations are **not** Hearth's relationships. Hearth's link two contacts
+    that both exist and read correctly from either end; Google's are a name typed as
+    text, whether or not that person is in the address book. They are stored separately
+    so neither has to pretend to be the other.
+  - CSV export and import carry all the new columns, so a round trip through a
+    spreadsheet no longer drops them. The parts of an address are the exception: a cell
+    holds one line per entry and there is nowhere to put street, city and postcode
+    without inventing a format inside it.
+  - One contact still keeps one organisation. Hearth has only ever sent one, so nothing
+    regresses, and the import now says so per contact when Google holds more.
+
 ### Changed
 
 - **Write the thank-you in Hearth and send it to whoever gave the gift.** Each gift a
@@ -78,33 +117,6 @@ that formally marks its milestone.
 - **The guest list has no rules between rows while reading.** A line per person on a list
   of one-line rows is more ink than the rows. They return while editing, where each row
   grows a form and needs the separation.
-
-### Fixed
-
-- **Hearth was deleting parts of every contact it synced.** `names` and `organizations`
-  are both groups Hearth manages, and Google replaces a managed group wholesale on each
-  push — but the serialiser only ever sent a first name, a last name, and
-  `{name, title}`. So a middle name, a title like Dr or Ms, a phonetic reading, a
-  department: present in Google, unknown to Hearth, and gone on the next sync.
-  - There are real columns for all of them now — six for the rest of a Google name,
-    seven for the rest of the organisation — and the serialiser sends them, which is the
-    half that actually stops the loss. They appear in the contact form, the list-view
-    columns and the Google field-mapping table automatically, because core fields and
-    user-defined ones are merged into one registry.
-  - The Google import stores them as themselves rather than rescuing them into custom
-    fields, so a middle name returns to Google as a middle name instead of reappearing as
-    `Middle name: Augusta` among the custom fields.
-  - **Addresses keep their parts too.** Street, extra line, city, region, postcode,
-    country, country code and PO box are stored and sent, alongside the one line Hearth
-    shows and searches — Google keeps both, and building formattedValue from the parts is
-    what it does when the line is absent. An email keeps Google's display name for the
-    same reason.
-  - The address parts are editable on the contact form, behind a disclosure on the address
-    row. They had to be: a save rewrites every contact point from the form, so parts the
-    form did not carry would have been erased by an edit to something else entirely — and
-    then flattened in Google on the next sync.
-  - One contact still keeps one organisation. Hearth has only ever sent one, so nothing
-    regresses, and the import now says so per contact when Google holds more.
 
 ### Added
 

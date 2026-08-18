@@ -188,9 +188,11 @@ async function importOne(
       orgPhoneticName: contact.columns.orgPhoneticName,
       orgType: contact.columns.orgType,
       notes: contact.columns.notes,
+      gender: contact.columns.gender,
       birthday: contact.columns.birthday
         ? new Date(`${contact.columns.birthday}T00:00:00.000Z`)
         : null,
+      birthdayText: contact.columns.birthdayText,
       displayName: computeDisplayName({
         givenName: contact.columns.givenName,
         familyName: contact.columns.familyName,
@@ -202,6 +204,12 @@ async function importOne(
         // Spread, so a part added to PlannedContactPoint reaches the database without
         // this list having to be remembered — the shape is checked at the write.
         create: contact.contactPoints.map((cp) => ({ ...cp })),
+      },
+      googleEvents: {
+        create: contact.events.map((e, order) => ({ ...e, order })),
+      },
+      googleRelations: {
+        create: contact.relations.map((r, order) => ({ ...r, order })),
       },
       labels: { create: labelIds.map((labelId) => ({ labelId })) },
       // The link that makes this an adoption rather than a duplicate: the next sync
