@@ -5,8 +5,9 @@ life, how they're connected, and who was where — with fields you define
 yourself, and one-way sync out to Google.
 
 Hearth is always the source of truth. It writes to Google Contacts and Google
-Calendar; it does not read your Google data back in. (The single exception, which
-you opt into, is pulling event RSVPs from calendar guests.)
+Calendar and does not read your Google data back in, with two exceptions you ask
+for by name: event RSVPs can be pulled back from calendar guests, and contacts you
+already have in Google can be imported once, in place, when you first move in.
 
 ---
 
@@ -38,9 +39,29 @@ Every original requirement is built and verified. Contacts, events, labels and p
 sync to Google; each field chooses where it lands; records can be shared with, or handed
 over to, other users on the same install.
 
+### Since v0.5.0, in `main`
+
+Written and covered by the automated suite, but not yet cut as a release — a minor
+version is only tagged once its work has been confirmed against a real Google account.
+
+| | Feature | State |
+|---|---|---|
+| ✅ | Light, dark or follow-the-system, with a separate accent colour for each | Done |
+| ✅ | Gift tracking, and thank-you notes sent as you from your own address | Done |
+| ✅ | Household cards — a contact record per user of the install | Done |
+| ✅ | Importing contacts from Google in place, by label or one at a time | Done |
+| ✅ | A real column for every Google contact field, preserving its shape | Done |
+| ✅ | Contact history — every version, who changed it, and what changed | Done |
+| ✅ | A trash can that never empties itself | Done |
+
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app, and `npm run e2e:google` runs the Google-facing half against throwaway
-accounts. See [docs/](docs/) for the checklists and what is left to do by hand.
+built app through 425 checks, and `npm run e2e:google` runs the Google-facing half
+against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
+by hand.
+
+The one gap worth naming: **no real Google address book has been through the in-place
+import or the widened field serialiser yet.** Both are exercised against throwaway
+accounts, which is not the same as your contacts.
 
 ---
 
@@ -94,16 +115,24 @@ docker compose down -v         # stop and destroy the database
      - `https://www.googleapis.com/auth/contacts`
      - `https://www.googleapis.com/auth/calendar.events`
      - `https://www.googleapis.com/auth/calendar.readonly`
+     - `https://www.googleapis.com/auth/gmail.send`
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID**
    - Application type **Web application**.
    - Authorised redirect URI: `${AUTH_URL}/api/auth/callback/google`
      — e.g. `http://localhost:3000/api/auth/callback/google`.
 5. Copy the client ID and secret into `.env`.
 
-Hearth asks for granular calendar scopes rather than the blanket
-`.../auth/calendar`, so a stolen token cannot delete your calendars — only manage
-events on them. Settings shows exactly which permissions were granted and offers
-a reconnect when a scope or offline access is missing.
+Hearth asks for granular scopes rather than blanket ones, so a stolen token can do
+less: `calendar.events` cannot delete a calendar, `calendar.readonly` only lists them,
+and `gmail.send` can send mail as you but cannot read a mailbox — the least a feature
+that only ever sends can ask for. Settings shows exactly which permissions were granted
+and offers a reconnect when a scope or offline access is missing.
+
+`gmail.send` is what thank-you notes are sent with. Leave it out and everything else
+still works: the thank-you control refuses up front, saying to reconnect Google, rather
+than failing after a note has been written. If you add the scope to an install that has
+already signed in, press **Reconnect Google** in Settings — Google widens a grant only
+when it re-prompts for consent, and the stored grant is refreshed on every sign-in.
 
 ---
 
@@ -578,6 +607,11 @@ so a narrow CSV cannot blank out fields it never mentions.
 Sharing in an import **grants only** — a recipient the file omits never loses access.
 Import never deletes a contact.
 
+The CSV has a column per field rather than a nested format, addresses included: `Address 1
+street`, `Address 1 city`, `Address 2 postcode` and so on, as many slots as the contact
+with the most addresses needs. A file that mentions only some of them leaves the rest
+alone.
+
 ## Photos
 
 Each contact can have a picture, shown on their page and beside every row in the list.
@@ -666,6 +700,92 @@ is the mechanism Google already has for it. A shared editor can still add attend
 and change the event in Hearth, and their additions are invited from the owner's copy
 — so nobody receives two invitations to the same thing.
 
+## Gifts and thank-yous
+
+Gifts are recorded on an event or on a contact's own page: what it was, who gave it, who
+it was for, and a note if you want one. A present at a gathering hangs off that
+gathering, so Christmas reads as Christmas rather than as fourteen loose rows.
+
+**One gift can have several recipients, and each of them owes their own note.** A week in
+Wales for both children is one gift and two thank-yous — the state lives on the pairing of
+gift and recipient, not on the gift.
+
+*write thank you* opens a box, and sending it mails the note **as you, from your own
+address, to whoever gave the present**. Once it has gone, a *thanked* badge takes the
+link's place. Nothing is marked thanked by a send that failed, and a refused send keeps
+what you wrote.
+
+Whose thanks you may write is a narrower question than whose record you may edit:
+
+| | |
+|---|---|
+| **Your own** | Always |
+| **Another user's** | Only if they have ticked *allow the head of household to write my thank-yous*, and only by the head |
+| **Anyone else's** | Never — a note is signed by whoever sends it |
+
+Only users of the install send thank-yous, by design. A contact who is not a user has
+nobody to write for them, and that is the answer rather than an omission.
+
+## Household cards
+
+Every user of the install gets a contact card — the record that represents *them*. The
+head of the household owns those cards and everyone can edit them, so your own details
+reach your own Google Contacts, which is what your phone's "share contact" sends.
+
+The first user to sign in becomes the head, and it can be handed over in **Settings →
+Sharing**. A card can be moved to the trash and restored like any contact, but it cannot
+be destroyed while a user is attached to it: their thank-yous and their place in the
+household hang off that row. Unlink it first.
+
+## Importing from Google Contacts
+
+**People → Import from Google**, beside *Import CSV* at the top of the contact list. Pick a Google label or tick individual
+contacts, and Hearth adopts them: the Google contact is not moved, copied or re-created.
+It stays exactly where it is, gains a `hearth_id`, and from then on the two are the same
+contact.
+
+The preview says what each row will bring with it and, when something has nowhere to go,
+what will be kept as a custom field rather than dropped. Everything Hearth models lands in
+a real column — the parts of a name, the parts of an address, organisation detail, chat
+handles, external ids, interests, skills, significant dates and Google's own relation
+labels — because the alternative is a sync that reads a field it cannot write and deletes
+it on the way back out.
+
+Known limits, stated rather than discovered: only **one organisation** per contact is
+kept, and Google's `clientData` is left untouched.
+
+## History and the trash
+
+Every change to a contact is remembered. The **History** card lists each version newest
+first, with who made it and which fields moved, and it is worked out from stored snapshots
+rather than from a changelog — so wording a change better improves every entry already
+recorded. A push to Google is not an edit and records nothing.
+
+Events keep no history, deliberately: an event happened on a date and is then over, where
+a contact is meant to persist and to change for years.
+
+**Deleting moves a record to the trash, and nothing empties the trash but you.** No
+retention window, no nightly prune, no thirty days. The **Trash** page offers *Restore* and
+*Delete permanently* per record, and *Empty trash* for the lot at once in front of a count
+of what it will destroy — thirty deleted contacts should not be thirty decisions. What
+makes the page safe is that the decision is never made *for* you.
+
+A trashed contact still leaves Google Contacts and a trashed event still leaves Google
+Calendar, because deleted has to mean deleted on your phone. Restoring cancels that removal
+if it has not gone out yet and pushes the record back if it has. Everything hanging off the
+record — gifts, guest lists, shares, history — is kept, which is what makes restoring
+honest. Somebody else's trash is not a place you can look, even for a record they had
+shared with you.
+
+## Appearance
+
+**Settings → Appearance.** Light, dark, or follow the system, with a **separate accent
+colour for each** — a scheme that reads well on white is often too pale on black. Seven
+built-in schemes, or a hue of your own on a slider.
+
+The choice is stored against your user and applied on the server, so there is no flash of
+the wrong theme on the first paint, and it follows you to another browser.
+
 ## Using it
 
 **People** — add contacts with as many emails, phones, addresses and links as you
@@ -738,6 +858,11 @@ surfacing as a runtime Prisma error.
 | Deletion bookkeeping | [src/lib/sync/tombstones.ts](src/lib/sync/tombstones.ts) | The Google resource id dies with the local row, so it's recorded *before* the delete. |
 | Timezone maths | [src/lib/time.ts](src/lib/time.ts) | Wall-clock ↔ instant conversion, DST-correct, no date library. |
 | Google scopes | [src/lib/google/scopes.ts](src/lib/google/scopes.ts) | One list, plus a `grantCovers()` check driving the reconnect prompt. |
+| What Google is told | [src/lib/google/serialize-person.ts](src/lib/google/serialize-person.ts) | Pure, and `MANAGED_PERSON_FIELDS` is the update mask. A field Hearth reads but omits here is **deleted from Google on the next push** — the reason "a column for every Google field" was a bug fix rather than a feature. |
+| Planning an import | [src/lib/google/import-plan.ts](src/lib/google/import-plan.ts) | Pure: decides what each Google contact becomes before anything is written, so the preview and the write cannot disagree. |
+| History | [src/lib/person-history.ts](src/lib/person-history.ts) · [person-versions.ts](src/lib/person-versions.ts) | Snapshot and diff are pure; the recorder reads the contact back after the write rather than trusting what the caller intended. |
+| The trash | `deletedAt` + the clauses in [src/lib/access.ts](src/lib/access.ts) | Soft delete is a read-path problem. Reaching the bin needs `trashedPeopleWhere` / `trashedEventsWhere`, which are owner-only. |
+| Theme | [src/lib/theme.ts](src/lib/theme.ts) | The oklch ramp is driven by one `--accent-hue`, and light/dark each have their own. |
 
 Scheduling fields (`startAt`/`endAt`/`allDay`/`timeZone`) are in the registry but
 flagged `generic: false`: they're validated uniformly and will be mappable to
@@ -761,18 +886,21 @@ npm run dev
 |---|---|
 | `npm run dev` | Dev server with hot reload |
 | `npm run build` | `prisma generate` + production build |
-| `npm run typecheck` | `tsc --noEmit` |
+| `npm run typecheck` | `tsc --noEmit`, over the app **and** the e2e suite |
 | `npm run db:migrate` | Create a migration from schema changes |
 | `npm run db:deploy` | Apply committed migrations |
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
+| `npm run e2e` | Build, then drive a real browser through 425 checks against an embedded Postgres |
+| `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
+| `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 
 `GET /api/health` returns `{"status":"ok"}` and is what the container healthcheck
 uses.
 
-Pinned to Next 15 rather than 16 so the toolchain runs on Node 18 as well; moving
-to 16 is a version bump plus Node 20+, with no code changes expected.
+Pinned to Next 15 rather than 16; moving up is a version bump with no code changes
+expected.
 
 ---
 
@@ -780,7 +908,7 @@ to 16 is a version bump plus Node 20+, with no code changes expected.
 
 Hearth follows [Semantic Versioning](https://semver.org). Below `1.0.0`, each
 milestone lands as a **minor** bump and may break things; patches are fixes only.
-`1.0.0` means all four milestones are shipped and stable.
+`1.0.0` means every milestone is shipped and stable.
 
 `package.json` is the single source of truth. Everything else derives from it —
 there is no second place to remember to edit.
@@ -843,17 +971,27 @@ redeploy the previous tag" quietly stops being a safe rollback.
 ## Data model
 
 ```
-User ─┬─ UserSettings          sync toggles, target calendar, default timezone
+User ─┬─ UserSettings          sync toggles, target calendar, timezone, theme + accents
       ├─ Account               Google tokens (Auth.js)
-      ├─ Person ─┬─ ContactPoint      repeatable emails/phones/addresses/links
-      │          ├─ custom JSONB      user-defined field values
-      │          ├─ PersonLabel ── Label      which labels are on this contact
+      ├─ isHeadOfHousehold     owns the household cards; exactly one, by partial index
+      ├─ contactCard ── Person the record representing this user
+      ├─ Person ─┬─ ContactPoint         repeatable emails/phones/addresses/links,
+      │          │                       with the parts of an address as columns
+      │          ├─ custom JSONB         user-defined field values
+      │          ├─ PersonLabel ── Label which labels are on this contact
       │          ├─ PersonPhoto          ONE ROW PER VIEWER — the owner's is the default
       │          ├─ PersonSync           ONE ROW PER GOOGLE ACCOUNT holding a copy
-      │          └─ addToGoogle          the owner's decision that it belongs there
-      ├─ Event ──┬─ EventAttendee     role + RSVP + per-person invite flag
+      │          ├─ PersonGoogleEvent    Google's own dated events (anniversaries)
+      │          ├─ PersonGoogleRelation Google's own relation labels, as text
+      │          ├─ PersonVersion        one snapshot per change, with who made it
+      │          ├─ addToGoogle          the owner's decision that it belongs there
+      │          └─ deletedAt            in the trash since; NOTHING prunes it
+      ├─ Event ──┬─ EventAttendee        role + RSVP + per-person invite flag
+      │          ├─ EventGiftRecipient   who the presents at this event are for
       │          ├─ custom JSONB
-      │          └─ google sync state
+      │          ├─ google sync state
+      │          └─ deletedAt            same trash, same guarantee
+      ├─ Gift ── GiftRecipient   ONE ROW PER RECIPIENT, each with its own thanks
       ├─ Relationship ── RelationshipType   directional or symmetric
       ├─ Label ── LabelGroup      ONE ROW PER GOOGLE ACCOUNT holding the group
       ├─ FieldDefinition       describes one custom field
@@ -876,6 +1014,16 @@ label is N groups.
 
 `Label` and `Person` must agree on their owner for a `PersonLabel` to be valid. That
 spans two rows, so it is enforced in the action layer rather than by a constraint.
+
+`GiftRecipient` carries the thanks rather than `Gift` doing so, because a present shared
+between two children earns two notes. `PersonVersion` stores a whole snapshot per change
+and derives the differences on reading, so there is no second representation of the truth
+to keep in step.
+
+`deletedAt` is the whole of the trash. It works as a single column only because every read
+of a contact or an event goes through a clause in `src/lib/access.ts`, so one line in each
+covers the lists, the search, the export, the pickers, the gifts and the sync push. There
+is no job anywhere that deletes by age.
 
 Deleting a user cascades to everything they own. The seeded relationship types
 (`ownerId = null`) are shared and survive.
