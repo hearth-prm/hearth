@@ -57,6 +57,60 @@ import { TransferForm } from "@/components/transfer-form";
 import { transferOwnership } from "@/lib/actions/transfer";
 import { listOtherUsers } from "@/lib/users";
 
+/**
+ * The structured detail on a contact point, as one readable line.
+ *
+ * Address parts are named rather than run together, because "Leeds · LS1 4AB" reads as a
+ * place while "Leeds LS1 4AB" reads as a typo. Anything absent is simply absent.
+ */
+function contactDetail(cp: {
+  kind: string;
+  poBox: string | null;
+  streetAddress: string | null;
+  extendedAddress: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
+  countryCode: string | null;
+  protocol: string | null;
+  buildingId: string | null;
+  floor: string | null;
+  floorSection: string | null;
+  deskCode: string | null;
+  current: boolean | null;
+  displayName: string | null;
+}): string[] {
+  if (cp.kind === "ADDRESS") {
+    // The one-line value is already shown above, so this is only what it does not say.
+    return [
+      cp.streetAddress,
+      cp.extendedAddress,
+      cp.city,
+      cp.region,
+      cp.postalCode,
+      cp.country ?? cp.countryCode,
+      cp.poBox ? `PO box ${cp.poBox}` : null,
+    ].filter((v): v is string => Boolean(v));
+  }
+  if (cp.kind === "IM") {
+    return [cp.protocol].filter((v): v is string => Boolean(v));
+  }
+  if (cp.kind === "LOCATION") {
+    return [
+      cp.buildingId,
+      cp.floor ? `floor ${cp.floor}` : null,
+      cp.floorSection,
+      cp.deskCode ? `desk ${cp.deskCode}` : null,
+      cp.current ? "current" : null,
+    ].filter((v): v is string => Boolean(v));
+  }
+  if (cp.kind === "EMAIL") {
+    return [cp.displayName].filter((v): v is string => Boolean(v));
+  }
+  return [];
+}
+
 export default async function PersonPage({
   params,
 }: {
@@ -71,6 +125,8 @@ export default async function PersonPage({
       owner: { select: { id: true, email: true, name: true } },
       googleSyncs: { include: { user: { select: { email: true } } } },
       contactPoints: { orderBy: [{ kind: "asc" }, { order: "asc" }] },
+      googleEvents: { orderBy: { order: "asc" } },
+      googleRelations: { orderBy: { order: "asc" } },
       labels: { include: { label: true }, orderBy: { label: { name: "asc" } } },
       eventAttendances: {
         include: { event: true },
@@ -260,6 +316,14 @@ export default async function PersonPage({
                     {cp.isPrimary && (cp.kind === "EMAIL" || cp.kind === "PHONE") ? (
                       <span className="ml-2 text-xs text-neutral-400">primary</span>
                     ) : null}
+                    {/* The detail beside a value: the parts of an address, the network a
+                        chat handle is on, where a location is. Shown only when there is
+                        something to show, so an ordinary email gains no clutter. */}
+                    {contactDetail(cp).length > 0 ? (
+                      <span className="mt-0.5 block text-xs text-neutral-500 dark:text-neutral-400">
+                        {contactDetail(cp).join(" · ")}
+                      </span>
+                    ) : null}
                   </DetailRow>
                 ))}
               </dl>
@@ -407,6 +471,47 @@ export default async function PersonPage({
             sendAction={sendThankYouNote}
             canSend={mailAllowed}
           />
+
+          {person.googleEvents.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Dates"
+                description="Anniversaries and other dates Google keeps."
+              />
+              <dl className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                {person.googleEvents.map((e) => (
+                  <DetailRow key={e.id} label={e.label ?? "Date"}>
+                    {/* A missing year is shown as missing rather than filled in with
+                        this one, which would invent a fact. */}
+                    {e.year
+                      ? formatDateOnly(new Date(Date.UTC(e.year, e.month - 1, e.day)))
+                      : `${e.day}/${e.month}`}
+                  </DetailRow>
+                ))}
+              </dl>
+            </Card>
+          ) : null}
+
+          {person.googleRelations.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Named in Google"
+                description="People named on this contact in Google, as text rather than as links."
+              />
+              <dl className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
+                {person.googleRelations.map((r) => (
+                  <DetailRow key={r.id} label={r.label ?? "Relation"}>
+                    {r.name}
+                  </DetailRow>
+                ))}
+              </dl>
+              <p className="border-t border-neutral-100 px-5 py-3 text-xs text-neutral-500 dark:border-neutral-800/60 dark:text-neutral-400">
+                Separate from the relationships above, which link two contacts that both
+                exist here. These are names Google holds as text — the person may not be
+                in your address book at all.
+              </p>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader title="Events" description="Where they showed up." />

@@ -213,6 +213,16 @@ async function applyRow(
             label: c.label,
             value: c.value,
             order,
+            // Present only when the file had address blocks; undefined leaves the
+            // column null rather than writing an empty string.
+            streetAddress: c.streetAddress ?? null,
+            extendedAddress: c.extendedAddress ?? null,
+            city: c.city ?? null,
+            region: c.region ?? null,
+            postalCode: c.postalCode ?? null,
+            country: c.country ?? null,
+            countryCode: c.countryCode ?? null,
+            poBox: c.poBox ?? null,
           })),
         });
       }

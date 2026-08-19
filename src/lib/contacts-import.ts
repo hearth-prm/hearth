@@ -13,6 +13,8 @@ import {
   COLUMNS,
   CONTACT_KIND_COLUMN,
   csvRawValue,
+  addressSlotsIn,
+  parseAddressBlocks,
   parseContactPoints,
   parseLabelList,
   parseShares,
@@ -127,6 +129,9 @@ export async function planImport(
   }
 
   const read = rowReader(headers);
+  // Decided by the file rather than by a constant: an export is as wide as its widest
+  // contact needed, so the reader has to look.
+  const addressSlots = addressSlotsIn(headers);
   const [defs, settings] = await Promise.all([
     loadRegistry(userId, "PERSON"),
     getUserSettings(userId),
@@ -376,6 +381,19 @@ export async function planImport(
           ? parseContactPoints(read.get(row, CONTACT_KIND_COLUMN[kind]), kind)
           : [],
       );
+
+      // Address blocks win over the summary column when the file has them, because they
+      // say strictly more: the same addresses, with their parts. Read from the same file
+      // both ways they would otherwise be duplicated.
+      if (addressSlots > 0) {
+        const blocks = parseAddressBlocks((column) => read.get(row, column), addressSlots);
+        if (blocks.length > 0) {
+          contactPoints = [
+            ...contactPoints.filter((c) => c.kind !== "ADDRESS"),
+            ...blocks.map((b) => ({ kind: "ADDRESS" as const, ...b })),
+          ];
+        }
+      }
       // Replacing wholesale would delete kinds the file omits, so a file with only
       // an Emails column must not wipe everyone's phone numbers.
       if (!KINDS.every((k) => read.has(CONTACT_KIND_COLUMN[k]))) {

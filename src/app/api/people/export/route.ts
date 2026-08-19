@@ -12,6 +12,7 @@ import {
   formatCustomValue,
   formatLabelList,
   formatShares,
+  ADDRESS_PART_COLUMNS,
   headersFor,
   isoDay,
 } from "@/lib/contacts-csv";
@@ -60,6 +61,13 @@ export async function GET(request: NextRequest) {
       },
     },
   });
+
+  // As many address blocks as the widest contact needs, and none when nobody has one.
+  const addressSlots = people.reduce(
+    (most, person) =>
+      Math.max(most, person.contactPoints.filter((c) => c.kind === "ADDRESS").length),
+    0,
+  );
 
   const rows = people.map((person) => {
     const bag = readCustomBag(person);
@@ -122,13 +130,25 @@ export async function GET(request: NextRequest) {
         .join("; "),
     };
 
+    // One block per address, in the order the contact points came back, so the summary
+    // column and the blocks describe the same addresses in the same order.
+    const addresses = person.contactPoints.filter((c) => c.kind === "ADDRESS");
+    const addressCells: string[] = [];
+    for (let slot = 0; slot < addressSlots; slot++) {
+      const a = addresses[slot];
+      for (const [key] of ADDRESS_PART_COLUMNS) {
+        addressCells.push(a ? ((a[key] as string | null) ?? "") : "");
+      }
+    }
+
     return [
       ...Object.values(COLUMNS).map((c) => fixed[c] ?? ""),
+      ...addressCells,
       ...customFields.map((def) => formatCustomValue(def.type, bag[def.key])),
     ];
   });
 
-  const csv = UTF8_BOM + toCsv(headersFor(customFields), rows);
+  const csv = UTF8_BOM + toCsv(headersFor(customFields, addressSlots), rows);
   const stamp = new Date().toISOString().slice(0, 10);
 
   return new Response(csv, {

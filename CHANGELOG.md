@@ -70,10 +70,17 @@ that formally marks its milestone.
     that both exist and read correctly from either end; Google's are a name typed as
     text, whether or not that person is in the address book. They are stored separately
     so neither has to pretend to be the other.
-  - CSV export and import carry all the new columns, so a round trip through a
-    spreadsheet no longer drops them. The parts of an address are the exception: a cell
-    holds one line per entry and there is nowhere to put street, city and postcode
-    without inventing a format inside it.
+  - CSV export and import carry all the new columns, **including a column per address
+    part**: `Address 1 street`, `Address 2 postcode` and so on, in numbered blocks. Plain
+    columns a spreadsheet can edit, rather than a format nested inside one cell — and an
+    export is as wide as its widest contact needs, so a file for people with no addresses
+    carries no address columns at all. The readable `Addresses` column stays, and is still
+    read, for older files and hand-written ones.
+  - Everything new shows on the contact page: the name and organisation detail, gender,
+    the parts of an address beneath the address, which network a chat handle is on, and
+    where a location is. Anniversaries get a **Dates** card — a missing year is shown as
+    missing rather than filled in with this one — and Google's relations get their own,
+    captioned to say they are names rather than links to contacts.
   - One contact still keeps one organisation. Hearth has only ever sent one, so nothing
     regresses, and the import now says so per contact when Google holds more.
 

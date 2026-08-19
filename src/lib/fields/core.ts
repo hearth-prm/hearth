@@ -31,7 +31,9 @@ const PERSON_CORE_KEYS = [
   "orgLocation",
   "orgPhoneticName",
   "orgType",
+  "gender",
   "birthday",
+  "birthdayText",
   "notes",
 ] as const satisfies readonly (keyof Person)[];
 
@@ -265,6 +267,16 @@ export const CORE_PERSON_FIELDS: readonly FieldDef[] = [
     order: 60,
   }),
   personField({
+    key: "gender",
+    label: "Gender",
+    type: "TEXT",
+    options: [],
+    required: false,
+    helpText: "Free text, as Google keeps it — whatever they actually answer.",
+    showInList: false,
+    order: 62,
+  }),
+  personField({
     key: "birthday",
     label: "Birthday",
     type: "DATE",
@@ -273,6 +285,17 @@ export const CORE_PERSON_FIELDS: readonly FieldDef[] = [
     helpText: null,
     showInList: false,
     order: 60,
+  }),
+  personField({
+    key: "birthdayText",
+    label: "Birthday (no year)",
+    type: "TEXT",
+    options: [],
+    required: false,
+    helpText:
+      "For a birthday recorded without a year. A date needs one; a great many contacts are not recorded with one.",
+    showInList: false,
+    order: 72,
   }),
   personField({
     key: "notes",

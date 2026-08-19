@@ -2395,6 +2395,109 @@ try {
   ok("17.13 the sync loads the events and relations it is about to send",
      syncSource.includes("googleEvents:") && syncSource.includes("googleRelations:"));
 
+  // A column per address part, in numbered blocks — not a nested format in one cell,
+  // and not a flattened line.
+  const {
+    addressColumnsFor, addressSlotsIn, parseAddressBlocks, headersFor, addressColumn,
+  } = await import("@/lib/contacts-csv");
+
+  ok("17.14 no addresses means no address columns at all",
+     addressColumnsFor(0).length === 0 && headersFor([], 0).every((h) => !h.startsWith("Address ")));
+  ok("17.14b two addresses means two blocks",
+     addressColumnsFor(2).includes("Address 1 city")
+       && addressColumnsFor(2).includes("Address 2 postcode")
+       && !addressColumnsFor(2).includes("Address 3 city"));
+  ok("17.14c and a file's width is read from its headers, not assumed",
+     addressSlotsIn(["Given name", "Address 1 city", "Address 2 street"]) === 2
+       && addressSlotsIn(["Given name"]) === 0);
+
+  const blockRow: Record<string, string> = {
+    [addressColumn(0, "type")]: "home",
+    [addressColumn(0, "line")]: "1 Long Road, Leeds",
+    [addressColumn(0, "street")]: "1 Long Road",
+    [addressColumn(0, "city")]: "Leeds",
+    [addressColumn(0, "postcode")]: "LS1 4AB",
+    // Second block: parts only, no summary line.
+    [addressColumn(1, "street")]: "2 Short Road",
+    [addressColumn(1, "city")]: "York",
+  };
+  const blocks = parseAddressBlocks((c) => blockRow[c] ?? "", 3);
+  ok("17.15 a block round-trips its parts",
+     blocks[0]?.streetAddress === "1 Long Road" && blocks[0]?.city === "Leeds"
+       && blocks[0]?.postalCode === "LS1 4AB" && blocks[0]?.label === "home",
+     blocks[0]);
+  ok("17.15b a block with parts but no line gets one built from them",
+     blocks[1]?.value === "2 Short Road, York", blocks[1]?.value);
+  ok("17.15c and an empty block is not an address",
+     blocks.length === 2, blocks.length);
+
+  // Through the real export and back, which is the claim that matters.
+  const csvPerson = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Csv Address", givenName: "Csv", familyName: "Address",
+      middleName: "Quentin", gender: "they/them", birthdayText: "1 April",
+      orgDepartment: "Research",
+      contactPoints: {
+        create: [
+          { kind: "ADDRESS", value: "9 Export Way, Hull", label: "home", order: 0,
+            isPrimary: true, streetAddress: "9 Export Way", city: "Hull",
+            postalCode: "HU1 1AA", countryCode: "GB" },
+        ],
+      },
+    },
+  });
+  const csvText = await (await A.page.request.get("/api/people/export")).text();
+  ok("17.16 the export carries a column per address part",
+     csvText.includes("Address 1 street") && csvText.includes("Address 1 postcode"),
+     csvText.split("\n")[0]?.slice(0, 120));
+  ok("17.16b with the parts in it",
+     csvText.includes("9 Export Way") && csvText.includes("HU1 1AA"));
+  ok("17.16c and the new person columns too",
+     csvText.includes("Middle name") && csvText.includes("Quentin")
+       && csvText.includes("they/them") && csvText.includes("Department"));
+
+  const { planImport } = await import("@/lib/contacts-import");
+  const reimport = await planImport(A.id, csvText);
+  const reAddress = reimport.rows
+    .find((r) => r.displayName === "Csv Address")
+    ?.write?.contactPoints?.find((c) => c.kind === "ADDRESS");
+  ok("17.17 and re-importing that file keeps the parts, not just the line",
+     reAddress?.streetAddress === "9 Export Way" && reAddress?.city === "Hull"
+       && reAddress?.postalCode === "HU1 1AA",
+     reAddress);
+
+  // The contact page shows what it stores.
+  await A.page.goto(`/people/${csvPerson.id}`);
+  const pageText = (await A.page.textContent("body")) ?? "";
+  // One claim per line. The combined version failed without saying which of the three
+  // was missing, and it was gender — declared in the schema but never as a core field,
+  // so it existed everywhere except the registry that puts it on a page.
+  ok("17.18 the contact page shows the new name fields", pageText.includes("Quentin"));
+  ok("17.18b and the organisation detail", pageText.includes("Research"));
+  ok("17.18c and gender", pageText.includes("they/them"));
+  ok("17.18d and the parts of an address beside it",
+     pageText.includes("9 Export Way") && pageText.includes("HU1 1AA"));
+
+  const datedPerson = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Dated Person", givenName: "Dated", familyName: "Person",
+      googleEvents: { create: [{ label: "anniversary", year: null, month: 6, day: 12 }] },
+      googleRelations: { create: [{ name: "Jane Somebody", label: "spouse" }] },
+      contactPoints: {
+        create: [{ kind: "IM", value: "dated@chat", protocol: "jabber", order: 0 }],
+      },
+    },
+  });
+  await A.page.goto(`/people/${datedPerson.id}`);
+  const datedText = (await A.page.textContent("body")) ?? "";
+  ok("17.19 an anniversary with no year is shown without one being invented",
+     datedText.includes("12/6") && !datedText.includes("1970"), true);
+  ok("17.19b a Google relation is shown, and marked as a name rather than a link",
+     datedText.includes("Jane Somebody") && datedText.includes("as text rather than"),
+     true);
+  ok("17.19c and a chat handle shows which network it is on",
+     datedText.includes("jabber"));
+
   await A.page.goto("/people/import/google");
   await A.page.goto("/people/import/google");
   ok("17.7 the page explains that contacts stay where they are",

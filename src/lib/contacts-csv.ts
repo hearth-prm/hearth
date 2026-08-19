@@ -84,14 +84,115 @@ export const CONTACT_KIND_COLUMN: Record<ContactKind, string> = {
 };
 
 /**
- * Note on what the CSV does NOT carry: the parts of an address, and the detail on a
- * location or chat handle.
+ * Addresses get a column per part, in numbered blocks.
  *
- * A cell holds `home|1 Long Road, London` — one line per entry — so there is nowhere to
- * put street, city and postcode without inventing a nested format inside a CSV cell. A
- * contact exported and re-imported keeps its address as that line and loses the parts,
- * which is worth knowing before using CSV as a backup of imported Google contacts.
+ * The `Addresses` column above holds one line per address and cannot carry street, city
+ * and postcode without a nested format inside the cell — which is unreadable in a
+ * spreadsheet and unparseable without guessing. So each address also gets its own block
+ * of plain columns: `Address 1 city`, `Address 2 postcode`, and so on.
+ *
+ * How many blocks is decided by the data. An export emits as many as its widest contact
+ * needs and none at all when nobody has an address, rather than padding every file with
+ * empty columns for the three-address case. The import reads however many it finds, which
+ * is why it scans headers for the pattern instead of a fixed list.
+ *
+ * `Addresses` stays, and is still read: it is the human-readable form, it is what older
+ * exports and hand-written files contain, and the blocks are what preserve the shape.
  */
+export const ADDRESS_PART_COLUMNS = [
+  ["label", "type"],
+  ["value", "line"],
+  ["streetAddress", "street"],
+  ["extendedAddress", "extra"],
+  ["city", "city"],
+  ["region", "region"],
+  ["postalCode", "postcode"],
+  ["country", "country"],
+  ["countryCode", "country code"],
+  ["poBox", "PO box"],
+] as const;
+
+export type AddressPartKey = (typeof ADDRESS_PART_COLUMNS)[number][0];
+
+/** `Address 2 city`. One-based, because a spreadsheet reader counts from one. */
+export function addressColumn(slot: number, suffix: string): string {
+  return `Address ${slot + 1} ${suffix}`;
+}
+
+export function addressColumnsFor(slots: number): string[] {
+  const out: string[] = [];
+  for (let slot = 0; slot < slots; slot++) {
+    for (const [, suffix] of ADDRESS_PART_COLUMNS) out.push(addressColumn(slot, suffix));
+  }
+  return out;
+}
+
+/** How many address blocks a file has, found by looking for the last one present. */
+export function addressSlotsIn(headers: readonly string[]): number {
+  const present = new Set(headers);
+  let slots = 0;
+  // Any part counts: a file with only `Address 1 city` still describes one address.
+  while (ADDRESS_PART_COLUMNS.some(([, suffix]) => present.has(addressColumn(slots, suffix)))) {
+    slots += 1;
+  }
+  return slots;
+}
+
+export interface CsvAddress {
+  label: string | null;
+  value: string;
+  streetAddress: string | null;
+  extendedAddress: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string | null;
+  countryCode: string | null;
+  poBox: string | null;
+}
+
+/**
+ * Read the address blocks out of one row.
+ *
+ * A block with no line and no street is an empty slot rather than an address; a block
+ * with parts but no line gets one built from them, so a spreadsheet user can fill in the
+ * pieces and leave the summary alone.
+ */
+export function parseAddressBlocks(
+  read: (column: string) => string,
+  slots: number,
+): CsvAddress[] {
+  const out: CsvAddress[] = [];
+
+  for (let slot = 0; slot < slots; slot++) {
+    const at = (key: AddressPartKey) => {
+      const suffix = ADDRESS_PART_COLUMNS.find(([k]) => k === key)?.[1] ?? key;
+      return cleanCell(read(addressColumn(slot, suffix))) || null;
+    };
+
+    const parts = {
+      streetAddress: at("streetAddress"),
+      extendedAddress: at("extendedAddress"),
+      city: at("city"),
+      region: at("region"),
+      postalCode: at("postalCode"),
+      country: at("country"),
+      countryCode: at("countryCode"),
+      poBox: at("poBox"),
+    };
+
+    const line =
+      at("value") ??
+      [parts.streetAddress, parts.city, parts.region, parts.postalCode, parts.country]
+        .filter(Boolean)
+        .join(", ");
+    if (!line) continue;
+
+    out.push({ label: at("label"), value: line, ...parts });
+  }
+
+  return out;
+}
 
 /**
  * Separator between a contact point's type and its value: `home|a@b.com`.
@@ -109,6 +210,21 @@ export interface CsvContactPoint {
   kind: ContactKind;
   label: string | null;
   value: string;
+  /**
+   * Address parts, when the file carried the blocks.
+   *
+   * Declared here rather than left as excess properties on a spread: TypeScript does not
+   * check those, so parts read from a file would have been carried this far and then
+   * dropped at the write without a word — parsed, believed, and lost.
+   */
+  streetAddress?: string | null;
+  extendedAddress?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
+  poBox?: string | null;
 }
 
 export function formatContactPoints(points: readonly CsvContactPoint[]): string {
@@ -278,6 +394,21 @@ export function customHeader(def: FieldDef): string {
  * Custom fields come last so the fixed columns stay at stable positions — a user
  * who adds a field should not find every earlier column shifted in their template.
  */
-export function headersFor(customFields: readonly FieldDef[]): string[] {
-  return [...Object.values(COLUMNS), ...customFields.map(customHeader)];
+/**
+ * `addressSlots` is decided by the rows being written, not by a constant.
+ *
+ * Which means the header row depends on the data — unusual, and the reason it is a
+ * parameter rather than something this function works out: the export knows how wide its
+ * widest contact is, and a file for people with no addresses should not carry ten empty
+ * address columns to prove it.
+ */
+export function headersFor(
+  customFields: readonly FieldDef[],
+  addressSlots = 0,
+): string[] {
+  return [
+    ...Object.values(COLUMNS),
+    ...addressColumnsFor(addressSlots),
+    ...customFields.map(customHeader),
+  ];
 }
