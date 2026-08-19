@@ -2874,6 +2874,72 @@ try {
      ((await A.page.textContent("body")) ?? "").includes("Old Trash"),
      trashedStill.id);
 
+  // --- emptying it, in one decision ----------------------------------------
+  //
+  // The reason this exists: thirty deleted contacts should not be thirty confirmations.
+  // What keeps the page safe is that the decision is never made for you, not that it is
+  // made slowly.
+  const bulk = [];
+  for (const n of ["Bulk One", "Bulk Two", "Bulk Three"]) {
+    bulk.push(await prisma.person.create({
+      data: {
+        ownerId: A.id, displayName: n, deletedAt: new Date(),
+        googleSyncs: { create: [{ userId: A.id, googleResourceName: `people/${n.replace(" ", "")}`, googleSyncStatus: "SYNCED" }] },
+      },
+    }));
+  }
+  const bulkEvent = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Bulk Gathering", startAt: new Date("2026-05-01T18:00:00Z"),
+      timeZone: "UTC", addToGoogle: true, googleEventId: "gcal-bulk", deletedAt: new Date(),
+    },
+  });
+  // A user's own card, trashed, to prove emptying leaves it behind rather than taking the
+  // household down with the bin.
+  await prisma.person.update({ where: { id: kid.id }, data: { deletedAt: new Date() } });
+
+  await A.page.goto("/trash");
+  const beforeEmpty = (await A.page.textContent("body")) ?? "";
+  ok("19.21 the trash offers to empty itself in one go",
+     (await A.page.$$('button:has-text("Empty trash")')).length === 1);
+  // Read from the tooltip itself, not from the page: the button's own label contains the
+  // words "Empty trash", so asking the whole body would pass whatever the note said.
+  const trashNote = (await A.page.textContent('[role="tooltip"]')) ?? "";
+  ok("19.21b and the note says so, rather than only that nothing prunes it",
+     trashNote.includes("Empty trash") && trashNote.includes("never empties itself"),
+     trashNote.slice(0, 160) || beforeEmpty.length);
+  await A.page.click('button:has-text("Empty trash")');
+  await waitForDb("the trash to empty", async () =>
+    (await prisma.person.count({ where: { id: { in: bulk.map((b) => b.id) } } })) === 0);
+  ok("19.22 emptying destroys every trashed contact",
+     (await prisma.person.count({ where: { id: { in: bulk.map((b) => b.id) } } })) === 0);
+  ok("19.22b and every trashed event",
+     (await prisma.event.count({ where: { id: bulkEvent.id } })) === 0);
+  ok("19.22c including one trashed years ago, since it was asked for explicitly",
+     (await prisma.person.count({ where: { id: trashedStill.id } })) === 0);
+  ok("19.22d with the Google copies queued to follow them",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_CONTACT", resourceId: { startsWith: "people/Bulk" }, processedAt: null },
+     })) === 3
+       && (await prisma.syncTombstone.count({
+         where: { target: "GOOGLE_EVENT", resourceId: "gcal-bulk", processedAt: null },
+       })) === 1);
+  ok("19.23 a Hearth user's own card survives the emptying",
+     (await prisma.person.count({ where: { id: kid.id } })) === 1);
+  await A.page.goto("/trash");
+  const afterEmpty = (await A.page.textContent("body")) ?? "";
+  ok("19.23b and is all that is left in the bin",
+     !afterEmpty.includes("Bulk One") && !afterEmpty.includes("Bulk Gathering")
+       && afterEmpty.includes("Alice"), afterEmpty.slice(0, 200));
+  ok("19.23c with nothing left to empty, the button is gone",
+     (await A.page.$$('button:has-text("Empty trash")')).length === 0);
+
+  // Live records are untouched by emptying — the obvious catastrophe, worth stating.
+  await prisma.person.update({ where: { id: kid.id }, data: { deletedAt: null } });
+  await A.page.goto("/people");
+  ok("19.24 emptying the trash left the live contacts alone",
+     ((await A.page.textContent("body")) ?? "").includes("Gift Auntie"));
+
 } finally {
   await h.stop();
 }

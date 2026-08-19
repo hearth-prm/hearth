@@ -3,10 +3,12 @@ import { prisma } from "@/lib/db";
 import { requireUser, trashedEventsWhere, trashedPeopleWhere } from "@/lib/access";
 import { purgeEvent, restoreEvent } from "@/lib/actions/events";
 import { purgePerson, restorePerson } from "@/lib/actions/people";
+import { emptyTrash } from "@/lib/actions/trash";
 import { getUserSettings } from "@/lib/settings";
 import { formatInstant } from "@/lib/time";
 import { Card, CardHeader, EmptyState, Hint, PageHeader } from "@/components/ui";
 import { DeleteForm } from "@/components/delete-form";
+import { EmptyTrashForm } from "@/components/empty-trash-form";
 import { RestoreForm } from "@/components/restore-form";
 
 /**
@@ -17,6 +19,10 @@ import { RestoreForm } from "@/components/restore-form";
  * only because somebody standing on this page said so, which is the whole point — the
  * cost of keeping a deleted contact is a row, and the cost of losing one is a row you
  * cannot get back.
+ *
+ * Said once, in bulk, or one at a time. Emptying the trash is a single decision in front of
+ * a count, because thirty deleted contacts should not be thirty confirmations — what makes
+ * this page safe is that the decision is never made FOR you, not that it is made slowly.
  *
  * Owner-only, through trashedPeopleWhere / trashedEventsWhere. Somebody else's bin is not
  * a place you can look, even for a record they had shared with you.
@@ -55,17 +61,35 @@ export default async function TrashPage() {
 
   const empty = people.length === 0 && events.length === 0;
 
+  // Counted here rather than in the action module: every export from a "use server" file is
+  // a callable endpoint, and one that counts a bin by user id would answer for anybody's.
+  // A user's own card is excluded because emptying leaves it behind — see purgePerson.
+  const purgeablePeople = people.filter((p) => p.linkedUserId === null).length;
+  const keptCards = people.length - purgeablePeople;
+
   return (
     <div>
       <PageHeader
         title="Trash"
         description="Deleted contacts and events, kept until you say otherwise."
         action={
-          <Hint label="How long is this kept?">
-            For as long as you leave it here. The trash never empties itself — there is no
-            retention period and nothing prunes it in the background. A record is destroyed
-            only when you choose <em>Delete permanently</em> on this page.
-          </Hint>
+          <div className="flex items-center gap-3">
+            <Hint label="How long is this kept?">
+              For as long as you leave it here. The trash never empties itself — there is no
+              retention period and nothing prunes it in the background. Records are destroyed
+              only when you say so, either one at a time with <em>Delete permanently</em> or
+              all at once with <em>Empty trash</em>. Both are immediate and neither can be
+              undone.
+            </Hint>
+            {purgeablePeople + events.length > 0 ? (
+              <EmptyTrashForm
+                action={emptyTrash}
+                people={purgeablePeople}
+                events={events.length}
+                keptCards={keptCards}
+              />
+            ) : null}
+          </div>
         }
       />
 

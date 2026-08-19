@@ -151,8 +151,13 @@ that formally marks its milestone.
   - The contact card of a Hearth user can be trashed and restored, but not destroyed while
     they are attached to it: their thank-yous and their place in the household hang off that
     row, and none of it comes back. Unlink it in Settings → Household first.
-  - Events have no history yet, so a trashed event records no version — the trash itself is
-    the record until they do.
+  - **Emptying the trash is one button and one confirmation**, naming what it will destroy —
+    thirty deleted contacts should not be thirty decisions. What keeps the page safe is that
+    the decision is never made *for* you, not that it is made slowly. Hearth users' own
+    cards are left behind, for the same reason they cannot be deleted individually.
+  - Events keep no history, by design: an event is a thing that happened on a date and is
+    then over, where a contact is meant to persist and to change for years. So a trashed
+    event has the trash itself as its record.
 
 - **Contact history.** Every change to a contact is remembered, with who made it and what
   it was: a **History** card on the contact page lists each version newest first, with the
