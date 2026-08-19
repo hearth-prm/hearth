@@ -127,6 +127,25 @@ that formally marks its milestone.
 
 ### Added
 
+- **Contact history.** Every change to a contact is remembered, with who made it and what
+  it was: a **History** card on the contact page lists each version newest first, with the
+  fields that changed and their old and new values side by side.
+  - **Snapshots are stored; the differences are worked out on reading.** A contact spans
+    five tables and a JSON bag, so diffing all of it on every write would be fragile
+    machinery — and two snapshots are enough to say what changed. That also means
+    improving how a change is described improves every entry already recorded, not just
+    new ones.
+  - **A version is recorded only when something actually changed.** Sync touches a
+    contact's timestamp on every push; without that check, a contact synced nightly would
+    accumulate hundreds of entries saying nothing happened and bury the few that matter.
+  - Recorded after the write rather than from what the caller intended, and outside its
+    transaction — a history entry that fails must not undo the edit it was describing.
+  - Deleting a contact deletes its history, which is the honest reading of delete for
+    personal data. Removing a *user*, though, only removes the attribution: the changes
+    they made to other people's contacts stay.
+  - Read-only for now. Reverting to an earlier version would have to write back through
+    the same validation and sync path as an edit, which is more than a button.
+
 - **Import contacts straight from Google, in place.** Pick a Google label or individual
   contacts and Hearth adopts them: the Google contact is not moved, copied or re-created,
   and everything already on it stays on it. A contact does **not** have to have been made

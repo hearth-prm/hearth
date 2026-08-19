@@ -13,6 +13,7 @@ import { loadRegistry } from "@/lib/fields/registry";
 import { parseFields } from "@/lib/fields/validation";
 import { partitionFieldValues, readCustomBag } from "@/lib/fields/values";
 import { computeDisplayName, parseContactPoints, type PersonNameParts } from "@/lib/people";
+import { recordPersonVersionAfter } from "@/lib/person-versions";
 import { getUserSettings } from "@/lib/settings";
 import { actionError, type ActionState } from "@/lib/actions/types";
 import { asColumnData, isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
@@ -61,6 +62,10 @@ export async function createPerson(
       select: { id: true },
     });
     newId = created.id;
+    // After the write, so the snapshot is of what was stored rather than what was asked
+    // for. Outside the transaction on purpose: a failed history entry must not undo a
+    // saved contact.
+    await recordPersonVersionAfter(newId, { byUserId: user.id, source: "CREATED" });
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);
@@ -74,9 +79,13 @@ export async function updatePerson(
   _prev: ActionState,
   form: FormData,
 ): Promise<ActionState> {
+  let editorId: string | null = null;
   const id = readString(form, "id");
   try {
+    // Captured because the recorder runs after the try block, where `user` is out of
+    // scope — and history without an author is worth much less on a shared install.
     const user = await requireUserForAction();
+    editorId = user.id;
     await requireWritablePerson(user.id, id);
 
     const existing = await prisma.person.findUniqueOrThrow({
@@ -155,6 +164,8 @@ export async function updatePerson(
     if (isFrameworkError(err)) throw err;
     return toActionError(err);
   }
+
+  await recordPersonVersionAfter(id, { byUserId: editorId, source: "EDITED" });
 
   revalidatePath("/people");
   revalidatePath(`/people/${id}`);

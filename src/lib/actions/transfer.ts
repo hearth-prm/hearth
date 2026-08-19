@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { recordPersonVersionAfter } from "@/lib/person-versions";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireOwnedPerson, requireUserForAction } from "@/lib/access";
@@ -33,11 +34,13 @@ export async function transferOwnership(
   form: FormData,
 ): Promise<ActionState> {
   const personId = readString(form, "personId");
+  let actorId: string | null = null;
   let outcome: KeptAccess = "none";
   let givenName = "";
 
   try {
     const user = await requireUserForAction();
+    actorId = user.id;
     // Only an owner may give a record away. An EDIT share is permission to help
     // maintain a contact, not to decide who it belongs to.
     await requireOwnedPerson(user.id, personId);
@@ -106,6 +109,9 @@ export async function transferOwnership(
     if (isFrameworkError(err)) throw err;
     return toActionError(err);
   }
+
+  // A transfer changes who owns a contact, which is a change to the contact.
+  await recordPersonVersionAfter(personId, { byUserId: actorId, source: "TRANSFERRED" });
 
   revalidatePath("/people");
   revalidatePath(`/people/${personId}`);

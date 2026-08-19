@@ -37,6 +37,8 @@ import { RelationshipEditForm } from "@/components/relationship-edit-form";
 import { GiftsCard } from "@/components/gifts-card";
 import { Disclosure } from "@/components/disclosure";
 import { listGiftsForPerson } from "@/lib/gifts";
+import { loadPersonVersions } from "@/lib/person-versions";
+import { PersonHistoryCard } from "@/components/person-history-card";
 import {
   addGift,
   removeGift,
@@ -161,6 +163,7 @@ export default async function PersonPage({
     myShares,
     ownerLabels,
     gifts,
+    versions,
     mailAllowed,
   ] = await Promise.all([
       loadRegistry(person.ownerId, "PERSON"),
@@ -188,6 +191,9 @@ export default async function PersonPage({
       }),
       // Gifts in both directions; the split into given and received happens below.
       listGiftsForPerson(user.id, person.id),
+      // No access check of its own: a version says nothing the contact does not, and
+      // this page has already established that the contact is readable.
+      loadPersonVersions(person.id),
       canSendMail(user.id),
     ]);
 
@@ -640,6 +646,8 @@ export default async function PersonPage({
               </div>
             </Card>
           ) : null}
+
+          <PersonHistoryCard versions={versions} timeZone={settings.timeZone} />
 
           <Card>
             <CardHeader title="Record" />

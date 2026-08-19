@@ -2506,6 +2506,138 @@ try {
   ok("17.7b and is reachable from the people list",
      (await A.page.$('a[href="/people/import/google"]')) !== null);
 
+  // ---------------------------------------------------------------------------
+  section("§18 Contact history");
+  // ---------------------------------------------------------------------------
+  // Snapshots are what is stored; the diff is derived from two of them. Both are pure, so
+  // both are checked directly rather than through the page that renders them.
+
+  const { snapshotPerson, diffSnapshots, sameSnapshot } =
+    await import("@/lib/person-history");
+  const { recordPersonVersionAfter, loadPersonVersions } =
+    await import("@/lib/person-versions");
+
+  const snapOf = (over: Record<string, unknown> = {}) =>
+    snapshotPerson({
+      person: { givenName: "Hist", familyName: "Ory", custom: {}, ...over },
+      contactPoints: (over.contactPoints as Record<string, unknown>[]) ?? [],
+      labels: (over.labels as string[]) ?? [],
+      events: (over.events as Record<string, unknown>[]) ?? [],
+      relations: (over.relations as Record<string, unknown>[]) ?? [],
+      ownerEmail: (over.ownerEmail as string) ?? "a@e2e.test",
+    });
+
+  ok("18.1 a snapshot keeps the fields worth remembering",
+     snapOf().fields.givenName === "Hist" && snapOf().fields.familyName === "Ory");
+  ok("18.1b and leaves out sync state and timestamps, which are not edits",
+     !("googleSyncStatus" in snapOf().fields) && !("updatedAt" in snapOf().fields));
+
+  // Rows come back in whatever order the database chose, and that must not read as a
+  // change somebody made.
+  const orderA = snapOf({
+    contactPoints: [
+      { kind: "EMAIL", value: "b@e2e.test" },
+      { kind: "EMAIL", value: "a@e2e.test" },
+    ],
+    labels: ["Work", "Family"],
+  });
+  const orderB = snapOf({
+    contactPoints: [
+      { kind: "EMAIL", value: "a@e2e.test" },
+      { kind: "EMAIL", value: "b@e2e.test" },
+    ],
+    labels: ["Family", "Work"],
+  });
+  ok("18.2 reordered rows are not a change", sameSnapshot(orderA, orderB));
+  // Postgres jsonb normalises key order, so a stored snapshot comes back with its keys
+  // rearranged. The comparison has to be about content, not about how Postgres filed it.
+  const reordered = JSON.parse(
+    JSON.stringify(orderA, Object.keys(orderA).sort().reverse()),
+  ) as typeof orderA;
+  ok("18.2c and neither is a snapshot whose keys came back in another order",
+     sameSnapshot({ ...reordered, fields: orderA.fields, contactPoints: orderA.contactPoints,
+                    custom: orderA.custom, events: orderA.events,
+                    relations: orderA.relations, labels: orderA.labels }, orderA));
+  ok("18.2b and produce no diff", diffSnapshots(orderA, orderB).length === 0);
+
+  const changed = diffSnapshots(
+    snapOf({ givenName: "Hist", labels: ["Family"] }),
+    snapOf({
+      givenName: "Historic",
+      labels: ["Work"],
+      contactPoints: [{ kind: "PHONE", value: "555 0111", label: "mobile" }],
+      events: [{ label: "anniversary", year: null, month: 6, day: 12 }],
+      relations: [{ name: "Jane", label: "spouse" }],
+      ownerEmail: "b@e2e.test",
+    }),
+  );
+  const said = (what: string) => changed.find((c) => c.what === what);
+  ok("18.3 a renamed field says both sides",
+     said("First name")?.from === "Hist" && said("First name")?.to === "Historic",
+     said("First name"));
+  ok("18.3b an added contact point is one change, not a pair",
+     changed.filter((c) => c.what === "Phone (mobile)").length === 1
+       && said("Phone (mobile)")?.from === null,
+     changed.filter((c) => c.what.startsWith("Phone")));
+  ok("18.3c labels added and removed are reported separately",
+     changed.some((c) => c.what === "Label" && c.to === "Work")
+       && changed.some((c) => c.what === "Label" && c.from === "Family"));
+  ok("18.3d dates, Google relations and a change of owner all show",
+     Boolean(said("Date")) && Boolean(said("Named in Google"))
+       && said("Owner")?.to === "b@e2e.test");
+  ok("18.4 a first version has nothing to diff against, and says so by being empty",
+     diffSnapshots(null, snapOf()).length === 0);
+
+  // And the recording, against the database.
+  const histPerson = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Hist Ory", givenName: "Hist", familyName: "Ory",
+      contactPoints: { create: [{ kind: "EMAIL", value: "hist@e2e.test", order: 0 }] },
+    },
+  });
+  await recordPersonVersionAfter(histPerson.id, { byUserId: A.id, source: "CREATED" });
+  ok("18.5 creating a contact records its first version",
+     (await prisma.personVersion.count({ where: { personId: histPerson.id } })) === 1);
+
+  // The whole reason the recorder compares content: sync touches updatedAt and the sync
+  // columns on every push, and a history of those would bury the edits that matter.
+  await prisma.person.update({
+    where: { id: histPerson.id },
+    data: { addToGoogle: true, updatedAt: new Date() },
+  });
+  await recordPersonVersionAfter(histPerson.id, { byUserId: null, source: "EDITED" });
+  ok("18.6 a write that changed nothing a person wrote records nothing",
+     (await prisma.personVersion.count({ where: { personId: histPerson.id } })) === 1);
+
+  await prisma.person.update({
+    where: { id: histPerson.id },
+    data: { familyName: "Orey", middleName: "Quill" },
+  });
+  await recordPersonVersionAfter(histPerson.id, { byUserId: B.id, source: "EDITED" });
+  const hist = await loadPersonVersions(histPerson.id);
+  ok("18.7 a real change records a new version, newest first",
+     hist.length === 2 && hist[0]?.revision === 2, hist.map((h) => h.revision));
+  ok("18.7b attributed to whoever made it",
+     hist[0]?.byEmail === "bob@e2e.test", hist[0]?.byEmail);
+  const histChanges = diffSnapshots(hist[1]!.content, hist[0]!.content);
+  ok("18.7c and the change is readable from the two snapshots",
+     histChanges.some((c) => c.what === "Last name" && c.from === "Ory" && c.to === "Orey")
+       && histChanges.some((c) => c.what === "Middle name" && c.to === "Quill"),
+     histChanges);
+
+  await A.page.goto(`/people/${histPerson.id}`);
+  const histText = (await A.page.textContent("body")) ?? "";
+  ok("18.8 the contact page shows the history", histText.includes("History"));
+  ok("18.8b with who changed what", histText.includes("bob@e2e.test")
+       && histText.includes("Orey"));
+
+  // Deleting a contact takes its history with it — the honest reading of delete.
+  const versionsBefore = await prisma.personVersion.count({ where: { personId: histPerson.id } });
+  await prisma.person.delete({ where: { id: histPerson.id } });
+  ok("18.9 deleting a contact deletes its history too",
+     versionsBefore > 0
+       && (await prisma.personVersion.count({ where: { personId: histPerson.id } })) === 0);
+
 } finally {
   await h.stop();
 }

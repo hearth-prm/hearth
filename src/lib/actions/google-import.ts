@@ -15,6 +15,7 @@ import { computeDisplayName } from "@/lib/people";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
 import { nextCustomFieldOrder } from "@/lib/fields/registry";
+import { recordPersonVersionAfter } from "@/lib/person-versions";
 
 /**
  * Importing contacts that already exist in Google.
@@ -166,7 +167,8 @@ async function importOne(
     .map((g) => labelIdsByGroup.get(g))
     .filter((id): id is string => Boolean(id));
 
-  await prisma.person.create({
+  const created = await prisma.person.create({
+    select: { id: true },
     data: {
       ownerId: userId,
       givenName: contact.columns.givenName,
@@ -223,6 +225,13 @@ async function importOne(
         },
       },
     },
+  });
+
+  // The first version of an adopted contact is what Google had, which makes the history
+  // start where the data did rather than at the first edit somebody makes afterwards.
+  await recordPersonVersionAfter(created.id, {
+    byUserId: userId,
+    source: "GOOGLE_IMPORT",
   });
 }
 

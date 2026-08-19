@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { recordPersonVersionAfter } from "@/lib/person-versions";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireUserForAction } from "@/lib/access";
@@ -95,6 +96,12 @@ export async function applyImport(
       const result = await applyRow(prisma, user.id, row.write);
       if (result.createdPerson) created++;
       else updated++;
+      // Per row, after its own transaction, so a row's history matches what that row
+      // actually wrote — and so a failure to record cannot lose the row.
+      await recordPersonVersionAfter(result.personId, {
+        byUserId: user.id,
+        source: "CSV_IMPORT",
+      });
       labelsMade += result.labelsCreated;
       sharesMade += result.sharesCreated;
     }
@@ -135,7 +142,12 @@ async function applyRow(
   db: typeof prisma,
   userId: string,
   write: RowWrite,
-): Promise<{ createdPerson: boolean; labelsCreated: number; sharesCreated: number }> {
+): Promise<{
+  personId: string;
+  createdPerson: boolean;
+  labelsCreated: number;
+  sharesCreated: number;
+}> {
   return db.$transaction(async (tx) => {
     let labelsCreated = 0;
     let sharesCreated = 0;
@@ -284,6 +296,6 @@ async function applyRow(
       ).addToGoogle;
     await requeueEveryCopy(tx, id, addToGoogle);
 
-    return { createdPerson, labelsCreated, sharesCreated };
+    return { personId: id, createdPerson, labelsCreated, sharesCreated };
   });
 }

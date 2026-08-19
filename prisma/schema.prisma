@@ -59,6 +59,7 @@ model User {
   labels            Label[]
   labelGroups       LabelGroup[]
   personPhotos      PersonPhoto[]
+  personVersions    PersonVersion[]
   contactCard       Person?            @relation("UserContactCard")
   giftsRecorded     Gift[]
 }
@@ -399,6 +400,7 @@ model Person {
   googleSyncs       PersonSync[]
   labels            PersonLabel[]
   photos            PersonPhoto[]
+  versions          PersonVersion[]
   googleEvents      PersonGoogleEvent[]
   googleRelations   PersonGoogleRelation[]
   giftsGiven        Gift[]          @relation("GiftGiver")
@@ -1025,4 +1027,54 @@ model PersonGoogleRelation {
   person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
 
   @@index([personId, order])
+}
+
+/// Why a version was recorded. Useful on its own: "changed by the CSV import" answers a
+/// question that "changed" does not.
+enum PersonVersionSource {
+  CREATED
+  EDITED
+  CSV_IMPORT
+  GOOGLE_IMPORT
+  TRANSFERRED
+}
+
+/// A contact as it stood at one moment.
+///
+/// A whole snapshot rather than a list of field changes, because a contact is spread over
+/// Person, ContactPoint, PersonLabel, PersonGoogleEvent, PersonGoogleRelation and a JSON
+/// bag — diffing five tables at write time is machinery that fails quietly, and a snapshot
+/// answers "as it was in March" exactly. The diff is derived from two snapshots by a pure
+/// function instead, so the timeline costs nothing to store and cannot drift from the data
+/// it describes.
+///
+/// Recorded only when the content actually differs from the previous version. Sync touches
+/// updatedAt and the sync columns constantly without changing anything a person wrote, and
+/// a history full of "pushed to Google" entries would bury the four edits that matter.
+///
+/// Cascades on delete. Deleting a contact takes its history with it, which is the honest
+/// reading of delete for personal data — the alternative is a record of somebody you
+/// believe you removed.
+model PersonVersion {
+  id       String @id @default(cuid())
+  personId String
+  /// 1, 2, 3… per contact, so a version has a name a person can use.
+  revision Int
+  /// Who saved it. Null when Hearth acted on its own behalf.
+  byUserId String?
+  source   PersonVersionSource
+
+  /// The contact at that moment, shaped by snapshotPerson().
+  content Json
+
+  createdAt DateTime @default(now())
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+  /// SetNull rather than Cascade: a departing user must not erase the history of
+  /// contacts they once edited.
+  byUser User?  @relation(fields: [byUserId], references: [id], onDelete: SetNull)
+
+  @@unique([personId, revision])
+  @@index([personId, createdAt])
+  @@index([byUserId])
 }
