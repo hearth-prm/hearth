@@ -1,6 +1,7 @@
 import type { ContactKind, SharePermission } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { writablePeopleWhere } from "@/lib/access";
+import { ownedPeopleWhere,
+  writablePeopleWhere } from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { parseOneField, type FieldValues } from "@/lib/fields/validation";
 import { partitionFieldValues } from "@/lib/fields/values";
@@ -191,7 +192,9 @@ export async function planImport(
     emailsInFile.length
       ? prisma.person.findMany({
           where: {
-            ownerId: userId,
+            // Trashed contacts are excluded: matching one would write an import into a
+            // record nothing displays, which reads as the import having been lost.
+            ...ownedPeopleWhere(userId),
             contactPoints: { some: { kind: "EMAIL", value: { in: [...new Set(emailsInFile)], mode: "insensitive" } } },
           },
           select: {

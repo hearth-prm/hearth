@@ -159,9 +159,10 @@ export default async function EventPage({
               <DeleteForm
                 action={deleteEvent}
                 id={event.id}
-                label="Delete"
+                label="Move to trash"
+                pendingLabel="Moving…"
                 className={btnDanger}
-                confirmMessage={`Delete "${event.title}"? ${
+                confirmMessage={`Move "${event.title}" to the trash? You can restore it later. ${
                   event.googleEventId
                     ? "The Google Calendar event will be removed on the next sync."
                     : ""

@@ -8,6 +8,8 @@ const SOURCE_WORDS: Record<string, string> = {
   CSV_IMPORT: "changed by a CSV import",
   GOOGLE_IMPORT: "imported from Google",
   TRANSFERRED: "given to somebody else",
+  TRASHED: "moved to the trash",
+  RESTORED: "restored from the trash",
 };
 
 /**

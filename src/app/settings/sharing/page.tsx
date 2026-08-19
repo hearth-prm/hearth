@@ -19,13 +19,21 @@ const SCOPE_LABELS: Record<string, string> = {
 export default async function SharingPage() {
   const user = await requireUser();
 
+  /** Records still in existence: a trashed one has nothing to share. */
+  const liveRecord = {
+    AND: [
+      { OR: [{ personId: null }, { person: { deletedAt: null } }] },
+      { OR: [{ eventId: null }, { event: { deletedAt: null } }] },
+    ],
+  };
+
   const [head, cards, me, users, given, received] = await Promise.all([
     prisma.user.findFirst({
       where: { isHeadOfHousehold: true },
       select: { id: true, name: true, email: true },
     }),
     prisma.person.findMany({
-      where: { linkedUserId: { not: null } },
+      where: { linkedUserId: { not: null }, deletedAt: null },
       select: { id: true, displayName: true, linkedUserId: true },
       orderBy: { displayName: "asc" },
     }),
@@ -34,8 +42,12 @@ export default async function SharingPage() {
       select: { isHeadOfHousehold: true },
     }),
     listOtherUsers(user.id),
+    // A share of a trashed record is dormant — the recipient cannot see the record, so
+    // listing the grant here would describe access nobody has. It is not deleted: the
+    // share comes back with the contact, which is why this filters rather than prunes.
+    // Blanket scopes carry no personId or eventId, hence the null arms.
     prisma.share.findMany({
-      where: { ownerId: user.id },
+      where: { ownerId: user.id, ...liveRecord },
       include: {
         withUser: { select: { email: true, name: true } },
         person: { select: { id: true, displayName: true } },
@@ -44,7 +56,7 @@ export default async function SharingPage() {
       orderBy: [{ scope: "asc" }, { createdAt: "desc" }],
     }),
     prisma.share.findMany({
-      where: { withUserId: user.id },
+      where: { withUserId: user.id, ...liveRecord },
       include: {
         owner: { select: { email: true, name: true } },
         person: { select: { id: true, displayName: true } },

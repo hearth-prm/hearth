@@ -336,12 +336,24 @@ function GiftLine({
         {others.map((person, i) => (
           <span key={person.id}>
             {i > 0 ? <span className="text-neutral-400">{", "}</span> : null}
-            <Link
-              href={`/people/${person.id}`}
-              className="text-accent-700 hover:underline dark:text-accent-400"
-            >
-              {person.displayName}
-            </Link>
+            {/* A trashed contact keeps its name here but loses its link: the gift is
+                still part of this person's history, and a link to a page that no longer
+                resolves would read as a fault rather than as a deletion. */}
+            {person.deleted ? (
+              <span
+                className="text-neutral-500 dark:text-neutral-400"
+                title="This contact is in the trash"
+              >
+                {person.displayName}
+              </span>
+            ) : (
+              <Link
+                href={`/people/${person.id}`}
+                className="text-accent-700 hover:underline dark:text-accent-400"
+              >
+                {person.displayName}
+              </Link>
+            )}
           </span>
         ))}
         {/* Only a gift with no event needs its date spelled out; an event gift has

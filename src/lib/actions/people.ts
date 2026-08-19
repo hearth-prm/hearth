@@ -14,6 +14,7 @@ import { parseFields } from "@/lib/fields/validation";
 import { partitionFieldValues, readCustomBag } from "@/lib/fields/values";
 import { computeDisplayName, parseContactPoints, type PersonNameParts } from "@/lib/people";
 import { recordPersonVersionAfter } from "@/lib/person-versions";
+import { AccessDeniedError, trashedPeopleWhere } from "@/lib/access";
 import { getUserSettings } from "@/lib/settings";
 import { actionError, type ActionState } from "@/lib/actions/types";
 import { asColumnData, isFrameworkError, readCheckbox, readString, toActionError } from "@/lib/actions/shared";
@@ -172,6 +173,16 @@ export async function updatePerson(
   redirect(`/people/${id}`);
 }
 
+/**
+ * Move a contact to the trash.
+ *
+ * This is what Delete does now. It still leaves your Google Contacts, because "deleted"
+ * has to mean deleted on your phone — a contact that vanished from Hearth but stayed on a
+ * handset would be worse than either outcome. Restoring pushes it back.
+ *
+ * Nothing is destroyed. The row keeps its id, its history, its gifts and its shares; the
+ * trash never empties itself, so the only thing that removes it is somebody saying so.
+ */
 export async function deletePerson(form: FormData): Promise<void> {
   const id = readString(form, "id");
   const user = await requireUserForAction();
@@ -180,12 +191,102 @@ export async function deletePerson(form: FormData): Promise<void> {
   await requireOwnedPerson(user.id, id);
 
   await prisma.$transaction(async (tx) => {
-    // Read the links before the cascade takes them: they are the only record of
-    // which Google accounts hold a copy.
+    // The links are read before anything else, as they were for a hard delete: they are
+    // the only record of which Google accounts hold a copy.
+    await queueContactDeletionEverywhere(tx, { personId: id, reason: "deleted" });
+    await tx.person.update({ where: { id }, data: { deletedAt: new Date() } });
+  });
+
+  await recordPersonVersionAfter(id, { byUserId: user.id, source: "TRASHED" });
+
+  revalidatePath("/people");
+  revalidatePath("/trash");
+  redirect("/people");
+}
+
+/** Take a contact back out of the trash, and queue it to return to Google. */
+export async function restorePerson(form: FormData): Promise<void> {
+  const id = readString(form, "id");
+  const user = await requireUserForAction();
+
+  // Not requireOwnedPerson: that clause excludes trashed contacts, which is the whole
+  // point of it — so the check is made here, against the trash.
+  const trashed = await prisma.person.findFirst({
+    where: { id, ...trashedPeopleWhere(user.id) },
+    select: { id: true },
+  });
+  if (!trashed) throw new AccessDeniedError("That contact is not in your trash");
+
+  await prisma.$transaction(async (tx) => {
+    // Drop any deletion still waiting to be sent. A restore that raced its own tombstone
+    // would put the contact back and then delete it again on the next sync.
+    const links = await tx.personSync.findMany({
+      where: { personId: id, googleResourceName: { not: null } },
+      select: { googleResourceName: true },
+    });
+    const resourceIds = links
+      .map((l) => l.googleResourceName)
+      .filter((r): r is string => Boolean(r));
+    if (resourceIds.length > 0) {
+      await tx.syncTombstone.deleteMany({
+        where: {
+          target: "GOOGLE_CONTACT",
+          resourceId: { in: resourceIds },
+          processedAt: null,
+        },
+      });
+    }
+    // PENDING so the next sync pushes it back, whether the deletion already went out or
+    // is being cancelled here.
+    await tx.personSync.updateMany({
+      where: { personId: id },
+      data: { googleSyncStatus: "PENDING" },
+    });
+    await tx.person.update({ where: { id }, data: { deletedAt: null } });
+  });
+
+  await recordPersonVersionAfter(id, { byUserId: user.id, source: "RESTORED" });
+
+  revalidatePath("/people");
+  revalidatePath("/trash");
+  redirect(`/people/${id}`);
+}
+
+/**
+ * Destroy a contact for good.
+ *
+ * Only from the trash, so it takes two decisions rather than one. Its history goes with
+ * it, which is the honest reading of a permanent delete.
+ */
+export async function purgePerson(form: FormData): Promise<void> {
+  const id = readString(form, "id");
+  const user = await requireUserForAction();
+
+  const trashed = await prisma.person.findFirst({
+    where: { id, ...trashedPeopleWhere(user.id) },
+    select: { id: true, displayName: true, linkedUserId: true },
+  });
+  if (!trashed) throw new AccessDeniedError("That contact is not in your trash");
+
+  // A card belonging to a user of this install may be trashed — that has always been
+  // allowed, and it can be restored — but it may not be destroyed while somebody is
+  // attached to it. Their thank-yous, their share of the household and their own page all
+  // hang off this row, and none of that comes back.
+  if (trashed.linkedUserId) {
+    throw new AccessDeniedError(
+      `${trashed.displayName} is the contact card of a Hearth user. Unlink it in Settings → Household before deleting it for good.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Trashing already queued these, but a contact may have been trashed before this
+    // release, or its links may have changed since. Queuing again is harmless: the
+    // tombstone worker treats an already-deleted resource as done.
     await queueContactDeletionEverywhere(tx, { personId: id, reason: "deleted" });
     await tx.person.delete({ where: { id } });
   });
 
   revalidatePath("/people");
-  redirect("/people");
+  revalidatePath("/trash");
+  redirect("/trash");
 }

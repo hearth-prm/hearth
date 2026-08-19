@@ -127,6 +127,33 @@ that formally marks its milestone.
 
 ### Added
 
+- **A trash can. Deleting a contact or an event now moves it there, and nothing empties it
+  by itself.** No retention window, no nightly prune, no thirty days — a record leaves the
+  trash only because somebody chose *Delete permanently* on the **Trash** page. The cost of
+  keeping a deleted contact is one row; the cost of losing one is a row you cannot get back.
+  - **Delete** is now **Move to trash**, and says so on both the contact and event pages.
+  - Restoring brings the record back with everything that hung off it — its gifts, its
+    guest list, its shares and its history, none of which were ever removed.
+  - **A trashed contact still leaves Google Contacts, and a trashed event still leaves
+    Google Calendar.** Deleted has to mean deleted on your phone; a contact that vanished
+    from Hearth and stayed on a handset would be the worst of both. Restoring cancels the
+    removal if it has not gone out yet, and pushes the record back if it has.
+  - Invisible everywhere while it is in the trash: the people and events lists, search, the
+    CSV export, the attendee picker, gift rows, the sharing page and the sync queue. That is
+    one line in each of the clauses in `src/lib/access.ts`, and it is only that cheap because
+    every query in Hearth already goes through them — the one query that did not, the event
+    push queue, would otherwise have sent a trashed event straight back to your calendar.
+  - **Somebody else's trash is not a place you can look**, even for a record they had
+    shared with you. Whether it comes back is theirs to decide.
+  - Trashing and restoring are recorded in a contact's history, so a deletion is not a gap.
+  - A gift outlives the trashing of whoever gave it — trashing somebody does not un-give
+    what they gave. The name stays on the gift; only the link to their page goes.
+  - The contact card of a Hearth user can be trashed and restored, but not destroyed while
+    they are attached to it: their thank-yous and their place in the household hang off that
+    row, and none of it comes back. Unlink it in Settings → Household first.
+  - Events have no history yet, so a trashed event records no version — the trash itself is
+    the record until they do.
+
 - **Contact history.** Every change to a contact is remembered, with who made it and what
   it was: a **History** card on the contact page lists each version newest first, with the
   fields that changed and their old and new values side by side.

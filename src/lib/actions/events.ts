@@ -5,10 +5,12 @@ import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
+  AccessDeniedError,
   filterReadablePeopleIds,
   requireOwnedEvent,
   requireUserForAction,
   requireWritableEvent,
+  trashedEventsWhere,
 } from "@/lib/access";
 import { genericFields, loadRegistry } from "@/lib/fields/registry";
 import { parseFields } from "@/lib/fields/validation";
@@ -207,6 +209,12 @@ export async function updateEvent(
   redirect(`/events/${id}`);
 }
 
+/**
+ * Move an event to the trash.
+ *
+ * Like a contact, it leaves Google Calendar straight away — an event deleted here but
+ * still ringing an alarm on a phone would be the worst of both. Restoring puts it back.
+ */
 export async function deleteEvent(form: FormData): Promise<void> {
   const id = readString(form, "id");
   const user = await requireUserForAction();
@@ -228,11 +236,74 @@ export async function deleteEvent(form: FormData): Promise<void> {
         reason: "deleted",
       });
     }
+    await tx.event.update({ where: { id }, data: { deletedAt: new Date() } });
+  });
+
+  revalidatePath("/events");
+  revalidatePath("/trash");
+  redirect("/events");
+}
+
+/** Take an event back out of the trash, and queue it to return to Google Calendar. */
+export async function restoreEvent(form: FormData): Promise<void> {
+  const id = readString(form, "id");
+  const user = await requireUserForAction();
+
+  // requireOwnedEvent excludes trashed events by design, so the check is made against
+  // the trash instead.
+  const trashed = await prisma.event.findFirst({
+    where: { id, ...trashedEventsWhere(user.id) },
+    select: { id: true, googleEventId: true },
+  });
+  if (!trashed) throw new AccessDeniedError("That event is not in your trash");
+
+  await prisma.$transaction(async (tx) => {
+    // If the deletion has not gone out yet, cancelling it leaves the remote copy alone
+    // and the next push updates it. If it has, settleEventTombstone already cleared
+    // googleEventId, so the push creates a fresh one.
+    if (trashed.googleEventId) {
+      await cancelPendingDeletion(tx, "GOOGLE_EVENT", trashed.googleEventId);
+    }
+    await tx.event.update({
+      where: { id },
+      data: { deletedAt: null, googleSyncStatus: "PENDING", googleSyncNextAttemptAt: null },
+    });
+  });
+
+  revalidatePath("/events");
+  revalidatePath("/trash");
+  redirect(`/events/${id}`);
+}
+
+/** Destroy an event for good. Only from the trash, so it takes two decisions. */
+export async function purgeEvent(form: FormData): Promise<void> {
+  const id = readString(form, "id");
+  const user = await requireUserForAction();
+
+  const trashed = await prisma.event.findFirst({
+    where: { id, ...trashedEventsWhere(user.id) },
+    select: { id: true, googleEventId: true, googleCalendarId: true, googleEtag: true },
+  });
+  if (!trashed) throw new AccessDeniedError("That event is not in your trash");
+
+  await prisma.$transaction(async (tx) => {
+    // Trashing queued this already, but an event may have been trashed before this
+    // release. A second tombstone for a resource Google no longer has settles as done.
+    if (trashed.googleEventId) {
+      await queueEventDeletion(tx, {
+        ownerId: user.id,
+        eventId: trashed.googleEventId,
+        calendarId: trashed.googleCalendarId,
+        etag: trashed.googleEtag,
+        reason: "deleted",
+      });
+    }
     await tx.event.delete({ where: { id } });
   });
 
   revalidatePath("/events");
-  redirect("/events");
+  revalidatePath("/trash");
+  redirect("/trash");
 }
 
 // --- attendee management (event detail page) -------------------------------

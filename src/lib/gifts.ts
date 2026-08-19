@@ -21,6 +21,14 @@ import { readableGiftsWhere, thankableCardIds } from "@/lib/access";
 export interface GiftRecipientView {
   id: string;
   displayName: string;
+  /**
+   * Whether this person is in the trash.
+   *
+   * A gift outlives the contact on either end of it: trashing somebody does not un-give
+   * what they gave, so the name stays and only the link to their page goes. Carried on
+   * both ends of a gift so a row can render either side the same way.
+   */
+  deleted: boolean;
   thankedAt: Date | null;
   thankYouNote: string | null;
   /** Whether the reader may write this person's thanks; see thankableCardIds. */
@@ -35,7 +43,7 @@ export interface GiftView {
   notes: string | null;
   receivedOn: Date | null;
   /** email is null when there is nowhere to send a thank-you. */
-  giver: { id: string; displayName: string; email: string | null };
+  giver: { id: string; displayName: string; email: string | null; deleted: boolean };
   /**
    * Everyone it was for, each with their own thanks.
    *
@@ -59,6 +67,7 @@ const giftSelect = {
     select: {
       id: true,
       displayName: true,
+      deletedAt: true,
       contactPoints: {
         where: { kind: "EMAIL" as const },
         orderBy: [{ isPrimary: "desc" as const }, { order: "asc" as const }],
@@ -71,7 +80,7 @@ const giftSelect = {
     select: {
       thankedAt: true,
       thankYouNote: true,
-      person: { select: { id: true, displayName: true } },
+      person: { select: { id: true, displayName: true, deletedAt: true } },
     },
     orderBy: { person: { displayName: "asc" as const } },
   },
@@ -85,11 +94,16 @@ const giftSelect = {
  * with one answer, asked where the gift is read.
  */
 type GiftRow = Omit<GiftView, "giver" | "recipients"> & {
-  giver: { id: string; displayName: string; contactPoints: { value: string }[] };
+  giver: {
+    id: string;
+    displayName: string;
+    deletedAt: Date | null;
+    contactPoints: { value: string }[];
+  };
   recipients: {
     thankedAt: Date | null;
     thankYouNote: string | null;
-    person: { id: string; displayName: string };
+    person: { id: string; displayName: string; deletedAt: Date | null };
   }[];
 };
 
@@ -100,12 +114,14 @@ function toView(rows: GiftRow[], mayThankFor: Set<string>): GiftView[] {
       id: row.giver.id,
       displayName: row.giver.displayName,
       email: row.giver.contactPoints[0]?.value ?? null,
+      deleted: row.giver.deletedAt !== null,
     },
     // Decided once, here, from the same set the action checks — so the control offered
     // and the control accepted can never disagree.
     recipients: row.recipients.map((r) => ({
       id: r.person.id,
       displayName: r.person.displayName,
+      deleted: r.person.deletedAt !== null,
       thankedAt: r.thankedAt,
       thankYouNote: r.thankYouNote,
       canThank: mayThankFor.has(r.person.id),

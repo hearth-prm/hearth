@@ -69,7 +69,9 @@ export function splitName(name: string | null): { givenName: string | null; fami
 export async function reconcileCardShares(tx: Prisma.TransactionClient = prisma): Promise<number> {
   const [cards, users] = await Promise.all([
     tx.person.findMany({
-      where: { linkedUserId: { not: null } },
+      // A trashed card needs no shares. Ownership transfer below deliberately does NOT
+      // filter it out: a card that comes back should belong to the current head.
+      where: { linkedUserId: { not: null }, deletedAt: null },
       select: { id: true, ownerId: true, shares: { select: { withUserId: true } } },
     }),
     tx.user.findMany({ select: { id: true } }),

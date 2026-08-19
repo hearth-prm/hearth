@@ -2638,6 +2638,242 @@ try {
      versionsBefore > 0
        && (await prisma.personVersion.count({ where: { personId: histPerson.id } })) === 0);
 
+  // ════════════════════════════════════════════════════════════════════════
+  section("§19 Trash");
+
+  // A trash can is a read-path problem, not a write-path one: setting deletedAt is
+  // trivial, and every check below exists because missing ONE query means a deleted
+  // contact turning up somewhere. So these test surfaces — lists, search, export,
+  // pickers, another user's view — rather than inspecting the clauses.
+  const doomed = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Trash Target", givenName: "Trash", familyName: "Target",
+      organization: "Bin Ltd", addToGoogle: true,
+      contactPoints: { create: [{ kind: "EMAIL", value: "trash@e2e.test", order: 0 }] },
+    },
+  });
+  await recordPersonVersionAfter(doomed.id, { byUserId: A.id, source: "CREATED" });
+  // A Google copy in two accounts, so trashing has to remove both.
+  await prisma.personSync.createMany({
+    data: [
+      { personId: doomed.id, userId: A.id, googleResourceName: "people/trashA", googleSyncStatus: "SYNCED" },
+      { personId: doomed.id, userId: B.id, googleResourceName: "people/trashB", googleSyncStatus: "SYNCED" },
+    ],
+  });
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: B.id, personId: doomed.id, scope: "PERSON", permission: "EDIT" },
+  });
+  // Something hanging off it, to prove trashing keeps the row rather than cascading.
+  const doomedGift = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: doomed.id, description: "Bin bag",
+      receivedOn: new Date("2026-03-01T00:00:00Z"),
+      recipients: { create: [{ personId: kid.id }] },
+    },
+  });
+
+  await A.page.goto(`/people/${doomed.id}`);
+  ok("19.1 Delete now says what it does", (await A.page.$$('button:has-text("Move to trash")')).length === 1);
+  await A.page.click('button:has-text("Move to trash")');
+  await waitForDb("the contact to be trashed", async () =>
+    (await prisma.person.findUnique({ where: { id: doomed.id }, select: { deletedAt: true } }))?.deletedAt !== null);
+  const trashedRow = await prisma.person.findUnique({ where: { id: doomed.id } });
+  ok("19.2 trashing keeps the row, and stamps when", trashedRow !== null && trashedRow.deletedAt !== null);
+  ok("19.2b and keeps everything hanging off it",
+     (await prisma.gift.count({ where: { id: doomedGift.id } })) === 1
+       && (await prisma.share.count({ where: { personId: doomed.id } })) === 1
+       && (await prisma.personVersion.count({ where: { personId: doomed.id, source: "CREATED" } })) === 1);
+  ok("19.3 the Google copy is queued for removal from EVERY account that held one",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_CONTACT", resourceId: { in: ["people/trashA", "people/trashB"] }, processedAt: null },
+     })) === 2);
+  ok("19.4 and the trashing is recorded in its history",
+     (await prisma.personVersion.count({ where: { personId: doomed.id, source: "TRASHED" } })) === 1);
+
+  // --- invisible everywhere -------------------------------------------------
+  await A.page.goto("/people");
+  ok("19.5 gone from the People list", !((await A.page.textContent("body")) ?? "").includes("Trash Target"));
+  await A.page.goto("/people?q=Trash");
+  ok("19.5b and from a search for it", !((await A.page.textContent("body")) ?? "").includes("Trash Target"));
+  const trashCsv = await (await A.page.request.get("/api/people/export")).text();
+  ok("19.5c and from the CSV export", !trashCsv.includes("Trash Target"), trashCsv.length);
+  const trashHit = await A.page.goto(`/people/${doomed.id}`);
+  ok("19.5d its own page is gone", trashHit?.status() === 404, trashHit?.status());
+
+  // The attendee picker searches through the same clause; asked of the action itself
+  // because a picker that offers nothing is indistinguishable from a picker that is
+  // simply empty.
+  // findPeopleMatching rather than the searchPeople action wrapping it: the wrapper reads
+  // request headers, and the query is what this is about.
+  const { findPeopleMatching } = await import("@/lib/actions/people-search");
+  ok("19.6 gone from people search",
+     (await findPeopleMatching(A.id, "Trash Target")).length === 0);
+  await A.page.goto("/events/new");
+  ok("19.6b and from the attendee picker on a new event",
+     !((await A.page.textContent("body")) ?? "").includes("Trash Target"));
+
+  await A.page.goto("/settings/sharing");
+  ok("19.7 and from the sharing page",
+     !((await A.page.textContent("body")) ?? "").includes("Trash Target"));
+
+  // Gifts follow their recipient, so a gift GIVEN by a trashed contact still belongs to
+  // the person who received it: trashing somebody does not un-give what they gave.
+  const giftsAfterTrash = await (await import("@/lib/gifts")).listGiftsForPerson(A.id, kid.id);
+  const binBag = giftsAfterTrash.find((g) => g.description === "Bin bag");
+  ok("19.8 a gift outlives the trashing of its giver", binBag !== undefined);
+  ok("19.8b but the giver is no longer a link to a page that is gone",
+     binBag?.giver.deleted === true);
+
+  // Somebody else's bin is not a place you can look, even for a record they shared.
+  const bobHit = await B.page.goto(`/people/${doomed.id}`);
+  ok("19.9 a recipient of the share loses it too", bobHit?.status() === 404, bobHit?.status());
+  await B.page.goto("/trash");
+  ok("19.9b and it is not in THEIR trash",
+     !((await B.page.textContent("body")) ?? "").includes("Trash Target"));
+
+  // --- the trash page itself ------------------------------------------------
+  await A.page.goto("/trash");
+  const trashPage = (await A.page.textContent("body")) ?? "";
+  ok("19.10 the owner's trash lists it", trashPage.includes("Trash Target"));
+  ok("19.10b with what restoring would bring back", trashPage.includes("Bin Ltd"));
+  ok("19.11 and says plainly that nothing empties it",
+     trashPage.includes("never empties itself") || (await A.page.$$('text="How long is this kept?"')).length === 1);
+
+  // --- restore --------------------------------------------------------------
+  await A.page.click('form:has(input[value="' + doomed.id + '"]) button:has-text("Restore")');
+  await waitForDb("the contact to come back", async () =>
+    (await prisma.person.findUnique({ where: { id: doomed.id }, select: { deletedAt: true } }))?.deletedAt === null);
+  ok("19.12 restoring brings it back", (await prisma.person.count({
+    where: { id: doomed.id, ...(await import("@/lib/access")).readablePeopleWhere(A.id) },
+  })) === 1);
+  ok("19.12b the queued Google deletions are cancelled, not left to fire",
+     (await prisma.syncTombstone.count({
+       where: { resourceId: { in: ["people/trashA", "people/trashB"] }, processedAt: null },
+     })) === 0);
+  ok("19.12c and it is queued to go back to Google",
+     (await prisma.personSync.count({
+       where: { personId: doomed.id, googleSyncStatus: "PENDING" },
+     })) === 2);
+  ok("19.12d the restore is in its history",
+     (await prisma.personVersion.count({ where: { personId: doomed.id, source: "RESTORED" } })) === 1);
+  await A.page.goto("/people");
+  ok("19.12e and it is back in the list",
+     ((await A.page.textContent("body")) ?? "").includes("Trash Target"));
+
+  // --- nobody else's trash to act on ---------------------------------------
+  //
+  // The action's own refusal cannot be provoked from here: requireUserForAction reads
+  // headers() and there is no request to read. So this asks the question the action asks
+  // — the identical findFirst against trashedPeopleWhere — and then checks that no
+  // control for it exists anywhere in B's interface either.
+  await prisma.person.update({ where: { id: doomed.id }, data: { deletedAt: new Date() } });
+  const { trashedPeopleWhere: trashedFor } = await import("@/lib/access");
+  ok("19.13 a share recipient has no claim on what its owner trashed",
+     (await prisma.person.findFirst({ where: { id: doomed.id, ...trashedFor(B.id) } })) === null);
+  await B.page.goto("/trash");
+  ok("19.13b and is offered no control for it",
+     (await B.page.$$(`form:has(input[value="${doomed.id}"])`)).length === 0);
+
+  // --- permanent delete ----------------------------------------------------
+  const versionsAtPurge = await prisma.personVersion.count({ where: { personId: doomed.id } });
+  await A.page.goto("/trash");
+  await A.page.click('form:has(input[value="' + doomed.id + '"]) button:has-text("Delete permanently")');
+  await waitForDb("the contact to be destroyed", async () =>
+    (await prisma.person.count({ where: { id: doomed.id } })) === 0);
+  ok("19.14 delete permanently destroys it", (await prisma.person.count({ where: { id: doomed.id } })) === 0);
+  ok("19.14b and its history with it",
+     versionsAtPurge > 0 && (await prisma.personVersion.count({ where: { personId: doomed.id } })) === 0);
+
+  // A user's own contact card may be trashed, as it could always be deleted — but not
+  // destroyed while somebody is attached to it, because none of what hangs off it
+  // (their thanks, their place in the household) comes back. Checked at the surface,
+  // since the guard inside purgePerson sits behind a session this harness cannot forge.
+  await prisma.person.update({ where: { id: kid.id }, data: { deletedAt: new Date() } });
+  await A.page.goto("/trash");
+  const cardRow = (await A.page.textContent(`li:has(input[value="${kid.id}"])`)) ?? "";
+  ok("19.15 a Hearth user's own card can be restored from the trash",
+     (await A.page.$$(`form:has(input[value="${kid.id}"]) button:has-text("Restore")`)).length === 1);
+  ok("19.15b but is offered no permanent delete while they are attached to it",
+     (await A.page.$$(`form:has(input[value="${kid.id}"]) button:has-text("Delete permanently")`)).length === 0,
+     cardRow.slice(0, 120));
+  ok("19.15c and says what to do instead", cardRow.includes("unlink it"), cardRow.slice(0, 160));
+  await prisma.person.update({ where: { id: kid.id }, data: { deletedAt: null } });
+
+  // --- events --------------------------------------------------------------
+  const doomedEvent = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Binned Gathering", startAt: new Date("2026-04-01T18:00:00Z"),
+      timeZone: "Europe/London", addToGoogle: true, googleEventId: "gcal-trash",
+      googleSyncStatus: "SYNCED",
+    },
+  });
+  await A.page.goto(`/events/${doomedEvent.id}`);
+  await A.page.click('button:has-text("Move to trash")');
+  await waitForDb("the event to be trashed", async () =>
+    (await prisma.event.findUnique({ where: { id: doomedEvent.id }, select: { deletedAt: true } }))?.deletedAt !== null);
+  ok("19.16 an event can be trashed too",
+     (await prisma.event.count({ where: { id: doomedEvent.id } })) === 1);
+  ok("19.16b and its calendar copy is queued for removal",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_EVENT", resourceId: "gcal-trash", processedAt: null },
+     })) === 1);
+  await A.page.goto("/events");
+  ok("19.17 gone from the Events list",
+     !((await A.page.textContent("body")) ?? "").includes("Binned Gathering"));
+  const eventHit = await A.page.goto(`/events/${doomedEvent.id}`);
+  ok("19.17b and its own page is gone", eventHit?.status() === 404, eventHit?.status());
+
+  // The event push queue used to name ownerId directly instead of going through a
+  // clause, which would have sent a trashed event straight back to the calendar it was
+  // just deleted from. Read from the source, because the queue itself cannot be reached
+  // without a Google grant — and a check that cannot fail is not a check.
+  const eventSyncSource = readFileSync("src/lib/sync/events.ts", "utf8");
+  const queueBlock = eventSyncSource.slice(
+    eventSyncSource.indexOf("const queue = await prisma.event.findMany"),
+    eventSyncSource.indexOf("include: {", eventSyncSource.indexOf("const queue = await prisma.event.findMany")),
+  );
+  ok("19.18 the event push queue goes through the clause that excludes trashed events",
+     queueBlock.includes("ownedEventsWhere(userId)") && !/ownerId:\s*userId/.test(queueBlock),
+     queueBlock.replace(/\s+/g, " ").slice(0, 140));
+  await A.page.goto("/settings");
+  const trashSettingsText = (await A.page.textContent("body")) ?? "";
+  ok("19.18b and it is not counted as waiting to sync",
+     !trashSettingsText.includes("Binned Gathering"));
+
+  await A.page.goto("/trash");
+  ok("19.19 the trash lists trashed events as well as contacts",
+     ((await A.page.textContent("body")) ?? "").includes("Binned Gathering"));
+  await A.page.click('form:has(input[value="' + doomedEvent.id + '"]) button:has-text("Restore")');
+  await waitForDb("the event to come back", async () =>
+    (await prisma.event.findUnique({ where: { id: doomedEvent.id }, select: { deletedAt: true } }))?.deletedAt === null);
+  const restoredEvent = await prisma.event.findUniqueOrThrow({ where: { id: doomedEvent.id } });
+  ok("19.19b restoring an event queues it back to the calendar",
+     restoredEvent.deletedAt === null && restoredEvent.googleSyncStatus === "PENDING",
+     restoredEvent.googleSyncStatus);
+  ok("19.19c with no deletion left waiting to undo it",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_EVENT", resourceId: "gcal-trash", processedAt: null },
+     })) === 0);
+
+  // --- nothing prunes it ---------------------------------------------------
+  // Asserted against the source rather than by waiting: "it did not empty in the next
+  // ten seconds" would pass for a job with any interval at all. The claim being made is
+  // that no code path deletes by age, which is a claim about what exists.
+  const srcFiles = ["src/lib/sync/scheduler.ts", "src/lib/sync/runner.ts", "src/lib/sync/reap.ts"];
+  const scheduled = srcFiles
+    .map((f) => readFileSync(f, "utf8"))
+    .join("\n");
+  ok("19.20 nothing in the background deletes by age",
+     !/deletedAt[^\n]*(lt|lte)\s*:/.test(scheduled) && !scheduled.includes("person.delete"),
+     srcFiles.join(", "));
+  const trashedStill = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Old Trash", deletedAt: new Date("2020-01-01T00:00:00Z") },
+  });
+  await A.page.goto("/trash");
+  ok("19.20b and a record trashed years ago is still there",
+     ((await A.page.textContent("body")) ?? "").includes("Old Trash"),
+     trashedStill.id);
+
 } finally {
   await h.stop();
 }

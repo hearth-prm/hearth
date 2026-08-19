@@ -256,14 +256,18 @@ export default async function PersonPage({
                 Edit
               </Link>
             ) : null}
-            {/* Deleting stays with the owner even under an EDIT share. */}
+            {/* Deleting stays with the owner even under an EDIT share. It says "move to
+                trash" because that is what it does — the record waits there until somebody
+                empties it by hand, and naming it Delete would undersell how recoverable
+                this is while overselling how final it is. */}
             {isOwner ? (
               <DeleteForm
                 action={deletePerson}
                 id={person.id}
-                label="Delete"
+                label="Move to trash"
+                pendingLabel="Moving…"
                 className={btnDanger}
-                confirmMessage={`Delete ${person.displayName}? ${
+                confirmMessage={`Move ${person.displayName} to the trash? You can restore it later. ${
                   person.googleSyncs.some((g) => g.googleResourceName)
                     ? "The Google contact will be removed from every account it reached, on the next sync."
                     : ""

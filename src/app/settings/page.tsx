@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { readablePeopleWhere, requireUser } from "@/lib/access";
+import { ownedEventsWhere,
+  readablePeopleWhere, requireUser } from "@/lib/access";
 import { signIn } from "@/lib/auth";
 import { getGoogleConnection, getUserSettings } from "@/lib/settings";
 import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
@@ -59,15 +60,17 @@ export default async function SettingsPage() {
     prisma.personSync.count({
       where: { userId: user.id, googleSyncStatus: "ERROR" },
     }),
+    // ownedEventsWhere rather than a bare ownerId, so a trashed event is not counted as
+    // waiting to sync: nothing is going to push it.
     prisma.event.count({
       where: {
-        ownerId: user.id,
+        ...ownedEventsWhere(user.id),
         addToGoogle: true,
         googleSyncStatus: "PENDING",
       },
     }),
     prisma.event.count({
-      where: { ownerId: user.id, addToGoogle: true, googleSyncStatus: "ERROR" },
+      where: { ...ownedEventsWhere(user.id), addToGoogle: true, googleSyncStatus: "ERROR" },
     }),
     listUserCalendars(user.id),
   ]);

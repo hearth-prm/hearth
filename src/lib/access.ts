@@ -20,6 +20,11 @@ import { prisma } from "@/lib/db";
  * Google Contacts too, which is the whole point of sharing one. (An earlier version of
  * this comment claimed the opposite, and so did the code.)
  *
+ * Deleting is a soft delete. Every clause below filters `deletedAt: null`, so a trashed
+ * contact or event is invisible in every list, search, export, picker and sync push
+ * without any of those needing to know that a trash can exists. Getting at the trash means
+ * asking for it explicitly, through trashedPeopleWhere / trashedEventsWhere.
+ *
  * Household cards — the contact representing each user of the install — need no special
  * case here. They are owned by the head of the household and shared with everyone
  * through ordinary Share rows, so every clause below already covers them.
@@ -69,6 +74,10 @@ export async function requireUserForAction(): Promise<CurrentUser> {
 
 export function readablePeopleWhere(userId: string): Prisma.PersonWhereInput {
   return {
+    // Trashed contacts are invisible everywhere, for everybody, including whoever they
+    // were shared with. This one line is what a soft delete needs to be safe, and it is
+    // only enough because every read goes through a clause in this file.
+    deletedAt: null,
     OR: [
       { ownerId: userId },
       // Shared as a single record.
@@ -87,6 +96,7 @@ export function readablePeopleWhere(userId: string): Prisma.PersonWhereInput {
 
 export function writablePeopleWhere(userId: string): Prisma.PersonWhereInput {
   return {
+    deletedAt: null,
     OR: [
       { ownerId: userId },
       { shares: { some: { withUserId: userId, permission: "EDIT" } } },
@@ -103,6 +113,7 @@ export function writablePeopleWhere(userId: string): Prisma.PersonWhereInput {
 
 export function readableEventsWhere(userId: string): Prisma.EventWhereInput {
   return {
+    deletedAt: null,
     OR: [
       { ownerId: userId },
       { shares: { some: { withUserId: userId } } },
@@ -117,6 +128,7 @@ export function readableEventsWhere(userId: string): Prisma.EventWhereInput {
 
 export function writableEventsWhere(userId: string): Prisma.EventWhereInput {
   return {
+    deletedAt: null,
     OR: [
       { ownerId: userId },
       { shares: { some: { withUserId: userId, permission: "EDIT" } } },
@@ -181,6 +193,7 @@ export async function thankableCardIds(userId: string): Promise<Set<string>> {
   const delegated = await prisma.person.findMany({
     where: {
       linkedUserId: { not: null },
+      deletedAt: null,
       linkedUser: { settings: { allowHeadThankYous: true } },
     },
     select: { id: true },
@@ -191,11 +204,30 @@ export async function thankableCardIds(userId: string): Promise<Set<string>> {
 
 /** Deleting is the owner's alone, whatever has been shared. */
 export function ownedPeopleWhere(userId: string): Prisma.PersonWhereInput {
-  return { ownerId: userId };
+  return { ownerId: userId, deletedAt: null };
 }
 
 export function ownedEventsWhere(userId: string): Prisma.EventWhereInput {
-  return { ownerId: userId };
+  return { ownerId: userId, deletedAt: null };
+}
+
+/**
+ * What is in the trash, which only its owner may see.
+ *
+ * A separate pair of clauses rather than a flag on the ones above, so that no ordinary
+ * query can be talked into including deleted records by passing an argument. Reaching the
+ * trash means asking for it by name.
+ *
+ * Sharing does not extend here. A contact shared with you and then deleted by its owner is
+ * gone as far as you are concerned; whether it is recoverable is theirs to decide, and
+ * their bin is not a place you can look.
+ */
+export function trashedPeopleWhere(userId: string): Prisma.PersonWhereInput {
+  return { ownerId: userId, deletedAt: { not: null } };
+}
+
+export function trashedEventsWhere(userId: string): Prisma.EventWhereInput {
+  return { ownerId: userId, deletedAt: { not: null } };
 }
 
 export async function requireOwnedPerson(

@@ -1,5 +1,6 @@
 import type { RsvpStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { ownedEventsWhere } from "@/lib/access";
 import { GoogleAuthError } from "@/lib/google/auth";
 import { backoffMs, classifyGoogleError } from "@/lib/google/errors";
 import type { CalendarClient, SendUpdates } from "@/lib/google/calendar-client";
@@ -197,7 +198,10 @@ export async function syncEventsForUser(
   // --- 2. pushes ---------------------------------------------------------
   const queue = await prisma.event.findMany({
     where: {
-      ownerId: userId,
+      // Through the clause rather than an inline ownerId, so a trashed event cannot be
+      // pushed back to a calendar it was just deleted from — which is exactly what this
+      // query did before the trash existed.
+      ...ownedEventsWhere(userId),
       addToGoogle: true,
       googleSyncStatus: { in: ["PENDING", "ERROR"] },
       OR: [
@@ -368,7 +372,7 @@ export async function syncEventsForUser(
       for (const remote of changed) {
         if (!remote.id || remote.status === "cancelled") continue;
         const local = await prisma.event.findFirst({
-          where: { ownerId: userId, googleEventId: remote.id },
+          where: { ...ownedEventsWhere(userId), googleEventId: remote.id },
           select: { id: true },
         });
         if (!local) continue;

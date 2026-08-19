@@ -29,6 +29,18 @@ export interface PersonSnapshot {
   relations: { name: string; label: string | null }[];
   /** Who owned it. A transfer is a change worth seeing in the history. */
   ownerEmail: string | null;
+  /**
+   * Present only while the contact is in the trash.
+   *
+   * In the snapshot because a version is recorded only when the content differs from the
+   * last one, and trashing changes nothing else a snapshot holds — so without this,
+   * moving a contact to the trash left no trace in its own history.
+   *
+   * Optional rather than a boolean that is usually false, so snapshots taken before this
+   * existed still compare equal to new ones and no install gains a version saying
+   * nothing happened.
+   */
+  trashed?: true;
 }
 
 /** Columns worth remembering. Sync state and timestamps are deliberately absent. */
@@ -135,6 +147,7 @@ export function snapshotPerson(input: SnapshotInput): PersonSnapshot {
       .map((r) => ({ name: text(r.name) ?? "", label: text(r.label) }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     ownerEmail: input.ownerEmail,
+    ...(input.person.deletedAt ? { trashed: true as const } : {}),
   };
 }
 
@@ -296,6 +309,16 @@ export function diffSnapshots(
 
   if (before.ownerEmail !== after.ownerEmail) {
     changes.push({ what: "Owner", from: before.ownerEmail, to: after.ownerEmail });
+  }
+
+  // Said in the diff as well as in the source word, so an entry for a trashing is not an
+  // otherwise-empty version reading "no visible change".
+  if (Boolean(before.trashed) !== Boolean(after.trashed)) {
+    changes.push({
+      what: "In the trash",
+      from: before.trashed ? "yes" : null,
+      to: after.trashed ? "yes" : null,
+    });
   }
 
   return changes;

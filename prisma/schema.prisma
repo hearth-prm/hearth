@@ -386,6 +386,18 @@ model Person {
   /// recipient's address book, which is why the resource id cannot live here.
   addToGoogle          Boolean    @default(true)
 
+  /// In the trash since this moment, or null for a live contact.
+  ///
+  /// Deleting puts a contact here rather than destroying it. Every access clause in
+  /// src/lib/access.ts filters on this, which is what makes one column enough: the
+  /// invariant that all reads funnel through those clauses is what a soft delete needs in
+  /// order not to leak a deleted contact into a list somewhere.
+  ///
+  /// The trash NEVER empties itself. There is no retention window and no job that prunes
+  /// it, by design: a bin that quietly throws things away is not a bin, and the whole
+  /// reason to have one is that the person deciding has changed their mind before.
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -408,6 +420,7 @@ model Person {
   giftEvents        EventGiftRecipient[]
 
   @@index([linkedUserId])
+  @@index([ownerId, deletedAt])
   @@index([ownerId, displayName])
   @@index([ownerId, updatedAt])
   @@index([ownerId, addToGoogle])
@@ -625,6 +638,9 @@ model Event {
   /// Earliest time this event should be tried again. Null means "now".
   googleSyncNextAttemptAt DateTime?
 
+  /// In the trash since this moment. See the note on Person.deletedAt.
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -634,6 +650,7 @@ model Event {
   gifts          Gift[]
   giftRecipients EventGiftRecipient[]
 
+  @@index([ownerId, deletedAt])
   @@index([ownerId, startAt])
   /// Drives the sync queue: pending/errored events whose backoff has elapsed.
   @@index([ownerId, addToGoogle, googleSyncStatus, googleSyncNextAttemptAt])
@@ -1037,6 +1054,8 @@ enum PersonVersionSource {
   CSV_IMPORT
   GOOGLE_IMPORT
   TRANSFERRED
+  TRASHED
+  RESTORED
 }
 
 /// A contact as it stood at one moment.
