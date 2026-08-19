@@ -55,7 +55,7 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A trash can that never empties itself | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 425 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 427 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -763,7 +763,14 @@ labels — because the alternative is a sync that reads a field it cannot write 
 it on the way back out.
 
 Known limits, stated rather than discovered: only **one organisation** per contact is
-kept, and Google's `clientData` is left untouched.
+kept, Google's `clientData` is left untouched, and a name Google never broke into parts
+keeps only the parts — a contact whose name reads "Dr. Liz Smith Jr." in Google, with just
+*Liz* and *Smith* in its structured fields, comes back as "Liz Smith" on the next push.
+
+`scripts/e2e/google-import-check.mts` answers this for **your** contacts before you commit
+to it. It is read-only — it writes nothing, adopts nothing, and needs no database — and it
+prints, per contact, what the import would store and then what a push would send back,
+flagging any field that would be cleared.
 
 ## History and the trash
 
@@ -903,7 +910,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 425 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 427 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

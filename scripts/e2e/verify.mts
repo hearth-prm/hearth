@@ -1397,8 +1397,19 @@ try {
   await waitForDb("the theme to be stored", async () => (await settingsRow())?.theme === "light");
   ok("15.4c which is stored", (await settingsRow())?.theme === "light", (await settingsRow())?.theme);
   await A.page.reload();
+  // Waited for rather than read straight after reload(): the load event can fire before
+  // the stylesheet has been applied, so reading a computed colour immediately made this
+  // check fail about one run in three — a flake that looks exactly like a regression.
+  await A.page.waitForFunction(
+    (want) =>
+      document.documentElement.getAttribute("data-theme") === "light" &&
+      getComputedStyle(document.body).backgroundColor === want,
+    systemLightBg,
+    { timeout: 10_000 },
+  ).catch(() => {});
   ok("15.4d and comes back server-rendered, still beating the device",
-     (await htmlState()).theme === "light" && (await bodyPaint()) === systemLightBg);
+     (await htmlState()).theme === "light" && (await bodyPaint()) === systemLightBg,
+     `${systemLightBg} -> ${await bodyPaint()}`);
   await A.page.emulateMedia({ colorScheme: "light" });
 
   // A hue of one's own.
@@ -2178,6 +2189,27 @@ try {
        && round.person.organizations?.[0]?.type === "work",
      round.person.organizations?.[0]);
 
+  // Found by running the real account through scripts/e2e/google-import-check.mts: Google
+  // holds a yearless birthday as {date:{month,day}}, a @db.Date column cannot, so the
+  // import keeps "12/10" as text — and pushing that back turned a birthday Google
+  // understands into a free-text note, losing the reminder and the sort.
+  const yearless = serializePerson(
+    barePerson({ givenName: "No", familyName: "Year", displayName: "No Year", birthdayText: "12/10" }),
+  );
+  ok("17.2i a yearless birthday goes back to Google as a date, not as prose",
+     yearless.person.birthdays?.[0]?.date?.month === 12
+       && yearless.person.birthdays?.[0]?.date?.day === 10
+       && yearless.person.birthdays?.[0]?.text === undefined,
+     yearless.person.birthdays?.[0]);
+  const prose = serializePerson(
+    barePerson({ givenName: "Some", familyName: "Prose", displayName: "Some Prose",
+                 birthdayText: "the week after Easter" }),
+  );
+  ok("17.2j but a birthday nobody could parse stays exactly as written",
+     prose.person.birthdays?.[0]?.text === "the week after Easter"
+       && prose.person.birthdays?.[0]?.date === undefined,
+     prose.person.birthdays?.[0]);
+
   ok("17.3 memberships are reported so Google labels can become Hearth ones",
      ada.groupIds.includes("contactGroups/friends"));
 
@@ -2678,6 +2710,10 @@ try {
   await A.page.click('button:has-text("Move to trash")');
   await waitForDb("the contact to be trashed", async () =>
     (await prisma.person.findUnique({ where: { id: doomed.id }, select: { deletedAt: true } }))?.deletedAt !== null);
+  // The version is recorded after the transaction commits, so waiting on deletedAt is not
+  // waiting for the history. Two separate writes need two separate waits.
+  await waitForDb("the trashing to be recorded", async () =>
+    (await prisma.personVersion.count({ where: { personId: doomed.id, source: "TRASHED" } })) === 1);
   const trashedRow = await prisma.person.findUnique({ where: { id: doomed.id } });
   ok("19.2 trashing keeps the row, and stamps when", trashedRow !== null && trashedRow.deletedAt !== null);
   ok("19.2b and keeps everything hanging off it",
@@ -2755,6 +2791,8 @@ try {
      (await prisma.personSync.count({
        where: { personId: doomed.id, googleSyncStatus: "PENDING" },
      })) === 2);
+  await waitForDb("the restore to be recorded", async () =>
+    (await prisma.personVersion.count({ where: { personId: doomed.id, source: "RESTORED" } })) === 1);
   ok("19.12d the restore is in its history",
      (await prisma.personVersion.count({ where: { personId: doomed.id, source: "RESTORED" } })) === 1);
   await A.page.goto("/people");

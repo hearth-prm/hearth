@@ -98,6 +98,27 @@ function sortPoints(points: readonly ContactPoint[]): ContactPoint[] {
   );
 }
 
+/**
+ * A yearless birthday, read back out of prose.
+ *
+ * Google can hold a birthday with no year — `{date: {month, day}}` — and a `@db.Date`
+ * column cannot, so the import keeps those as text. Pushing the text straight back would
+ * turn a birthday Google understands into a free-text note: reminders stop, and it stops
+ * sorting as a date. So the exact shape the import writes, "M/D", is read back into a
+ * dateless date on the way out, which makes the round trip lossless.
+ *
+ * Anything that is not that shape stays prose — "the week after Easter" is a birthday
+ * note, and guessing at it would be worse than keeping it.
+ */
+function yearlessBirthday(text: string | null): { month: number; day: number } | null {
+  const match = /^(\d{1,2})\/(\d{1,2})$/.exec((text ?? "").trim());
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { month, day };
+}
+
 export function serializePerson(
   person: PersonWithContacts,
   options: SerializeOptions = {},
@@ -251,9 +272,11 @@ export function serializePerson(
             },
           },
         ]
-      : clean(person.birthdayText)
-        ? [{ text: clean(person.birthdayText) }]
-        : [],
+      : yearlessBirthday(person.birthdayText)
+        ? [{ date: yearlessBirthday(person.birthdayText)! }]
+        : clean(person.birthdayText)
+          ? [{ text: clean(person.birthdayText) }]
+          : [],
     biographies: biography ? [{ value: biography, contentType: "TEXT_PLAIN" }] : [],
     emailAddresses: [
       ...byKind("EMAIL")

@@ -27,6 +27,15 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **A birthday with no year came back from Google as a date and went back as prose.** Google
+  holds "12 October, year unknown" as a structured date without a year; a `@db.Date` column
+  cannot express that, so the import keeps it as text — and the push then wrote it into
+  Google's free-text birthday field, where it stops being a birthday: no reminder, no
+  sorting, just a note. The exact shape the import writes is now read back into a dateless
+  date, so the round trip is lossless, while a birthday nobody could parse ("the week after
+  Easter") is still kept as written. Found by running a real Google contact through the new
+  import probe — the automated fixtures had only ever carried birthdays with years.
+
 - **The setup instructions were wrong about how long a Google grant lasts.** They said an
   app in "Testing" keeps its refresh tokens indefinitely for test users. Google expires
   them after **seven days**, which means a self-hosted install stops syncing about weekly
