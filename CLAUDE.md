@@ -111,8 +111,15 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 
 ## Known open items
 
-- No real Google address book has been through the in-place import or the widened
-  serialiser. Throwaway accounts are not the same thing.
+- One real Google contact has been through the import and the round trip, read-only, via
+  `scripts/e2e/google-import-check.mts` — and it found a bug the fixtures could not (a
+  yearless birthday going back as prose). What is still unproven is an actual **write** to a
+  real account, and anything larger or messier than a single contact. Run the probe first
+  on any new address book; it flags what a push would clear before a push happens.
+- A name Google never broke into parts keeps only the parts on a push, so honorifics that
+  live only in `unstructuredName` are lost. Preferring `unstructuredName` over the parts
+  would be a change to the most dangerous write path in the app, so it is a stated limit
+  until there is evidence about which Google prefers.
 - One organisation per contact; `clientData` untouched.
 - Contact history is read-only — reverting would have to write back through the same
   validation and sync path as an edit.
