@@ -27,6 +27,14 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **The setup instructions were wrong about how long a Google grant lasts.** They said an
+  app in "Testing" keeps its refresh tokens indefinitely for test users. Google expires
+  them after **seven days**, which means a self-hosted install stops syncing about weekly
+  and asks to reconnect however many times you oblige. The README now says to move the
+  OAuth app to "In production" before relying on it, and explains that verification is a
+  separate concern. Found by two throwaway test tokens dying exactly eight days after they
+  were minted.
+
 - **"Reconnect Google" did nothing at all.** Auth.js's Prisma adapter writes an `Account`
   row when an account is first linked and has no way to update it afterwards, so
   re-consenting changed what Google would allow while Hearth went on reading the scope

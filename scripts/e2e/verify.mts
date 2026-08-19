@@ -2153,6 +2153,7 @@ try {
     orgSymbol: null, orgDomain: null, orgLocation: null, orgPhoneticName: null,
     orgType: null, gender: null, birthday: null, birthdayText: null, notes: null,
     displayName: "Fixture", custom: {}, addToGoogle: true, linkedUserId: null,
+    deletedAt: null,
     createdAt: new Date(0), updatedAt: new Date(0),
     contactPoints: [] as ReturnType<typeof bareContactPoint>[],
     ...over,
@@ -2879,7 +2880,7 @@ try {
   // The reason this exists: thirty deleted contacts should not be thirty confirmations.
   // What keeps the page safe is that the decision is never made for you, not that it is
   // made slowly.
-  const bulk = [];
+  const bulk: { id: string }[] = [];
   for (const n of ["Bulk One", "Bulk Two", "Bulk Three"]) {
     bulk.push(await prisma.person.create({
       data: {

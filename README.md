@@ -108,8 +108,8 @@ docker compose down -v         # stop and destroy the database
    - **Google Calendar API**
 3. **APIs & Services → OAuth consent screen**
    - User type **External** is fine for a personal install.
-   - Add yourself under **Test users**. An app in "Testing" doesn't need Google
-     verification, and its refresh tokens last indefinitely for test users.
+   - Add yourself under **Test users**. An app in "Testing" needs no Google
+     verification — but see the warning below about how long its tokens last.
    - Add these scopes:
      - `.../auth/userinfo.email`, `.../auth/userinfo.profile`, `openid`
      - `https://www.googleapis.com/auth/contacts`
@@ -127,6 +127,17 @@ less: `calendar.events` cannot delete a calendar, `calendar.readonly` only lists
 and `gmail.send` can send mail as you but cannot read a mailbox — the least a feature
 that only ever sends can ask for. Settings shows exactly which permissions were granted
 and offers a reconnect when a scope or offline access is missing.
+
+> **Move the app to "In production" before you rely on it.** While the publishing status
+> is **Testing**, Google expires every refresh token after **seven days** — so a
+> long-running install stops syncing about once a week and asks you to reconnect, and it
+> will keep doing that however many times you do. Publishing removes the seven-day cap.
+> Verification is a separate thing, only needed to drop the "Google hasn't verified this
+> app" screen and to let people who are not test users sign in; an unverified published app
+> works fine for yourself past that warning.
+>
+> This is what a dead token looks like: sync stops, Settings shows a reconnect prompt, and
+> the server log carries `invalid_grant — Token has been expired or revoked`.
 
 `gmail.send` is what thank-you notes are sent with. Leave it out and everything else
 still works: the thank-you control refuses up front, saying to reconnect Google, rather

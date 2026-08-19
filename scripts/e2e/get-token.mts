@@ -12,6 +12,11 @@
  * driving Google's sign-in would mean handing over an account password, and Google
  * blocks automated sign-in anyway — brand-new accounts most aggressively of all.
  *
+ * Tokens minted here die after SEVEN DAYS if the OAuth app's publishing status is still
+ * "Testing" — that is Google's rule, not a fault in this script. If `e2e:google` or the
+ * import probe starts reporting invalid_grant a week after it last worked, that is why:
+ * re-run this, or publish the app.
+ *
  * Scopes come from src/lib/google/scopes.ts rather than being restated here, so a
  * token obtained by this script always covers exactly what Hearth asks for. Note they
  * are granular: calendar.events and calendar.readonly, NOT the blanket calendar
