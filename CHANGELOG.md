@@ -200,6 +200,23 @@ that formally marks its milestone.
 
 ### Added
 
+- **Bulk actions on the people list.** A checkbox on every row, one in the header that ticks
+  every row listed, and a bar that appears with what you can do to the selection:
+  - **Labels** — add or remove several at once, or type a new one. Labels are matched by
+    *name*, which is what makes a mixed selection work: a label belongs to a contact's owner,
+    so applying *Family* to a contact your partner shared with you means theirs, not yours.
+    They reach Google Contacts as groups, and the bar says so.
+  - **Add to Google / Remove from Google** across the selection. Unticking queues the Google
+    copies for removal exactly as unticking one does.
+  - **Move to trash**, which is owner-only per record — an edit share is permission to help
+    maintain a contact, not to destroy it — and reports what it left alone rather than
+    silently doing three of four.
+  - When the list is truncated, the bar offers **all N matching this filter** rather than only
+    the rows on screen. The filter is re-read on the server rather than trusted as a list of
+    ids from the browser.
+  - Bulk editing is deliberately limited to what means something for many people at once. A
+    name or an address is per person; custom fields are not offered yet.
+
 - **Importing from Google brings the picture, not a link to it.** A contact's photo is
   downloaded and becomes its picture in Hearth. Both places Google keeps one are read: the
   contact's own photo, and — for contacts that arrived through Google's CSV importer — a

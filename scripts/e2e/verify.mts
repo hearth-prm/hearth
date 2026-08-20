@@ -3418,6 +3418,158 @@ try {
     where: { id: { in: [first.id, second!.id, stale.id, live.id] } },
   });
 
+  // ════════════════════════════════════════════════════════════════════════
+  section("§21 Bulk actions on the people list");
+
+  // Driven through the browser throughout. The whole feature IS form wiring — one form
+  // around the table, checkboxes named personId, and buttons that send it to three
+  // different actions with their own name/value — and none of that is testable by calling
+  // the actions directly.
+  const bulkLabel = await prisma.label.create({
+    data: { ownerId: A.id, name: "Bulk Label" },
+  });
+  const bulkPeople: { id: string }[] = [];
+  for (const n of ["Bulk Alpha", "Bulk Beta", "Bulk Gamma"]) {
+    bulkPeople.push(await prisma.person.create({
+      data: {
+        ownerId: A.id, displayName: n, givenName: n.split(" ")[0], familyName: n.split(" ")[1],
+        addToGoogle: false,
+      },
+    }));
+  }
+  // One shared with A but owned by B: it must be editable and NOT deletable, which is the
+  // rule a bulk control is most likely to get wrong.
+  const bulkShared = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Bulk Shared", addToGoogle: false },
+  });
+  await prisma.share.create({
+    data: { ownerId: B.id, withUserId: A.id, personId: bulkShared.id, scope: "PERSON", permission: "EDIT" },
+  });
+
+  const tick = async (name: string) => {
+    await A.page.check(`tr:has-text("${name}") input[name="personId"]`);
+  };
+  const bulkBar = () => A.page.textContent('form#people-bulk >> text=selected');
+
+  await A.page.goto("/people?q=Bulk");
+  ok("21.1 every row has a checkbox",
+     (await A.page.$$('input[name="personId"]')).length >= 4,
+     (await A.page.$$('input[name="personId"]')).length);
+  ok("21.1b and no bulk bar until something is ticked",
+     (await A.page.$$('form#people-bulk >> text=selected')).length === 0);
+
+  await tick("Bulk Alpha");
+  await A.page.waitForSelector('form#people-bulk >> text=selected', { timeout: 10_000 });
+  ok("21.2 ticking a row shows what is selected", ((await bulkBar()) ?? "").includes("1 selected"),
+     await bulkBar());
+
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.waitForFunction(
+    () => document.querySelectorAll('input[name="personId"]:not(:checked)').length === 0,
+    undefined, { timeout: 10_000 },
+  ).catch(() => {});
+  const allCount = (await A.page.$$('input[name="personId"]')).length;
+  ok("21.3 select all ticks every listed row",
+     ((await bulkBar()) ?? "").includes(`${allCount} selected`), await bulkBar());
+
+  // --- bulk label ----------------------------------------------------------
+  await A.page.click('form#people-bulk button:has-text("Labels")');
+  await A.page.check(`form#people-bulk input[name="labelName"][value="Bulk Label"]`);
+  // :text-is, not :has-text — the latter matches substrings, so "Add" found the
+  // "Add to Google" button rendered above and this check spent two runs failing while the
+  // code was right.
+  await A.page.click('form#people-bulk button:text-is("Add")');
+  await waitForDb("the label to reach all three", async () =>
+    (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 3);
+  ok("21.4 a label is applied to everything selected",
+     (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 3,
+     await A.page.textContent('form#people-bulk [role="status"]').catch(() => "no message"));
+  // The shared contact is owned by B, so it gets B's label of the same name rather than
+  // A's — the rule that a contact carries its owner's labels, kept in bulk.
+  const bsLabels = await prisma.personLabel.findMany({
+    where: { personId: bulkShared.id },
+    include: { label: true },
+  });
+  ok("21.4b including one shared with you, under its OWNER's label of that name",
+     bsLabels.length === 1 && bsLabels[0]?.label.name === "Bulk Label"
+       && bsLabels[0]?.label.ownerId === B.id,
+     bsLabels.map((pl) => `${pl.label.name}/${pl.label.ownerId === B.id ? "B" : "A"}`));
+
+  // Seeded directly first, so removal is a removal. The earlier version of this check ran
+  // straight after the add and would have passed on a count that was already zero — which
+  // is exactly how it passed while the add was broken.
+  await prisma.personLabel.createMany({
+    data: bulkPeople.map((p) => ({ personId: p.id, labelId: bulkLabel.id })),
+    skipDuplicates: true,
+  });
+  const beforeRemoval = await prisma.personLabel.count({ where: { labelId: bulkLabel.id } });
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:has-text("Labels")');
+  await A.page.check(`form#people-bulk input[name="labelName"][value="Bulk Label"]`);
+  await A.page.click('form#people-bulk button:text-is("Remove")');
+  await waitForDb("the label to be taken off", async () =>
+    (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 0);
+  ok("21.5 and can be taken off the same way",
+     beforeRemoval === 3
+       && (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 0
+       && (await prisma.personLabel.count({ where: { personId: bulkShared.id } })) === 0,
+     beforeRemoval);
+
+  // --- bulk Add to Google --------------------------------------------------
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:has-text("Add to Google")');
+  await waitForDb("all four to be marked for Google", async () =>
+    (await prisma.person.count({
+      where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] }, addToGoogle: true },
+    })) === 4);
+  ok("21.6 Add to Google applies to the selection, shared records included",
+     (await prisma.person.count({
+       where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] }, addToGoogle: true },
+     })) === 4);
+
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:has-text("Remove from Google")');
+  await waitForDb("all four to be unmarked", async () =>
+    (await prisma.person.count({
+       where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] }, addToGoogle: false },
+    })) === 4);
+  ok("21.6b and unticking it queues the Google copies for removal",
+     (await prisma.person.count({
+       where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] }, addToGoogle: false },
+     })) === 4);
+
+  // --- bulk delete ---------------------------------------------------------
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:has-text("Move to trash")');
+  await waitForDb("the three owned contacts to be trashed", async () =>
+    (await prisma.person.count({
+      where: { id: { in: bulkPeople.map((p) => p.id) }, deletedAt: { not: null } },
+    })) === 3);
+  ok("21.7 deleting in bulk trashes what you own",
+     (await prisma.person.count({
+       where: { id: { in: bulkPeople.map((p) => p.id) }, deletedAt: { not: null } },
+     })) === 3);
+  // The one that matters: an EDIT share is help maintaining a record, not permission to
+  // destroy it, and a bulk button must not be the place that rule gets forgotten.
+  ok("21.7b and leaves somebody else's contact alone",
+     (await prisma.person.findUniqueOrThrow({ where: { id: bulkShared.id } })).deletedAt === null);
+  const bulkMsg = (await A.page.textContent('form#people-bulk [role="status"]')) ?? "";
+  ok("21.7c saying so, rather than silently doing three of four",
+     bulkMsg.includes("3 contact") && bulkMsg.includes("not yours to delete"), bulkMsg);
+  ok("21.7d and each trashing is in that contact's history",
+     (await prisma.personVersion.count({
+       where: { personId: { in: bulkPeople.map((p) => p.id) }, source: "TRASHED" },
+     })) === 3);
+
+  await prisma.person.deleteMany({
+    where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] } },
+  });
+  await prisma.label.deleteMany({ where: { name: "Bulk Label" } });
+
 } finally {
   await h.stop();
 }

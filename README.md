@@ -55,7 +55,7 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A trash can that never empties itself | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 476 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 489 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -611,6 +611,17 @@ The contact list filters by label (any or all of them), by who can see a contact
 there is an email or phone. Every filter is a link, so a filtered list is a URL you
 can bookmark and Back out of one step at a time.
 
+### Doing one thing to many contacts
+
+Tick the rows you want — or the checkbox in the header to take everything listed — and a bar
+appears with what can be done to a selection: add or remove **labels**, turn **Add to
+Google** on or off, or **move them to the trash**. When the list is showing the first 200 of
+more, the bar offers *all N matching this filter* instead of only what is on screen.
+
+Deleting stays owner-only, per record, and the bar tells you when it left something alone
+rather than quietly doing most of what you asked. Only operations that mean something for
+many people at once are offered: a name or an address is per person.
+
 ### Import and export
 
 **Export** writes a CSV of whatever the contact list is currently showing — filter
@@ -927,7 +938,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 476 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 489 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 476 checks
+npm run e2e         # builds, then drives a real browser through 489 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -87,6 +87,9 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **A check that can pass without the feature working is not a check.** Assert painted
   colours over attributes, counted deltas over absences, a tooltip's own text over the
   page's. Say what failed as the third argument, never bare `true`.
+- **`:has-text()` matches substrings.** "Add" found the "Add to Google" button above it, so
+  two label checks failed for two runs while the code was right. Use `:text-is()` whenever
+  one button's name is a prefix of another's.
 - **`waitForDb`, not a toast**, when the assertion is about a write: `revalidatePath` can
   sweep the message away before it is read.
 - Leave state clean for later sections, and remember new fixtures invalidate old absence
@@ -123,6 +126,10 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   exercising the import that calls all three. `importOne` is now in `google/import-one.ts`
   rather than inside the action, so §17.25 drives a Google payload to the rows it produces —
   picture included — with no request and no Google account.
+- **React drops a submitter's `name`/`value`** when a form goes to a function action, so one
+  form with several buttons cannot learn which was pressed that way. Every "add" silently
+  became the "remove" that was its fallback. `SubmitButton`'s `beforeSubmit` sets a hidden
+  input instead.
 - **A tombstone must know which record it was queued for.** Matching a queued deletion by
   Google resource id alone meant it settled onto whatever row held that id when it ran, so
   deleting a contact and re-importing the same one disabled the new contact and deleted the

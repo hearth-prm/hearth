@@ -24,6 +24,13 @@ import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
 import { effectivePhotoMap } from "@/lib/photos-db";
 import { PeopleFilters } from "@/components/people-filters";
+import { PeopleBulkBar } from "@/components/people-bulk-bar";
+import { SelectAllPeople } from "@/components/select-all-people";
+import {
+  bulkLabelPeople,
+  bulkSetAddToGoogle,
+  bulkTrashPeople,
+} from "@/lib/actions/people-bulk";
 
 const PAGE_SIZE = 200;
 
@@ -146,9 +153,16 @@ export default async function PeoplePage({
           />
         ) : (
           <div className="overflow-x-auto">
+            {/* One form around the whole table, so every ticked row is submitted with
+                whichever bulk button is pressed — no selection state to keep in step with
+                the rows, and it works before hydration. */}
+            <form id="people-bulk" className="contents">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+                  <th scope="col" className="w-8 pl-5 pr-0 py-3 font-medium">
+                    <SelectAllPeople />
+                  </th>
                   <th scope="col" className="px-5 py-3 font-medium">
                     Name
                   </th>
@@ -178,6 +192,15 @@ export default async function PeoplePage({
                     key={person.id}
                     className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50 dark:border-neutral-800/60 dark:hover:bg-neutral-800/40"
                   >
+                    <td className="w-8 pl-5 pr-0 py-3">
+                      <input
+                        type="checkbox"
+                        name="personId"
+                        value={person.id}
+                        aria-label={`Select ${person.displayName}`}
+                        className="size-4 rounded border-neutral-300 dark:border-neutral-600"
+                      />
+                    </td>
                     <td className="px-5 py-3">
                       <span className="flex items-center gap-2.5">
                         <Avatar
@@ -229,6 +252,17 @@ export default async function PeoplePage({
                 ))}
               </tbody>
             </table>
+
+            <PeopleBulkBar
+              labelNames={labelRows.map((l) => l.name)}
+              total={total}
+              shown={people.length}
+              filterFields={filterFields(params)}
+              labelAction={bulkLabelPeople}
+              googleAction={bulkSetAddToGoogle}
+              trashAction={bulkTrashPeople}
+            />
+            </form>
           </div>
         )}
       </Card>
@@ -250,6 +284,25 @@ export default async function PeoplePage({
       </div>
     </div>
   );
+}
+
+/**
+ * The current filter, as fields the bulk form can carry.
+ *
+ * Same parameters the export uses, for the same reason: "act on everything matching" has to
+ * mean the list you were looking at. Sent as f.* so the action can tell a filter apart from
+ * its own inputs, and re-parsed server-side rather than trusted — peopleWhere ANDs the
+ * readable clause, so the widest a forged request can reach is that user's own contacts.
+ */
+function filterFields(params: RawParams): { name: string; value: string }[] {
+  const out: { name: string; value: string }[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if ((NON_FILTER_PARAMS as readonly string[]).includes(key)) continue;
+    for (const v of Array.isArray(value) ? value : value === undefined ? [] : [value]) {
+      out.push({ name: key, value: v });
+    }
+  }
+  return out;
 }
 
 /** Pass the current filters straight through to the export endpoint. */
