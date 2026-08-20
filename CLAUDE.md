@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 456 checks
+npm run e2e         # builds, then drives a real browser through 465 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -118,6 +118,11 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   `unstructuredName`, `canonicalForm` and `formattedValue` from what it is sent, so omitting
   them costs nothing — 300 phone numbers came back identical. `birthdays[].text` is NOT
   regenerated: dropping the echo is a real change, and a deliberate one.
+- **A helper with tests and a call site without them is where the bug lives.** The photo
+  import had unit tests for choosing the URL, downloading it and storing it, and nothing
+  exercising the import that calls all three. `importOne` is now in `google/import-one.ts`
+  rather than inside the action, so §17.25 drives a Google payload to the rows it produces —
+  picture included — with no request and no Google account.
 - **A group-level loss check is not a loss check.** `google-write-check.mts --all` reported
   a clean run while 41 custom fields were deleted from inside `userDefined`, because every
   contact had gained a `hearth_id` and so every group was still non-empty. It compares

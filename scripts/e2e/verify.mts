@@ -2416,6 +2416,78 @@ try {
      (await savePhotoFromUrl(picPerson.id, A.id, `${base}/not-an-image`)) === "not-an-image"
        && (await prisma.personPhoto.count({ where: { personId: picPerson.id } })) === 1);
   await prisma.person.delete({ where: { id: picPerson.id } });
+
+  // --- the whole import, wiring included -----------------------------------
+  //
+  // Every piece above had a test and the wiring between them had none, which is where this
+  // codebase has been bitten before. importOne is the writer the action delegates to, so
+  // this drives a Google payload all the way to the rows it produces — columns, rescued
+  // fields, labels, the adoption link, the history entry and the picture — without needing
+  // a request or a real Google account.
+  const { importOne } = await import("@/lib/google/import-one");
+  const wiredLabel = await prisma.label.create({
+    data: { ownerId: A.id, name: "Imported Wiring" },
+  });
+  const wiredPlan = planGoogleImport(
+    [{
+      resourceName: "people/wired", etag: "etag-wired",
+      names: [{ givenName: "Wired", familyName: "Import", displayName: "Wired Import" }],
+      emailAddresses: [{ value: "wired@e2e.test", type: "home" }],
+      addresses: [{ streetAddress: "1 Wire St", city: "Leeds", postalCode: "LS1 1AA",
+                    countryCode: "GB", type: "home" }],
+      birthdays: [{ date: { month: 3, day: 9 } }],
+      userDefined: [
+        { key: "Photo", value: `${base}/pic.png` },
+        { key: "Blood type", value: "AB+" },
+      ],
+      memberships: [{ contactGroupMembership: { contactGroupResourceName: "contactGroups/wired" } }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+
+  await importOne(A.id, wiredPlan, new Map([["contactGroups/wired", wiredLabel.id]]));
+  const wired = await prisma.person.findFirst({
+    where: { ownerId: A.id, displayName: "Wired Import" },
+    include: {
+      contactPoints: true,
+      labels: true,
+      googleSyncs: true,
+      photos: true,
+      versions: true,
+    },
+  });
+  ok("17.25 an imported contact exists, with its columns", wired?.givenName === "Wired"
+       && wired?.familyName === "Import", wired?.displayName);
+  ok("17.25b its contact points, address parts and all",
+     wired!.contactPoints.some((cp) => cp.kind === "EMAIL" && cp.value === "wired@e2e.test")
+       && wired!.contactPoints.some((cp) => cp.kind === "ADDRESS" && cp.city === "Leeds"
+            && cp.postalCode === "LS1 1AA"),
+     wired?.contactPoints.map((cp) => `${cp.kind}:${cp.value}`));
+  ok("17.25c the yearless birthday, in the form that goes back as a date",
+     wired?.birthday === null && wired?.birthdayText === "--03-09", wired?.birthdayText);
+  ok("17.25d the Google label as a Hearth label",
+     wired?.labels.length === 1 && wired?.labels[0]?.labelId === wiredLabel.id);
+  ok("17.25e the link that makes this an adoption rather than a duplicate",
+     wired?.googleSyncs[0]?.googleResourceName === "people/wired"
+       && wired?.googleSyncs[0]?.googleSyncStatus === "PENDING",
+     wired?.googleSyncs[0]);
+  ok("17.25f a first version, so history starts where the data did",
+     wired?.versions.length === 1 && wired?.versions[0]?.source === "GOOGLE_IMPORT",
+     wired?.versions.map((v) => v.source));
+  // The question this whole section exists to answer.
+  ok("17.25g AND THE PICTURE — downloaded, not left as a URL",
+     wired?.photos.length === 1 && wired?.photos[0]?.mimeType === "image/png"
+       && (wired?.photos[0]?.data.length ?? 0) > 0,
+     wired?.photos.map((ph) => `${ph.mimeType} ${ph.width}px`));
+  ok("17.25h with no custom field holding that URL",
+     !Object.keys((wired?.custom ?? {}) as Record<string, unknown>).includes("photo"),
+     Object.keys((wired?.custom ?? {}) as Record<string, unknown>));
+  ok("17.25i while a custom field that is not a photo is still imported",
+     ((wired?.custom ?? {}) as Record<string, string>)["blood_type"] === "AB+",
+     wired?.custom);
+
+  await prisma.person.delete({ where: { id: wired!.id } });
+  await prisma.label.delete({ where: { id: wiredLabel.id } });
   photoServer.close();
 
   // Every group Hearth overwrites must be one the import reads, or the first sync
@@ -3171,8 +3243,14 @@ try {
      trashNote.includes("Empty trash") && trashNote.includes("never empties itself"),
      trashNote.slice(0, 160) || beforeEmpty.length);
   await A.page.click('button:has-text("Empty trash")');
+  // Waits for the events too, not only the contacts. emptyTrash destroys people first and
+  // events second, in a transaction each, so "the contacts are gone" is the middle of the
+  // operation rather than the end of it — and asserting on the events there failed about one
+  // run in three. The same shape as 19.12d: one wait per write.
   await waitForDb("the trash to empty", async () =>
-    (await prisma.person.count({ where: { id: { in: bulk.map((b) => b.id) } } })) === 0);
+    (await prisma.person.count({ where: { id: { in: bulk.map((b) => b.id) } } })) === 0
+      && (await prisma.event.count({ where: { id: bulkEvent.id } })) === 0
+      && (await prisma.person.count({ where: { id: trashedStill.id } })) === 0);
   ok("19.22 emptying destroys every trashed contact",
      (await prisma.person.count({ where: { id: { in: bulk.map((b) => b.id) } } })) === 0);
   ok("19.22b and every trashed event",
