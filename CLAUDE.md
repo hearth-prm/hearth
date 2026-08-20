@@ -111,15 +111,25 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 
 ## Known open items
 
-- Six real Google contacts have been through the import, and one has been **pushed back**
-  (`scripts/e2e/google-write-check.mts`). Nothing was lost: Google recomputes `displayName`,
-  `displayNameLastFirst`, `unstructuredName` and `canonicalForm` from what is sent, notes
-  with emoji and accents survive byte-for-byte, and — the one that mattered — `memberships`
-  is untouched, so a push does not drop a contact out of its labels. Still unproven: an
-  address book big or messy enough to hit paging, and the nine field groups no real contact
-  has yet carried (`imClients`, `locations`, `externalIds`, `skills`, `genders`, …).
+- **The Google round trip is verified against real data, read and write.** 327 real contacts
+  through `scripts/e2e/google-import-check.mts` (two pages, so paging is exercised): zero
+  field groups would be cleared. Three pushed back with
+  `scripts/e2e/google-write-check.mts`: nothing lost, and every group Google returned came
+  back field-for-field — structured addresses with `region` and `countryCode`, a yearless
+  birthday as a date, phone numbers, emails, URLs, notes with emoji and accents. Google
+  recomputes `displayName`, `displayNameLastFirst`, `unstructuredName`, `canonicalForm` and
+  `formattedValue` from what it is sent, so omitting them costs nothing, and `memberships` is
+  untouched — a push does not drop a contact out of its labels.
 - Run the read-only probe first on any new address book; it says what a push would clear
-  before a push happens.
+  before a push happens. `--field <group>` shows the contacts a named group would change.
+- **Nine field groups are unreachable by hand**: `imClients`, `sipAddresses`, `calendarUrls`,
+  `externalIds`, `miscKeywords`, `interests`, `skills`, `locations`, `genders`. Not one of
+  327 real contacts carried any — Google's own interface does not appear to create them, so
+  they arrive only from other clients. Covered by fixtures (§17.11) and not testable against
+  a real account without another client to write them; treat that as answered, not pending.
+- `birthdays[].text` is deliberately not sent back when it only echoes the date. That is a
+  choice, not a measurement: no dummy contact carried an echo, and the ones that did were
+  real people.
 - Honorifics are NOT lost — Google's own UI stores them structured and Hearth returns them
   there. What is lost is a name that arrived from another client as one unsplit string: it
   comes back as a first name. Preferring `unstructuredName` over the parts would be a change

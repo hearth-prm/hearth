@@ -59,9 +59,16 @@ built app through 433 checks, and `npm run e2e:google` runs the Google-facing ha
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
-The one gap worth naming: **no real Google address book has been through the in-place
-import or the widened field serialiser yet.** Both are exercised against throwaway
-accounts, which is not the same as your contacts.
+The Google round trip has been checked against a real 327-contact address book, in both
+directions: nothing a push would clear, and three contacts actually pushed back with every
+field Google returned surviving field-for-field — structured addresses, a birthday with no
+year, phone numbers, notes with emoji, and labels left alone.
+
+Nine of the field groups Hearth manages have never been seen on a real contact
+(`imClients`, `sipAddresses`, `calendarUrls`, `externalIds`, `miscKeywords`, `interests`,
+`skills`, `locations`, `genders`). Google's own interface does not appear to create them, so
+they reach an account only from another client; they are covered by fixtures rather than by
+your data.
 
 ---
 
