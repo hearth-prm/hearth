@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 433 checks
+npm run e2e         # builds, then drives a real browser through 456 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -111,15 +111,26 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 
 ## Known open items
 
-- **The Google round trip is verified against real data, read and write.** 327 real contacts
-  through `scripts/e2e/google-import-check.mts` (two pages, so paging is exercised): zero
-  field groups would be cleared. Three pushed back with
-  `scripts/e2e/google-write-check.mts`: nothing lost, and every group Google returned came
-  back field-for-field — structured addresses with `region` and `countryCode`, a yearless
-  birthday as a date, phone numbers, emails, URLs, notes with emoji and accents. Google
-  recomputes `displayName`, `displayNameLastFirst`, `unstructuredName`, `canonicalForm` and
-  `formattedValue` from what it is sent, so omitting them costs nothing, and `memberships` is
-  untouched — a push does not drop a contact out of its labels.
+- **The Google round trip is verified against a whole real address book, read and write.**
+  330 contacts read (two pages, so paging is exercised) and then **all 330 pushed back** with
+  `google-write-check.mts --all`: zero field groups lost, and `memberships` and `photos`
+  untouched on every one. Google recomputes `displayName`, `displayNameLastFirst`,
+  `unstructuredName`, `canonicalForm` and `formattedValue` from what it is sent, so omitting
+  them costs nothing — 300 phone numbers came back identical. `birthdays[].text` is NOT
+  regenerated: dropping the echo is a real change, and a deliberate one.
+- **A group-level loss check is not a loss check.** `google-write-check.mts --all` reported
+  a clean run while 41 custom fields were deleted from inside `userDefined`, because every
+  contact had gained a `hearth_id` and so every group was still non-empty. It compares
+  entries now. Any "did anything disappear" check over a repeated field has this trap.
+- **Never edit a module while a long write against Google is using it.** A bulk run that
+  started on one version of `import-plan.ts` and finished on another cannot be attributed,
+  and re-running it is the only fix. `.probe/all-before.json` is saved before the first write
+  precisely so a run like that is recoverable — `google-restore-userdefined.mts` put the 41
+  fields back.
+- **A push is idempotent.** Proven by pushing the same 330 contacts twice: the second run
+  came back `0 rewritten, 0 LOST` on every group. The first run trims whitespace (a trailing
+  space on an organisation, a leading one in a middle name) and drops Google's redundant
+  birthday echo; after that the account holds exactly what Hearth sends.
 - Run the read-only probe first on any new address book; it says what a push would clear
   before a push happens. `--field <group>` shows the contacts a named group would change.
 - **Nine field groups are unreachable by hand**: `imClients`, `sipAddresses`, `calendarUrls`,

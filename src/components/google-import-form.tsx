@@ -98,6 +98,11 @@ export function GoogleImportForm({
               <Stat label="Can be imported" value={plan.counts.import} tone="accent" />
               <Stat label="Already linked" value={plan.counts.linked} tone="slate" />
               <Stat label="Kept as custom fields" value={plan.counts.rescued} tone="amber" />
+              <Stat
+                label="Pictures"
+                value={plan.contacts.filter((c) => c.photoUrl).length}
+                tone="accent"
+              />
             </div>
 
             {plan.newFieldKeys.length > 0 ? (
@@ -179,6 +184,10 @@ function ContactRow({ contact }: { contact: PlannedContact }) {
               {contact.rescued.length === 1 ? "" : "s"}
             </Badge>
           ) : null}
+          {/* Said before the import rather than discovered after: a picture is the one
+              thing here that is fetched from outside Google's API, so whether a contact
+              has one is worth seeing in the list. */}
+          {contact.photoUrl ? <Badge tone="accent">picture</Badge> : null}
         </span>
 
         {contact.rescued.length > 0 ? (

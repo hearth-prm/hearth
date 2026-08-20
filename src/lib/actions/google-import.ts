@@ -12,6 +12,7 @@ import {
   type PlannedContact,
 } from "@/lib/google/import-plan";
 import { computeDisplayName } from "@/lib/people";
+import { savePhotoFromUrl } from "@/lib/google/fetch-photo";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
 import { nextCustomFieldOrder } from "@/lib/fields/registry";
@@ -226,6 +227,19 @@ async function importOne(
       },
     },
   });
+
+  // The picture, if it has one. Downloaded rather than referenced: a URL in a custom field
+  // is a link that rots — Google's contact photo URLs are not permanent, and a contact whose
+  // picture is a dead link is worse than one with initials. Google resizes on demand, which
+  // is what makes this possible with no image decoder on the server.
+  if (contact.photoUrl) {
+    const outcome = await savePhotoFromUrl(created.id, userId, contact.photoUrl);
+    // A picture that will not download is not a reason to lose a contact. The import
+    // carries on and the contact keeps its initials.
+    if (outcome !== "saved") {
+      console.warn(`[hearth] photo for ${contact.displayName}: ${outcome}`);
+    }
+  }
 
   // The first version of an adopted contact is what Google had, which makes the history
   // start where the data did rather than at the first edit somebody makes afterwards.

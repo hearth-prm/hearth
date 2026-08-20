@@ -1,5 +1,6 @@
 import type { ContactKind } from "@prisma/client";
 import type { GooglePerson } from "./people-client";
+import { isPhotoField, photoSourceFor } from "./photo-source";
 import { HEARTH_ID_KEY } from "./serialize-person";
 
 /**
@@ -32,6 +33,10 @@ import { HEARTH_ID_KEY } from "./serialize-person";
 export const GOOGLE_IMPORT_FIELDS = [
   "metadata",
   "names",
+  // Read but never written: Hearth sets a picture through the separate photo endpoint, so
+  // `photos` is deliberately absent from MANAGED_PERSON_FIELDS. Here to find the picture to
+  // import, not to take ownership of it.
+  "photos",
   "nicknames",
   "organizations",
   "birthdays",
@@ -150,6 +155,13 @@ export interface PlannedContact {
   /** Google's free-text relations — a name, not a link to another contact. */
   relations: { name: string; label: string | null }[];
   rescued: RescuedValue[];
+  /**
+   * Where the contact's picture can be downloaded from, or null when it has none.
+   *
+   * A URL rather than the bytes: the plan is pure and a preview should not fetch three
+   * hundred images to show you a list.
+   */
+  photoUrl: string | null;
   /** Google contact-group resource names, for turning memberships into labels. */
   groupIds: string[];
   reasons: string[];
@@ -182,13 +194,42 @@ function isPrimary(entry: { metadata?: { primary?: boolean | null } | null }): b
   return entry.metadata?.primary === true;
 }
 
+/**
+ * Whether a value belongs to the CONTACT rather than to a Google profile behind it.
+ *
+ * The People API returns a linked person's own account data alongside the contact's:
+ * `metadata.source.type` is CONTACT for what somebody typed into this contact, and
+ * PROFILE / ACCOUNT / DOMAIN_PROFILE for what Google knows about the person from their
+ * own Google account. The second kind is READ-ONLY — Hearth cannot own it and Google will
+ * not replace it.
+ *
+ * Importing it anyway is how a contact grows. A profile-linked contact came back with two
+ * copies of the same address, one CONTACT and one ACCOUNT; Hearth stored both, pushed both
+ * as CONTACT-owned, and Google added them beside the ACCOUNT copy it had kept — three where
+ * there had been two, and one more on every sync after that. Found by pushing a real
+ * account of 330 contacts and counting, which no fixture would have shown: a fixture has no
+ * metadata at all.
+ *
+ * Absent metadata therefore means "mine": that is what every hand-written payload looks
+ * like, and treating silence as a profile would import nothing.
+ */
+function isContactOwned(entry: {
+  metadata?: { source?: { type?: string | null } | null } | null;
+}): boolean {
+  const type = entry.metadata?.source?.type;
+  return !type || type === "CONTACT";
+}
+
 function pointsOf(
   entries:
     | readonly {
         value?: string | null;
         type?: string | null;
         displayName?: string | null;
-        metadata?: { primary?: boolean | null } | null;
+        metadata?: {
+          primary?: boolean | null;
+          source?: { type?: string | null } | null;
+        } | null;
       }[]
     | undefined,
   kind: ContactKind,
@@ -199,6 +240,7 @@ function pointsOf(
   for (const entry of entries ?? []) {
     const value = clean(entry.value);
     if (!value) continue;
+    if (!isContactOwned(entry)) continue;
     out.push({
       ...NO_DETAIL,
       kind,
@@ -257,8 +299,23 @@ export function planGoogleImport(
     const resourceName = clean(person.resourceName);
     if (!resourceName) continue;
 
-    const name = person.names?.[0];
-    const org = person.organizations?.[0];
+    // The contact's own entry wins over a linked profile's for every group Hearth writes
+    // back, for the reason in isContactOwned: a profile value cannot be owned and pushing
+    // it duplicates it. `ownOf` keeps the first CONTACT-sourced entry and falls back to the
+    // first of any kind, so a contact whose ONLY name comes from a profile still has one to
+    // show — Hearth just does not claim authorship of it.
+    const ownOf = <T extends { metadata?: { source?: { type?: string | null } | null } | null }>(
+      entries: readonly T[] | undefined,
+    ): T[] => {
+      const all = entries ?? [];
+      const own = all.filter(isContactOwned);
+      return own.length > 0 ? own : [...all];
+    };
+
+    const ownNames = ownOf(person.names);
+    const ownOrgs = ownOf(person.organizations);
+    const name = ownNames[0];
+    const org = ownOrgs[0];
     const userDefined = person.userDefined ?? [];
     const existingHearthId =
       clean(userDefined.find((u) => u.key === HEARTH_ID_KEY)?.value) ?? null;
@@ -268,7 +325,7 @@ export function planGoogleImport(
     // Google's own displayName first; then the parts; then anything that identifies
     // the row at all, so a contact that is only an email address still has a name.
     const displayName =
-      clean(person.names?.[0]?.displayName) ??
+      clean(name?.displayName) ??
       clean([givenName, familyName].filter(Boolean).join(" ")) ??
       clean(org?.name) ??
       clean(person.emailAddresses?.[0]?.value) ??
@@ -289,13 +346,35 @@ export function planGoogleImport(
     // They have columns of their own now, so they keep their shape: a middle name goes
     // back to Google as a middle name rather than reappearing as "Middle name: John" in
     // the custom fields. What remains below is what genuinely has nowhere to sit.
+    const photoUrl = photoSourceFor(person);
+    // A custom field called "Photo" holding a URL is Google's CSV exporter describing a
+    // picture, not data somebody typed. It becomes the contact's picture in Hearth, so it
+    // is NOT also kept as a text field — a URL in a custom field is the thing being fixed
+    // here, not the goal.
+    // Any Photo field holding a URL, not merely the one that won. A contact with both a
+    // real Google photo and a leftover Photo column would otherwise keep the column as
+    // text — which is the thing being fixed, whether or not that URL is the picture used.
+    const photoFieldUsed = (entry: { key?: string | null; value?: string | null }) =>
+      isPhotoField(entry.key) && /^https?:\/\//i.test((entry.value ?? "").trim());
+
     for (const entry of userDefined) {
       if (entry.key === HEARTH_ID_KEY) continue;
+      if (photoFieldUsed(entry)) continue;
       rescue(
         clean(entry.key) ?? "Custom field",
         clean(entry.value),
         "An existing Google custom field. Hearth replaces the whole custom-field group when it syncs, so this is kept as one of its own.",
       );
+    }
+    if (userDefined.some((e) => photoFieldUsed(e))) {
+      // Said out loud because it removes something from Google. Hearth replaces the whole
+      // custom-field group on a push, and this field is not being kept as a field, so the
+      // URL goes — while the picture it pointed at is downloaded and kept.
+      reasons.push(
+        "The Photo custom field becomes the contact's picture in Hearth; the URL itself will be dropped from Google on the next sync.",
+      );
+    } else if (photoUrl) {
+      reasons.push("The contact's picture will be downloaded into Hearth.");
     }
 
     // --- contact points -----------------------------------------------------
@@ -315,7 +394,7 @@ export function planGoogleImport(
       ...pointsOf(person.occupations, "OCCUPATION", 0),
       // Google's first nickname is Hearth's `nickname` column; any others become rows,
       // so a maiden name filed as a second nickname is not thrown away.
-      ...pointsOf((person.nicknames ?? []).slice(1), "NICKNAME", 0),
+      ...pointsOf(ownOf(person.nicknames).slice(1), "NICKNAME", 0),
     );
     for (const [i, entry] of (person.calendarUrls ?? []).entries()) {
       const value = clean(entry.url);
@@ -333,7 +412,7 @@ export function planGoogleImport(
         isPrimary: i === 0, order: i, protocol: clean(entry.protocol),
       });
     }
-    for (const [i, entry] of (person.locations ?? []).entries()) {
+    for (const [i, entry] of ownOf(person.locations).entries()) {
       const value = clean(entry.value);
       if (!value) continue;
       contactPoints.push({
@@ -348,7 +427,7 @@ export function planGoogleImport(
     }
 
     let addressOrder = 0;
-    for (const address of person.addresses ?? []) {
+    for (const address of ownOf(person.addresses)) {
       const text = addressText(address);
       if (!text) continue;
       // The line AND the parts. Hearth stores both, and sends both, so an imported
@@ -371,13 +450,14 @@ export function planGoogleImport(
       });
     }
 
-    if ((person.organizations ?? []).length > 1) {
+    if (ownOrgs.length > 1) {
       reasons.push(
         "Only the first organisation is kept; Hearth stores one per contact and the rest will be dropped on the next sync.",
       );
     }
 
-    const birthdayDate = person.birthdays?.find((b) => b.date)?.date;
+    const ownBirthdays = ownOf(person.birthdays);
+    const birthdayDate = ownBirthdays.find((b) => b.date)?.date;
     const birthday =
       birthdayDate?.year && birthdayDate.month && birthdayDate.day
         ? `${String(birthdayDate.year).padStart(4, "0")}-${String(birthdayDate.month).padStart(2, "0")}-${String(birthdayDate.day).padStart(2, "0")}`
@@ -402,7 +482,7 @@ export function planGoogleImport(
     //
     // So an echo is discarded, and a yearless date is held in the form Google itself uses,
     // which serialize-person reads back into a date.
-    const googleBirthdayText = clean(person.birthdays?.find((b) => b.text)?.text);
+    const googleBirthdayText = clean(ownBirthdays.find((b) => b.text)?.text);
     const echoesTheDate =
       googleBirthdayText !== null &&
       birthdayDate !== undefined &&
@@ -463,19 +543,19 @@ export function planGoogleImport(
         orgLocation: clean(org?.location),
         orgPhoneticName: clean(org?.phoneticName),
         orgType: clean(org?.type),
-        nickname: clean(person.nicknames?.[0]?.value),
+        nickname: clean(ownOf(person.nicknames)[0]?.value),
         organization: clean(org?.name),
         // Google keeps a job title on the organisation and an occupation apart from
         // it; Hearth has one field, so the organisation's title wins and a stray
         // occupation becomes the fallback rather than being dropped.
         jobTitle: clean(org?.title) ?? occupations[0] ?? null,
-        notes: clean(person.biographies?.[0]?.value),
-        gender: clean(person.genders?.[0]?.value),
+        notes: clean(ownOf(person.biographies)[0]?.value),
+        gender: clean(ownOf(person.genders)[0]?.value),
         birthday,
         birthdayText,
       },
       contactPoints,
-      events: (person.events ?? [])
+      events: ownOf(person.events)
         .filter((e) => e.date?.month && e.date?.day)
         .map((e) => ({
           label: clean(e.type),
@@ -483,10 +563,11 @@ export function planGoogleImport(
           month: e.date!.month!,
           day: e.date!.day!,
         })),
-      relations: (person.relations ?? [])
+      relations: ownOf(person.relations)
         .map((r) => ({ name: clean(r.person), label: clean(r.type) }))
         .filter((r): r is { name: string; label: string | null } => Boolean(r.name)),
       rescued,
+      photoUrl,
       groupIds: (person.memberships ?? [])
         .map((m) => clean(m.contactGroupMembership?.contactGroupResourceName))
         .filter((v): v is string => Boolean(v)),

@@ -27,6 +27,16 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **A contact linked to a Google profile gained a duplicate on every sync.** Google returns a
+  linked person's own account data alongside the contact's — the same email once as `CONTACT`
+  and once as `ACCOUNT`. That second copy is read-only: Hearth imported it, pushed it back as
+  the contact's own, and Google added it beside the copy it had kept. Two became three, and
+  would have become four on the next sync, and so on. Only values Google marks as the
+  contact's own are imported now; a contact whose *only* name comes from its profile still
+  keeps that name, since the alternative is a blank row. Found by pushing all 330 contacts of
+  a real address book and counting — no fixture could have shown it, because a hand-written
+  payload carries no source metadata at all.
+
 - **A birthday with no year lost its shape on the way back to Google.** Google returns a
   `text` beside every structured birthday, and on a real 327-contact account every one was a
   machine echo of the date — `1977-06-13` beside `{1977,6,13}`, `--08-08` beside `{8,8}`.
@@ -171,6 +181,29 @@ that formally marks its milestone.
   grows a form and needs the separation.
 
 ### Added
+
+- **Importing from Google brings the picture, not a link to it.** A contact's photo is
+  downloaded and becomes its picture in Hearth. Both places Google keeps one are read: the
+  contact's own photo, and — for contacts that arrived through Google's CSV importer — a
+  custom field called *Photo* holding a URL. On the address book this was built against, 28
+  contacts had the first, 63 had the second, and 41 had **only** the second, so reading
+  either alone would have lost pictures.
+  - Google's generated grey silhouette is skipped. Importing it would give hundreds of
+    contacts the same meaningless avatar in place of the initials Hearth draws.
+  - A *Photo* custom field holding a URL is never kept as a text field, whether or not it is
+    the picture that wins — a URL sitting in a custom field is the thing being fixed, not the
+    goal. The preview says that the URL will leave Google on the next sync, because that is a
+    deletion. On the address book this was built against that took the number of values
+    rescued as custom fields from 63 to nought.
+  - Downloaded at 512px by asking Google to resize, which is what makes this possible with
+    no image decoder on the server, and validated exactly like an upload from the form: a
+    content type that lies about being an image is refused on the bytes.
+  - A picture that will not download is not a reason to lose a contact. The import carries
+    on and that contact keeps its initials.
+  - Worth knowing: the next sync pushes that picture back, at 512px. For a contact whose
+    photo came from Google that replaces the original with a copy no larger than itself, and
+    for one that only had a URL in a custom field it gives the contact a real photo for the
+    first time. Neither loses the picture, but the first is a re-encode rather than a no-op.
 
 - **A trash can. Deleting a contact or an event now moves it there, and nothing empties it
   by itself.** No retention window, no nightly prune, no thirty days — a record leaves the

@@ -2262,6 +2262,162 @@ try {
        && strayId.reasons.some((r) => r.includes("another install")),
      strayId.reasons);
 
+  // --- a linked Google profile is not the contact's own data ----------------
+  //
+  // Found by pushing 330 real contacts and counting: one profile-linked contact came back
+  // with three copies of an email where it had had two. Google returns a linked person's own
+  // account data beside the contact's, marked ACCOUNT or PROFILE rather than CONTACT. It is
+  // read-only, so Hearth importing it and pushing it back adds a copy beside the one Google
+  // kept — and would add another on every sync after that.
+  const linkedProfile = planGoogleImport(
+    [{
+      resourceName: "people/linked", etag: "e",
+      names: [
+        { givenName: "Profile", displayName: "Profile Name", metadata: { source: { type: "PROFILE" } } },
+        { givenName: "Contact", familyName: "Own", displayName: "Contact Own", metadata: { source: { type: "CONTACT" } } },
+      ],
+      emailAddresses: [
+        { value: "typed@e2e.test", metadata: { source: { type: "CONTACT" } } },
+        { value: "typed@e2e.test", metadata: { source: { type: "ACCOUNT" } } },
+      ],
+      phoneNumbers: [{ value: "555", metadata: { source: { type: "DOMAIN_PROFILE" } } }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.24 an email Google copied from the linked profile is not imported twice",
+     linkedProfile.contactPoints.filter((p) => p.kind === "EMAIL").length === 1,
+     linkedProfile.contactPoints.filter((p) => p.kind === "EMAIL"));
+  ok("17.24b nor is a phone number that belongs to the profile rather than the contact",
+     linkedProfile.contactPoints.filter((p) => p.kind === "PHONE").length === 0);
+  ok("17.24c and the contact's own name wins over the profile's",
+     linkedProfile.columns.givenName === "Contact" && linkedProfile.displayName === "Contact Own",
+     { given: linkedProfile.columns.givenName, display: linkedProfile.displayName });
+
+  // A contact whose only name is the profile's still has one: silence is not a profile, and
+  // preferring nothing over a read-only value would leave the row blank.
+  const profileOnly = planGoogleImport(
+    [{
+      resourceName: "people/only", etag: "e",
+      names: [{ givenName: "OnlyProfile", displayName: "Only Profile", metadata: { source: { type: "PROFILE" } } }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.24d a contact whose only name comes from a profile still has a name",
+     profileOnly.columns.givenName === "OnlyProfile", profileOnly.columns.givenName);
+
+  // --- pictures, not URLs to pictures --------------------------------------
+  //
+  // The account this was built against had 28 contacts with a real Google photo and 63 with
+  // the URL sitting in a custom field called "Photo" — Google's own CSV exporter writes it
+  // that way — and 41 of those had ONLY the custom field. Reading either source alone loses
+  // pictures, so both are read and the better one wins.
+  const { photoSourceFor, sizedPhotoUrl } = await import("@/lib/google/photo-source");
+  ok("17.20 a real Google photo is the picture",
+     photoSourceFor({ photos: [{ url: "https://lh3.googleusercontent.com/contacts/AAA" }] })
+       === "https://lh3.googleusercontent.com/contacts/AAA");
+  ok("17.20b Google's generated silhouette is not",
+     photoSourceFor({ photos: [{ url: "https://x/default", default: true }] }) === null);
+  ok("17.20c a Photo custom field holding a URL is",
+     photoSourceFor({ userDefined: [{ key: "Photo", value: "https://x/pic.jpg" }] })
+       === "https://x/pic.jpg");
+  ok("17.20d but a Photo field holding something else is not a URL to fetch",
+     photoSourceFor({ userDefined: [{ key: "Photo", value: "in the blue album" }] }) === null);
+  ok("17.20e a real photo wins over the custom field, being the larger rendition",
+     photoSourceFor({
+       photos: [{ url: "https://real" }],
+       userDefined: [{ key: "Photo", value: "https://custom" }],
+     }) === "https://real");
+  ok("17.20f a size suffix is replaced rather than appended",
+     sizedPhotoUrl("https://lh3.googleusercontent.com/contacts/AAA=s96", 512)
+       === "https://lh3.googleusercontent.com/contacts/AAA=s512",
+     sizedPhotoUrl("https://lh3.googleusercontent.com/contacts/AAA=s96", 512));
+  ok("17.20g and a URL from anywhere else is left exactly as it is",
+     sizedPhotoUrl("https://example.test/pic.jpg", 512) === "https://example.test/pic.jpg");
+
+  const photoPlan = planGoogleImport(
+    [{
+      resourceName: "people/pic", etag: "e",
+      names: [{ givenName: "Pic", displayName: "Pic" }],
+      userDefined: [
+        { key: "Photo", value: "https://lh3.googleusercontent.com/contacts/PIC" },
+        { key: "Blood type", value: "O-" },
+      ],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.21 the plan says where the picture is",
+     photoPlan.photoUrl === "https://lh3.googleusercontent.com/contacts/PIC",
+     photoPlan.photoUrl);
+  ok("17.21b and does NOT also keep it as a text field",
+     !photoPlan.rescued.some((r) => r.key === "photo"),
+     photoPlan.rescued.map((r) => r.key));
+  ok("17.21c while a custom field that is not a photo is still rescued",
+     photoPlan.rescued.some((r) => r.label === "Blood type"),
+     photoPlan.rescued.map((r) => r.label));
+  ok("17.21d and it says the URL will leave Google, since that is a deletion",
+     photoPlan.reasons.some((r) => r.includes("dropped from Google")),
+     photoPlan.reasons);
+
+  // The download itself, against a real HTTP server rather than a mock: the thing that can
+  // fail here is fetch, redirects, content types and the byte cap, none of which a stub
+  // exercises. A PNG this suite already knows how to build stands in for a contact photo.
+  const { createServer } = await import("node:http");
+  const { fetchContactPhoto } = await import("@/lib/google/fetch-photo");
+  const pngBody = makePng(16, [10, 200, 120]);
+  const photoServer = createServer((req, res) => {
+    if (req.url === "/pic.png") {
+      res.writeHead(200, { "content-type": "image/png", "content-length": String(pngBody.length) });
+      res.end(pngBody);
+    } else if (req.url === "/not-an-image") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<html>nope</html>");
+    } else if (req.url === "/lying-image") {
+      // Claims to be an image and is not. The validator, not the header, decides.
+      res.writeHead(200, { "content-type": "image/png" });
+      res.end("this is not a png");
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise<void>((done) => photoServer.listen(0, "127.0.0.1", done));
+  const photoPort = (photoServer.address() as { port: number }).port;
+  const base = `http://127.0.0.1:${photoPort}`;
+
+  const fetched = await fetchContactPhoto(`${base}/pic.png`);
+  ok("17.22 a picture is downloaded and measured",
+     typeof fetched !== "string" && fetched.mimeType === "image/png" && fetched.width === 16,
+     fetched);
+  ok("17.22b a page that is not an image is refused",
+     (await fetchContactPhoto(`${base}/not-an-image`)) === "not-an-image");
+  ok("17.22c and so is a lie about the content type — the bytes decide",
+     (await fetchContactPhoto(`${base}/lying-image`)) === "rejected");
+  ok("17.22d an unreachable URL is a failure, not a crash",
+     (await fetchContactPhoto(`${base}/missing`)) === "unreachable");
+
+  // And that it lands in the database as a picture, which the fetch alone does not show.
+  const { savePhotoFromUrl } = await import("@/lib/google/fetch-photo");
+  const picPerson = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Pic Ture", givenName: "Pic", familyName: "Ture" },
+  });
+  ok("17.23 an imported picture becomes the contact's photo",
+     (await savePhotoFromUrl(picPerson.id, A.id, `${base}/pic.png`)) === "saved");
+  const storedPic = await prisma.personPhoto.findFirst({
+    where: { personId: picPerson.id, userId: A.id },
+  });
+  ok("17.23b stored as bytes, with its size and a cache token",
+     storedPic?.mimeType === "image/png" && storedPic?.width === 16
+       && (storedPic?.data.length ?? 0) > 0 && Boolean(storedPic?.etag),
+     { mime: storedPic?.mimeType, w: storedPic?.width, bytes: storedPic?.data.length });
+  ok("17.23c and it is the photo the contact page would show",
+     (await (await import("@/lib/photos-db")).effectivePhotoFor(picPerson.id, A.id, A.id))?.etag
+       === storedPic?.etag);
+  ok("17.23d a picture that will not download leaves the contact without one, not broken",
+     (await savePhotoFromUrl(picPerson.id, A.id, `${base}/not-an-image`)) === "not-an-image"
+       && (await prisma.personPhoto.count({ where: { personId: picPerson.id } })) === 1);
+  await prisma.person.delete({ where: { id: picPerson.id } });
+  photoServer.close();
+
   // Every group Hearth overwrites must be one the import reads, or the first sync
   // deletes data nobody took a copy of. This is the check that would fail if somebody
   // added a field to MANAGED_PERSON_FIELDS and forgot the import.

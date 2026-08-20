@@ -3,6 +3,12 @@
  *
  *   npx tsx scripts/e2e/google-write-check.mts B "Mister Four" --yes
  *   npx tsx scripts/e2e/google-write-check.mts B "Mister Four" --clear-id
+ *   npx tsx scripts/e2e/google-write-check.mts B --all --yes
+ *
+ * --all pushes EVERY contact in the account and then re-reads the lot. Only ever point that
+ * at an account you are willing to lose: it is the whole address book through the most
+ * dangerous write path in the app, which is exactly the test worth having and exactly the
+ * thing that ruins a real Google account if a belief here is wrong.
  *
  * --clear-id undoes the one mark this leaves behind. A push writes `hearth_id` into
  * userDefined, which is the adoption working as intended — but a probe run against a
@@ -34,6 +40,9 @@ import {
   serializePerson,
   type PersonWithContacts,
 } from "@/lib/google/serialize-person";
+import { resolveMappings } from "@/lib/google/mappings";
+import type { FieldDef } from "@/lib/fields/types";
+import type { FieldMapping } from "@prisma/client";
 import type { ContactPoint, Person } from "@prisma/client";
 
 const ENV_FILE = path.join(process.cwd(), ".env.e2e");
@@ -58,7 +67,8 @@ const slot = (process.argv[2] ?? "").toUpperCase() === "A" ? "A" : "B";
 const needle = process.argv[3] ?? "";
 const confirmed = process.argv.includes("--yes");
 const clearId = process.argv.includes("--clear-id");
-if (!needle) {
+const all = process.argv.includes("--all");
+if (!needle && !all) {
   console.error('Name a contact: google-write-check.mts B "Mister Four" --yes');
   process.exit(1);
 }
@@ -115,6 +125,24 @@ function strip(value: unknown): unknown {
 }
 const show = (v: unknown) => JSON.stringify(canon(strip(v)));
 
+/**
+ * Entries that were in a group and are not any more.
+ *
+ * Presence of the GROUP is not presence of its contents. Comparing only "had something,
+ * has something" reported a clean run while forty-one custom fields were deleted from
+ * inside userDefined, because every contact had gained a hearth_id and so every group was
+ * still non-empty. Matched on the serialised entry so a value that merely moved position
+ * is not called a loss.
+ */
+function entriesMissing(before: unknown, after: unknown): string[] {
+  if (!Array.isArray(before)) return [];
+  const now = new Set((Array.isArray(after) ? after : []).map((x) => JSON.stringify(x)));
+  return before
+    .map((x) => JSON.stringify(x))
+    .filter((x) => !now.has(x))
+    .map((x) => (x.length > 70 ? `${x.slice(0, 70)}…` : x));
+}
+
 const bareContactPoint = (over: Partial<ContactPoint>): ContactPoint =>
   ({
     id: "cp", personId: "p", kind: "EMAIL", label: null, value: "",
@@ -144,6 +172,173 @@ const barePerson = (over: Partial<Person> & Record<string, unknown>): PersonWith
 console.log(`\n=== Google WRITE check — ${email} (slot ${slot}) ===\n`);
 
 const connections = await people.listConnections([...GOOGLE_IMPORT_FIELDS]);
+
+/** What Hearth would send for one Google contact, through the real modules. */
+function payloadFor(source: (typeof connections)[number]) {
+  const contact = planGoogleImport([source], {
+    linkedResourceNames: new Set<string>(),
+  }).contacts[0]!;
+  const customFields: FieldDef[] = contact.rescued.map((r, i) => ({
+    key: r.key, label: r.label, type: "TEXT", core: false, entity: "PERSON",
+    order: 100 + i, required: false, options: [], helpText: null, archived: false,
+    storage: "custom", generic: true, listed: false,
+  }) as unknown as FieldDef);
+  const mappings = resolveMappings(
+    contact.rescued.map((r) => ({
+      fieldKey: r.key, target: "userDefined", targetKey: r.label,
+    }) as unknown as FieldMapping),
+  );
+  return serializePerson(
+    barePerson({
+      ...contact.columns,
+      birthday: contact.columns.birthday ? new Date(contact.columns.birthday) : null,
+      displayName: contact.displayName,
+      id: "probe-write",
+      custom: Object.fromEntries(contact.rescued.map((r) => [r.key, r.value])),
+      contactPoints: contact.contactPoints.map((cp, i) =>
+        bareContactPoint({ ...cp, id: `cp${i}` }),
+      ),
+      googleEvents: contact.events,
+      googleRelations: contact.relations,
+    }),
+    { customFields, mappings },
+  );
+}
+
+if (all && clearId) {
+  // Undo a --all run: strip the probe's marker from every contact, keeping whatever else
+  // each one had in its custom fields.
+  let cleaned = 0;
+  for (const source of connections) {
+    const stray = source.userDefined?.find((u) => u.key === "hearth_id");
+    if (!stray) continue;
+    const keep = (source.userDefined ?? [])
+      .filter((u) => u.key !== "hearth_id")
+      .map((u) => ({ key: u.key ?? "", value: u.value ?? "" }));
+    try {
+      await people.updateContact({
+        resourceName: source.resourceName!,
+        etag: source.etag!,
+        person: { userDefined: keep },
+        updateFields: ["userDefined"],
+      });
+      cleaned += 1;
+    } catch (err) {
+      console.log(`  failed on ${source.names?.[0]?.displayName}: ${err instanceof Error ? err.message.slice(0, 70) : err}`);
+    }
+    if (cleaned % 50 === 0 && cleaned > 0) console.log(`  ${cleaned} cleaned`);
+  }
+  console.log(`\nremoved the marker from ${cleaned} contacts\n`);
+  process.exit(0);
+}
+
+if (all) {
+  if (!confirmed) {
+    console.error(`--all would push all ${connections.length} contacts. Add --yes.`);
+    process.exit(1);
+  }
+  mkdirSync(OUT_DIR, { recursive: true });
+  writeFileSync(path.join(OUT_DIR, "all-before.json"), JSON.stringify(connections, null, 2));
+  console.log(`pushing all ${connections.length} contacts. before payload saved.\n`);
+
+  let done = 0;
+  const failures: { name: string; error: string }[] = [];
+  for (const source of connections) {
+    const name = source.names?.[0]?.displayName ?? source.resourceName ?? "?";
+    const { person: payload, updateFields } = payloadFor(source);
+    // One at a time with a retry, rather than as fast as the loop will go: the People API
+    // rate-limits writes, and a run that dies two thirds of the way through leaves an
+    // address book in a state nobody planned.
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      try {
+        await people.updateContact({
+          resourceName: source.resourceName!,
+          etag: source.etag!,
+          person: payload,
+          updateFields: [...updateFields],
+        });
+        break;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (attempt === 4) {
+          failures.push({ name, error: message.slice(0, 90) });
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+      }
+    }
+    done += 1;
+    if (done % 25 === 0) console.log(`  ${done}/${connections.length}`);
+  }
+  console.log(`\npushed ${done - failures.length} of ${connections.length}`);
+  for (const f of failures) console.log(`  FAILED ${f.name}: ${f.error}`);
+
+  const afterAll = await people.listConnections([...GOOGLE_IMPORT_FIELDS]);
+  writeFileSync(path.join(OUT_DIR, "all-after.json"), JSON.stringify(afterAll, null, 2));
+  const afterByName = new Map(afterAll.map((c) => [c.resourceName, c]));
+
+  const verdicts = new Map<string, { same: number; rewritten: number; lost: number }>();
+  const losses: string[] = [];
+  const unmanagedChanges: string[] = [];
+  let missing = 0;
+
+  for (const source of connections) {
+    const after = afterByName.get(source.resourceName);
+    if (!after) { missing += 1; continue; }
+    const name = source.names?.[0]?.displayName ?? "?";
+
+    for (const field of MANAGED_PERSON_FIELDS) {
+      const b = canon(strip((source as Record<string, unknown>)[field] ?? null));
+      const a = canon(strip((after as Record<string, unknown>)[field] ?? null));
+      const had = Array.isArray(b) ? b.length > 0 : b !== null;
+      const has = Array.isArray(a) ? a.length > 0 : a !== null;
+      if (!had && !has) continue;
+      const v = verdicts.get(field) ?? { same: 0, rewritten: 0, lost: 0 };
+      if (JSON.stringify(b) === JSON.stringify(a)) v.same += 1;
+      else if (had && !has) {
+        v.lost += 1;
+        if (losses.length < 40) losses.push(`   ✗ ${name} — ${field} — was ${show(b)}`);
+      } else {
+        // A group that still has SOMETHING in it can still have lost something from it,
+        // and calling that merely "rewritten" is how this instrument came to report zero
+        // losses while 41 values disappeared from inside userDefined. Entries present
+        // before and absent after are counted as losses whether the group emptied or not.
+        const gone = entriesMissing(b, a);
+        if (gone.length > 0) {
+          v.lost += 1;
+          if (losses.length < 40) {
+            losses.push(`   ✗ ${name} — ${field} — gone from the group: ${gone.join(", ")}`);
+          }
+        } else v.rewritten += 1;
+      }
+      verdicts.set(field, v);
+    }
+
+    // The promise the mask makes, checked on every contact rather than one.
+    for (const field of ["memberships", "photos"]) {
+      const b = canon(strip((source as Record<string, unknown>)[field] ?? null));
+      const a = canon(strip((after as Record<string, unknown>)[field] ?? null));
+      if (JSON.stringify(b) !== JSON.stringify(a) && unmanagedChanges.length < 20) {
+        unmanagedChanges.push(`   ✗ ${name} — ${field} — ${show(b)} → ${show(a)}`);
+      }
+    }
+  }
+
+  console.log(`\n── what Google kept, across ${connections.length} contacts`);
+  for (const [field, v] of verdicts) {
+    const flag = v.lost > 0 ? "✗" : v.rewritten > 0 ? "~" : "=";
+    console.log(`   ${flag} ${field.padEnd(16)} ${v.same} unchanged, ${v.rewritten} rewritten, ${v.lost} LOST`);
+  }
+  if (missing > 0) console.log(`\n   ${missing} contacts are GONE — restore from all-before.json`);
+  if (losses.length > 0) { console.log("\n── losses"); for (const l of losses) console.log(l); }
+  console.log(`\n── fields outside the mask (must be untouched): ${unmanagedChanges.length === 0 ? "all untouched" : ""}`);
+  for (const c of unmanagedChanges) console.log(c);
+
+  const totalLost = [...verdicts.values()].reduce((n, v) => n + v.lost, 0);
+  console.log(`\n=== ${totalLost} field group(s) lost across the account ===\n`);
+  process.exit(0);
+}
+
 const matches = connections.filter((c) =>
   (c.names?.[0]?.displayName ?? "").toLowerCase().includes(needle.toLowerCase()),
 );
@@ -165,12 +360,17 @@ if (clearId) {
     process.exit(0);
   }
   console.log(`removing hearth_id=${stray.value}`);
+  // Everything else in the group is written back. userDefined is replaced wholesale, so
+  // sending an empty group to drop one marker would take a contact's other custom fields
+  // with it — which on this account means 63 Photo values. Taking a marker back has to
+  // put the rest back with it.
+  const keep = (before.userDefined ?? [])
+    .filter((u) => u.key !== "hearth_id")
+    .map((u) => ({ key: u.key ?? "", value: u.value ?? "" }));
   await people.updateContact({
     resourceName,
     etag: before.etag!,
-    // userDefined holds nothing but the id, so replacing the group with an empty one
-    // removes exactly the marker and nothing else.
-    person: { userDefined: [] },
+    person: { userDefined: keep },
     updateFields: ["userDefined"],
   });
   const after = (await people.listConnections([...GOOGLE_IMPORT_FIELDS])).find(

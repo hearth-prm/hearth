@@ -55,7 +55,7 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A trash can that never empties itself | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 433 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 456 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -763,7 +763,11 @@ It stays exactly where it is, gains a `hearth_id`, and from then on the two are 
 contact.
 
 The preview says what each row will bring with it and, when something has nowhere to go,
-what will be kept as a custom field rather than dropped. Everything Hearth models lands in
+what will be kept as a custom field rather than dropped. **Pictures come across as
+pictures** — the photo is downloaded and becomes the contact's picture in Hearth, whether
+Google holds it as the contact's own photo or as a *Photo* custom field left behind by its
+CSV importer. Google's generated grey silhouette is skipped, so contacts without a real
+picture keep their initials. Everything Hearth models lands in
 a real column — the parts of a name, the parts of an address, organisation detail, chat
 handles, external ids, interests, skills, significant dates and Google's own relation
 labels — because the alternative is a sync that reads a field it cannot write and deletes
@@ -923,7 +927,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 433 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 456 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 
