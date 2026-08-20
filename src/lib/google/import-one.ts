@@ -3,6 +3,7 @@ import { computeDisplayName } from "@/lib/people";
 import { nextCustomFieldOrder } from "@/lib/fields/registry";
 import { recordPersonVersionAfter } from "@/lib/person-versions";
 import { savePhotoFromUrl } from "@/lib/google/fetch-photo";
+import { reclaimGoogleContact } from "@/lib/sync/tombstones";
 import type { PlannedContact } from "./import-plan";
 
 /**
@@ -66,6 +67,15 @@ export async function importOne(
   const labelIds = contact.groupIds
     .map((g) => labelIdsByGroup.get(g))
     .filter((id): id is string => Boolean(id));
+
+  // Re-importing a contact that was deleted here but still exists in Google. Two things
+  // are in the way, both invisible until it happens: a deletion still waiting to be sent,
+  // which would fire afterwards and disable the row just created, and the trashed
+  // original still claiming the resource name that @@unique([userId, googleResourceName])
+  // allows only one contact to hold. Taking the contact back settles both.
+  await prisma.$transaction(async (tx) => {
+    await reclaimGoogleContact(tx, { userId, resourceName: contact.resourceName });
+  });
 
   const created = await prisma.person.create({
     select: { id: true },

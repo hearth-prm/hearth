@@ -9,6 +9,7 @@ import {
 import { hearthIdOf, serializePerson } from "@/lib/google/serialize-person";
 import { loadMappings, type ResolvedMappings } from "@/lib/google/mappings";
 import { readablePeopleWhere } from "@/lib/access";
+import { forgetGoogleLink } from "./tombstones";
 import {
   applyMemberships,
   resolveGroups,
@@ -164,7 +165,7 @@ export async function syncContactsForUser(
       }
 
       await deps.people.deleteContact(tombstone.resourceId);
-      await settleTombstone(tombstone.id, userId, tombstone.resourceId);
+      await settleTombstone(tombstone, userId);
       result.deleted += 1;
     } catch (err) {
       const classified = classifyGoogleError(err);
@@ -180,7 +181,7 @@ export async function syncContactsForUser(
             data: { processedAt: now() },
           });
         } else {
-          await settleTombstone(tombstone.id, userId, tombstone.resourceId);
+          await settleTombstone(tombstone, userId);
           result.deleted += 1;
         }
         continue;
@@ -569,22 +570,19 @@ async function markFailed(
  * Scoped to the one account: a shared contact's other copies are unaffected.
  */
 async function settleTombstone(
-  tombstoneId: string,
+  tombstone: { id: string; resourceId: string; personId: string | null },
   userId: string,
-  resourceId: string,
 ): Promise<void> {
-  await prisma.$transaction([
-    prisma.syncTombstone.update({
-      where: { id: tombstoneId },
+  await prisma.$transaction(async (tx) => {
+    await tx.syncTombstone.update({
+      where: { id: tombstone.id },
       data: { processedAt: new Date(), lastError: null },
-    }),
-    prisma.personSync.updateMany({
-      where: { userId, googleResourceName: resourceId },
-      data: {
-        googleResourceName: null,
-        googleEtag: null,
-        googleSyncStatus: "DISABLED",
-      },
-    }),
-  ]);
+    });
+    // Scoped to the contact this deletion was queued FOR; see forgetGoogleLink.
+    await forgetGoogleLink(tx, {
+      userId,
+      resourceId: tombstone.resourceId,
+      personId: tombstone.personId,
+    });
+  });
 }

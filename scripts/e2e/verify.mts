@@ -3280,6 +3280,144 @@ try {
   ok("19.24 emptying the trash left the live contacts alone",
      ((await A.page.textContent("body")) ?? "").includes("Gift Auntie"));
 
+  // ════════════════════════════════════════════════════════════════════════
+  section("§20 Importing the same Google contact twice");
+
+  // Reported from a real install: import three contacts from Google, delete them in Hearth,
+  // import the same three again — and they come back reading "Not in Google" with the sync
+  // reporting nothing to do. Both symptoms are one cause: DISABLED renders as "Not in
+  // Google" and is excluded from the push queue.
+  const { importOne: importAgain } = await import("@/lib/google/import-one");
+  const reGoogle = {
+    resourceName: "people/twice", etag: "etag-twice",
+    names: [{ givenName: "Second", familyName: "Chance", displayName: "Second Chance" }],
+    emailAddresses: [{ value: "twice@e2e.test" }],
+  };
+  const planTwice = () =>
+    planGoogleImport([reGoogle], { linkedResourceNames: new Set<string>() }).contacts[0]!;
+
+  await importAgain(A.id, planTwice(), new Map());
+  const first = await prisma.person.findFirstOrThrow({
+    where: { ownerId: A.id, displayName: "Second Chance" },
+    include: { googleSyncs: true },
+  });
+  ok("20.1 an imported contact is queued to reach Google",
+     first.addToGoogle && first.googleSyncs[0]?.googleSyncStatus === "PENDING"
+       && first.googleSyncs[0]?.googleResourceName === "people/twice",
+     { addToGoogle: first.addToGoogle, sync: first.googleSyncs[0]?.googleSyncStatus });
+
+  // Deleted the way a person deletes it, so the tombstone is queued exactly as it would be.
+  await A.page.goto(`/people/${first.id}`);
+  await A.page.click('button:has-text("Move to trash")');
+  await waitForDb("the contact to be trashed", async () =>
+    (await prisma.person.findUnique({ where: { id: first.id }, select: { deletedAt: true } }))?.deletedAt !== null);
+  ok("20.2 deleting it queues the Google copy for removal",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_CONTACT", resourceId: "people/twice", processedAt: null },
+     })) === 1);
+
+  // Now the same Google contact again. It still exists in Google — the deletion has not been
+  // sent yet — so the import offers it, and taking it must mean taking it back.
+  await importAgain(A.id, planTwice(), new Map());
+  const second = await prisma.person.findFirst({
+    where: { ownerId: A.id, displayName: "Second Chance", deletedAt: null },
+    include: { googleSyncs: true },
+  });
+  ok("20.3 re-importing it works at all", second !== null);
+  ok("20.3b and the new contact holds the Google link",
+     second?.googleSyncs[0]?.googleResourceName === "people/twice",
+     second?.googleSyncs.map((g) => g.googleResourceName));
+  ok("20.3c and reads as waiting for Google rather than as absent from it",
+     second?.addToGoogle === true && second?.googleSyncs[0]?.googleSyncStatus === "PENDING",
+     { addToGoogle: second?.addToGoogle, sync: second?.googleSyncs[0]?.googleSyncStatus });
+
+  // The heart of it. A queued deletion that outlives the record it was made for settles onto
+  // whatever row holds that resource name next — and settleTombstone matches on the resource
+  // alone. Left in place, the next sync would delete the contact from Google and set the
+  // FRESHLY imported row to DISABLED: "Not in Google", nothing to do, and the Google contact
+  // gone. Re-importing a contact is an unambiguous statement that you want it, so the
+  // deletion is cancelled.
+  ok("20.4 re-importing cancels the deletion that was still waiting to be sent",
+     (await prisma.syncTombstone.count({
+       where: { target: "GOOGLE_CONTACT", resourceId: "people/twice", processedAt: null },
+     })) === 0,
+     await prisma.syncTombstone.findMany({
+       where: { target: "GOOGLE_CONTACT", resourceId: "people/twice" },
+       select: { processedAt: true, reason: true },
+     }));
+  ok("20.4b and the trashed original no longer claims the resource name",
+     (await prisma.personSync.count({
+       where: { personId: first.id, googleResourceName: "people/twice" },
+     })) === 0);
+
+  // It is in the push queue, which is the assertion the bug report was really about: the
+  // same predicate the sync uses, asked directly.
+  const { readablePeopleWhere: readableForQueue } = await import("@/lib/access");
+  const queued = await prisma.person.count({
+    where: {
+      AND: [
+        readableForQueue(A.id),
+        { id: second!.id, addToGoogle: true },
+        { googleSyncs: { some: { userId: A.id, googleSyncStatus: { in: ["PENDING", "ERROR"] } } } },
+      ],
+    },
+  });
+  ok("20.5 and the sync has something to do", queued === 1, queued);
+
+  // The other half of the same bug, for the timeline where a sync HAS already run between
+  // the delete and the re-import: the deletion is no longer pending, so cancelling it is not
+  // what saves the new contact. What saves it is that settling a tombstone only forgets the
+  // link belonging to the contact it was queued for.
+  const { forgetGoogleLink } = await import("@/lib/sync/tombstones");
+  const stale = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Stale Link", deletedAt: new Date(),
+      googleSyncs: { create: { userId: A.id, googleResourceName: "people/shared-name", googleSyncStatus: "SYNCED" } },
+    },
+  });
+  const live = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Live Again",
+      googleSyncs: { create: { userId: A.id, googleSyncStatus: "PENDING" } },
+    },
+  });
+  // Both rows would match on resource name alone, which is what the old code did.
+  await prisma.personSync.updateMany({
+    where: { personId: stale.id },
+    data: { googleResourceName: null },
+  });
+  await prisma.personSync.updateMany({
+    where: { personId: live.id },
+    data: { googleResourceName: "people/shared-name" },
+  });
+  const cleared = await forgetGoogleLink(prisma, {
+    userId: A.id,
+    resourceId: "people/shared-name",
+    personId: stale.id,
+  });
+  ok("20.6 settling a deletion does not disable a different contact holding that resource",
+     cleared === 0
+       && (await prisma.personSync.findFirstOrThrow({ where: { personId: live.id } }))
+            .googleSyncStatus === "PENDING",
+     cleared);
+  ok("20.6b and a deletion whose contact is gone for good touches nothing",
+     (await forgetGoogleLink(prisma, {
+       userId: A.id, resourceId: "people/shared-name", personId: null,
+     })) === 0
+       && (await prisma.personSync.findFirstOrThrow({ where: { personId: live.id } }))
+            .googleResourceName === "people/shared-name");
+  // And it does forget the right one when the ids agree.
+  ok("20.6c while the contact it WAS queued for does lose its link",
+     (await forgetGoogleLink(prisma, {
+       userId: A.id, resourceId: "people/shared-name", personId: live.id,
+     })) === 1
+       && (await prisma.personSync.findFirstOrThrow({ where: { personId: live.id } }))
+            .googleSyncStatus === "DISABLED");
+
+  await prisma.person.deleteMany({
+    where: { id: { in: [first.id, second!.id, stale.id, live.id] } },
+  });
+
 } finally {
   await h.stop();
 }

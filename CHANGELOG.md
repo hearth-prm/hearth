@@ -27,6 +27,24 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **Re-importing a contact you had deleted left it stranded: "Not in Google", and the sync
+  reporting nothing to do.** Reported from a real install after importing three contacts,
+  deleting them, and importing the same three again. Two faults, one symptom.
+  - A queued deletion was matched by Google resource id alone, so it settled onto whatever
+    contact held that id when it finally ran — which after a re-import is the *new* contact.
+    It was disabled (which renders as "Not in Google" and is excluded from the push queue)
+    and its Google copy deleted. A deletion now records which contact it was queued for and
+    can only ever settle that one.
+  - And the deleted original still claimed the resource name, which only one contact per
+    account may hold, so re-importing before a sync had run failed on a database constraint
+    with no explanation. Re-importing a contact now takes it back: any deletion still waiting
+    is dropped, and the old link released. Re-importing something is not an ambiguous
+    statement about whether you want it.
+
+  If you hit this, the imported contacts are fine to delete and import once more. Check
+  Google for the three contacts themselves — the stray deletion may have removed them, and
+  the trash keeps whatever Hearth had.
+
 - **A contact linked to a Google profile gained a duplicate on every sync.** Google returns a
   linked person's own account data alongside the contact's — the same email once as `CONTACT`
   and once as `ACCOUNT`. That second copy is read-only: Hearth imported it, pushed it back as

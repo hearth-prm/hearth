@@ -43,6 +43,9 @@ export async function queueContactDeletionEverywhere(
         target: "GOOGLE_CONTACT",
         resourceId: link.googleResourceName!,
         etag: link.googleEtag,
+        // Which contact this was queued for, so it can never settle onto a different one
+        // that comes to hold the same Google resource name later.
+        personId: args.personId,
         reason: args.reason,
       },
     });
@@ -67,6 +70,7 @@ export async function queueContactDeletionForAccount(
       target: "GOOGLE_CONTACT",
       resourceId: link.googleResourceName!,
       etag: link.googleEtag,
+      personId: args.personId,
       reason: args.reason,
     },
   });
@@ -133,4 +137,67 @@ export async function cancelPendingDeletion(
   await tx.syncTombstone.deleteMany({
     where: { target, resourceId, processedAt: null },
   });
+}
+
+/**
+ * Take back a deletion because the same Google contact is being adopted again.
+ *
+ * Importing a contact you deleted is not ambiguous: it still exists in Google, you are
+ * looking at it in a list, and you have ticked it. So a deletion still waiting to be sent
+ * is dropped rather than left to fire afterwards — which is what it used to do, deleting
+ * the contact from Google and disabling the row that had just been created for it.
+ *
+ * The old link is cleared too. `@@unique([userId, googleResourceName])` means one Hearth
+ * contact per Google resource per account, and the trashed original still claimed it; the
+ * live contact is the one that owns it now. The trashed record keeps everything else,
+ * including its history — it simply stops pointing at a Google contact somebody else has.
+ */
+export async function reclaimGoogleContact(
+  tx: Tx,
+  args: { userId: string; resourceName: string },
+): Promise<void> {
+  await tx.syncTombstone.deleteMany({
+    where: {
+      target: "GOOGLE_CONTACT",
+      resourceId: args.resourceName,
+      ownerId: args.userId,
+      processedAt: null,
+    },
+  });
+  await tx.personSync.updateMany({
+    where: { userId: args.userId, googleResourceName: args.resourceName },
+    data: { googleResourceName: null, googleEtag: null, googleSyncStatus: "DISABLED" },
+  });
+}
+
+/**
+ * Forget one account's link to a contact whose Google copy has just been deleted.
+ *
+ * The half of settling a tombstone that touches Hearth's own rows, split out so it can be
+ * tested: the sync that calls it needs a Google client and a request-shaped world, and this
+ * is the part that once did the damage. Scoped to the contact the deletion was queued FOR —
+ * a tombstone that matched on the resource name alone would settle onto whatever row held
+ * that name by the time it ran, which after a delete-then-re-import is a live contact.
+ *
+ * A tombstone with no personId is one whose contact is gone for good; there is no link left
+ * to clear, and clearing every row with that resource name would be the original bug.
+ */
+export async function forgetGoogleLink(
+  db: Tx,
+  args: { userId: string; resourceId: string; personId: string | null },
+): Promise<number> {
+  if (!args.personId) return 0;
+  const { count } = await db.personSync.updateMany({
+    where: {
+      userId: args.userId,
+      googleResourceName: args.resourceId,
+      personId: args.personId,
+    },
+    data: {
+      googleResourceName: null,
+      googleEtag: null,
+      googleSyncStatus: "DISABLED",
+    },
+  });
+  return count;
 }

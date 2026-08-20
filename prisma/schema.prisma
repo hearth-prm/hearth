@@ -899,6 +899,14 @@ model SyncTombstone {
   resourceId String
   /// Calendar the event lived on; null for contacts.
   calendarId String?
+  /// Which contact this deletion was queued for, when it was a contact.
+  ///
+  /// Without it a tombstone is matched by resource id alone, and settles onto whatever row
+  /// holds that Google resource name when it finally runs — which after a delete-then-
+  /// re-import is a different, live contact. No foreign key on purpose: a tombstone must
+  /// outlive the row it describes, and for a permanently deleted contact there is nothing
+  /// left to point at. Null then means "no local link to settle".
+  personId   String?
   etag       String?
   /// Why the delete was queued, for audit: "deleted" | "opted_out".
   reason     String
@@ -913,6 +921,7 @@ model SyncTombstone {
 
   @@index([ownerId, processedAt])
   @@index([target, resourceId])
+  @@index([personId])
 }
 
 /// Somebody at a gift event who the gifts are FOR.

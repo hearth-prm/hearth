@@ -55,7 +55,7 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A trash can that never empties itself | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 465 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 476 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -927,7 +927,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 465 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 476 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

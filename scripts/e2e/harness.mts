@@ -12,7 +12,7 @@
  * every contact as failed.
  */
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -129,6 +129,52 @@ export async function startDatabase(): Promise<Database> {
   };
 }
 
+/**
+ * Kill app servers left behind by runs that were killed.
+ *
+ * stop() ends the server on a normal exit, but a run that is SIGKILLed — the editor
+ * crashing, an out-of-memory kill, a terminal closing — never reaches it, and the server is
+ * reparented to init and lives on. Fourteen of them accumulated over one day, holding about
+ * 2.8GB between them, and the machine then started killing tsc and the editor: the leak
+ * made its own symptoms look like unrelated crashes.
+ *
+ * So each run notes its server's pid in a file and, before starting, kills any pid there
+ * that is still alive. Recorded rather than pattern-matched on the process name: this must
+ * never kill a `next start` somebody is using for something else.
+ */
+const APP_PIDS = path.join(tmpdir(), "hearth-e2e-app.pids");
+
+function rememberApp(pid: number | undefined): void {
+  if (!pid) return;
+  const existing = existsSync(APP_PIDS) ? readFileSync(APP_PIDS, "utf8") : "";
+  writeFileSync(APP_PIDS, `${existing}${pid}\n`);
+}
+
+function forgetApp(pid: number | undefined): void {
+  if (!existsSync(APP_PIDS)) return;
+  const kept = readFileSync(APP_PIDS, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() && line.trim() !== String(pid));
+  writeFileSync(APP_PIDS, kept.length > 0 ? `${kept.join("\n")}\n` : "");
+}
+
+function reapStaleApps(): void {
+  if (!existsSync(APP_PIDS)) return;
+  let reaped = 0;
+  for (const line of readFileSync(APP_PIDS, "utf8").split("\n")) {
+    const pid = Number(line.trim());
+    if (!pid) continue;
+    try {
+      process.kill(pid, "SIGKILL");
+      reaped += 1;
+    } catch {
+      // Already gone, which is the common case and not worth saying anything about.
+    }
+  }
+  writeFileSync(APP_PIDS, "");
+  if (reaped > 0) console.log(`  harness: reaped ${reaped} app server(s) from a killed run`);
+}
+
 export async function start(): Promise<Harness> {
   const db = await startDatabase();
   const dir = db.dir;
@@ -150,9 +196,12 @@ export async function start(): Promise<Harness> {
     PORT: String(appPort),
   };
 
+  reapStaleApps();
+
   const app: ChildProcess = spawn("npx", ["next", "start", "-p", String(appPort), "-H", "127.0.0.1"], {
     env, cwd: REPO, stdio: ["ignore", "pipe", "pipe"],
   });
+  rememberApp(app.pid);
   const appLog: string[] = [];
   app.stdout?.on("data", (d) => appLog.push(String(d)));
   app.stderr?.on("data", (d) => appLog.push(String(d)));
@@ -221,6 +270,7 @@ export async function start(): Promise<Harness> {
     await browser.close().catch(() => {});
     await prisma.$disconnect().catch(() => {});
     app.kill("SIGTERM");
+    forgetApp(app.pid);
     await new Promise((r) => setTimeout(r, 500));
     await db.stop();
   }
