@@ -111,7 +111,10 @@ function sortPoints(points: readonly ContactPoint[]): ContactPoint[] {
  * note, and guessing at it would be worse than keeping it.
  */
 function yearlessBirthday(text: string | null): { month: number; day: number } | null {
-  const match = /^(\d{1,2})\/(\d{1,2})$/.exec((text ?? "").trim());
+  const trimmed = (text ?? "").trim();
+  // Two notations: the "12/10" a person types, and the "--12-10" Google itself returns
+  // beside a yearless date. Both mean a day of the year and nothing else.
+  const match = /^(\d{1,2})\/(\d{1,2})$/.exec(trimmed) ?? /^--(\d{2})-(\d{2})$/.exec(trimmed);
   if (!match) return null;
   const month = Number(match[1]);
   const day = Number(match[2]);
@@ -287,6 +290,10 @@ export function serializePerson(
               month: birthday.getUTCMonth() + 1,
               day: birthday.getUTCDate(),
             },
+            // Prose alongside the date, when there is prose worth keeping. The import
+            // discards Google's machine echo of the date, so anything left here is
+            // something a person wrote.
+            ...(clean(person.birthdayText) ? { text: clean(person.birthdayText) } : {}),
           },
         ]
       : yearlessBirthday(person.birthdayText)

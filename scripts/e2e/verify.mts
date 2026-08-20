@@ -2383,10 +2383,45 @@ try {
   const t = tail.contacts[0]!;
   const kindOf = (k: string) => t.contactPoints.filter((p) => p.kind === k);
 
+  // --04-01, in Google's own notation for a date with no year, rather than the "4/1" this
+  // used to synthesise. Kept in the form it arrived in so serialize-person can read it back
+  // as a date instead of pushing prose where Google had a date.
   ok("17.11 gender and a year-less birthday are stored rather than dropped",
      t.columns.gender === "she/her" && t.columns.birthday === null
-       && t.columns.birthdayText === "4/1",
+       && t.columns.birthdayText === "--04-01",
      { gender: t.columns.gender, text: t.columns.birthdayText });
+  ok("17.11a and that form goes back to Google as a date, not as a string",
+     serializePerson(barePerson({
+       displayName: "Tail", givenName: "Tail", birthdayText: t.columns.birthdayText,
+     })).person.birthdays?.[0]?.date?.month === 4,
+     serializePerson(barePerson({
+       displayName: "Tail", givenName: "Tail", birthdayText: t.columns.birthdayText,
+     })).person.birthdays?.[0]);
+
+  // Google returns a `text` beside every structured birthday, and on a real account all
+  // twenty were machine echoes of the date — "1977-06-13" beside {1977,6,13}. Storing them
+  // gave a contact a birthday plus a redundant "birthday, no year" line saying the same.
+  const echoed = planGoogleImport(
+    [{
+      resourceName: "people/echo", etag: "e",
+      names: [{ givenName: "Echo", displayName: "Echo" }],
+      birthdays: [{ date: { year: 1977, month: 6, day: 13 }, text: "1977-06-13" }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.11j a birthday text that merely repeats the date is not stored twice",
+     echoed.columns.birthday === "1977-06-13" && echoed.columns.birthdayText === null,
+     { date: echoed.columns.birthday, text: echoed.columns.birthdayText });
+  const prosed = planGoogleImport(
+    [{
+      resourceName: "people/prose", etag: "e",
+      names: [{ givenName: "Prose", displayName: "Prose" }],
+      birthdays: [{ date: { year: 1977, month: 6, day: 13 }, text: "the day Elvis died" }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.11k but a text that says something a date cannot is kept",
+     prosed.columns.birthdayText === "the day Elvis died", prosed.columns.birthdayText);
   ok("17.11b a chat handle keeps its network",
      kindOf("IM")[0]?.value === "tail@chat" && kindOf("IM")[0]?.protocol === "jabber",
      kindOf("IM")[0]);

@@ -27,6 +27,21 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **A birthday with no year lost its shape on the way back to Google.** Google returns a
+  `text` beside every structured birthday, and on a real 327-contact account every one was a
+  machine echo of the date — `1977-06-13` beside `{1977,6,13}`, `--08-08` beside `{8,8}`.
+  Hearth stored those echoes, which gave a contact a birthday *and* a redundant
+  "birthday, no year" line saying the same thing; worse, an echo like `--08-08` could not be
+  parsed on the way out, so the push replaced Google's structured date with that string and
+  the birthday stopped being a date at all. Echoes are now discarded, a yearless date is kept
+  in Google's own `--MM-DD` notation and read back as a date, and a text that says something
+  a date cannot — "the day Elvis died" — is still kept.
+
+- **A huge address book was truncated in silence.** Reading contacts stops after 20 pages of
+  200. Beyond 4,000 contacts the rest were simply absent, which reads as "that is all of
+  them" — and this list is both what the import offers and what sync reconciles against, so
+  the missing ones would have been quietly unfindable. It now says so in the log.
+
 - **A contact with no name would have been christened with its own email address.** Hearth
   shows the address as the name of a contact that has none, which a list has to do — and the
   push wrote that straight into Google's given-name field, so importing a bare

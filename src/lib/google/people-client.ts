@@ -173,6 +173,16 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
         pages += 1;
       } while (pageToken && pages < MAX_CONNECTION_PAGES);
 
+      // Hitting the cap with a token still in hand means the rest of the address book was
+      // not read. Said out loud, because silence here reads as "that is all of them" — and
+      // this list is what the import offers and what sync reconciles against, so a
+      // truncation nobody notices is contacts that quietly cannot be found.
+      if (pageToken) {
+        console.warn(
+          `[hearth] Google returned more than ${MAX_CONNECTION_PAGES * CONNECTIONS_PAGE_SIZE} contacts; the rest were not read`,
+        );
+      }
+
       return out;
     },
 
@@ -197,6 +207,12 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
         pageToken = res.data.nextPageToken ?? undefined;
         pages += 1;
       } while (pageToken && pages < MAX_CONTACT_GROUP_PAGES);
+
+      if (pageToken) {
+        console.warn(
+          `[hearth] Google returned more than ${MAX_CONTACT_GROUP_PAGES * CONTACT_GROUP_PAGE_SIZE} contact groups; the rest were not read`,
+        );
+      }
 
       return out;
     },

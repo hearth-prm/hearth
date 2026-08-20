@@ -391,11 +391,33 @@ export function planGoogleImport(
       .filter((v): v is string => Boolean(v));
 
     // A birthday with no year is kept as prose rather than reported unstorable.
+    //
+    // But only prose that SAYS something. Google returns a `text` alongside the structured
+    // date, and on a real account every one of them turned out to be a machine echo of that
+    // same date — "1977-06-13" beside {1977,6,13}, "--08-08" beside {8,8}. Storing those
+    // gave a contact a birthday and a redundant "birthday, no year" line reading
+    // 1977-06-13; worse, for a yearless date the echo is unparseable on the way out, so
+    // the push replaced Google's structured date with the string "--08-08" and the birthday
+    // stopped being a date at all.
+    //
+    // So an echo is discarded, and a yearless date is held in the form Google itself uses,
+    // which serialize-person reads back into a date.
+    const googleBirthdayText = clean(person.birthdays?.find((b) => b.text)?.text);
+    const echoesTheDate =
+      googleBirthdayText !== null &&
+      birthdayDate !== undefined &&
+      [
+        birthday,
+        `--${String(birthdayDate.month ?? 0).padStart(2, "0")}-${String(birthdayDate.day ?? 0).padStart(2, "0")}`,
+        [birthdayDate.month, birthdayDate.day].filter(Boolean).join("/"),
+      ].includes(googleBirthdayText);
+    const meaningfulText = echoesTheDate ? null : googleBirthdayText;
     const birthdayText =
       birthdayDate && !birthday
-        ? clean(person.birthdays?.find((b) => b.text)?.text) ??
-          [birthdayDate.month, birthdayDate.day].filter(Boolean).join("/")
-        : clean(person.birthdays?.find((b) => b.text)?.text);
+        ? // Yearless: keep the date, in Google's own --MM-DD notation, so nothing about it
+          // has to be guessed at on the way back.
+          `--${String(birthdayDate.month ?? 0).padStart(2, "0")}-${String(birthdayDate.day ?? 0).padStart(2, "0")}`
+        : meaningfulText;
 
     const action: ContactAction = options.linkedResourceNames.has(resourceName)
       ? "linked"

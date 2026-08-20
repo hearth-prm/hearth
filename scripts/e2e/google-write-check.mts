@@ -77,6 +77,29 @@ const auth = new google.auth.OAuth2({ clientId, clientSecret });
 auth.setCredentials({ refresh_token: refreshToken, scope: GOOGLE_SCOPES.join(" ") });
 const people = createPeopleClient(auth);
 
+/**
+ * Key order is not a difference.
+ *
+ * strip() preserved whatever order each side happened to build its objects in, so six
+ * organisations were reported as rewritten purely because Hearth emits title before
+ * department and Google returns them the other way round. Exactly the bug canonical() in
+ * person-history.ts exists for, in a second place — comparing serialised JSON is only
+ * meaningful once both sides are ordered the same way.
+ *
+ * Array order is left alone: a different order of addresses IS a difference.
+ */
+function canon(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canon);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((k) => [k, canon((value as Record<string, unknown>)[k])]),
+    );
+  }
+  return value;
+}
+
 function strip(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(strip);
   if (value && typeof value === "object") {
@@ -90,7 +113,7 @@ function strip(value: unknown): unknown {
   }
   return value;
 }
-const show = (v: unknown) => JSON.stringify(strip(v));
+const show = (v: unknown) => JSON.stringify(canon(strip(v)));
 
 const bareContactPoint = (over: Partial<ContactPoint>): ContactPoint =>
   ({
@@ -212,8 +235,8 @@ let lost = 0;
 let changed = 0;
 console.log("\n── what Google actually holds now:");
 for (const field of MANAGED_PERSON_FIELDS) {
-  const b = strip((before as Record<string, unknown>)[field] ?? null);
-  const a = strip((after as Record<string, unknown>)[field] ?? null);
+  const b = canon(strip((before as Record<string, unknown>)[field] ?? null));
+  const a = canon(strip((after as Record<string, unknown>)[field] ?? null));
   const had = Array.isArray(b) ? b.length > 0 : b !== null;
   const has = Array.isArray(a) ? a.length > 0 : a !== null;
   if (!had && !has) continue;
@@ -235,8 +258,8 @@ for (const field of MANAGED_PERSON_FIELDS) {
 // is somebody's picture.
 console.log("\n── fields Hearth does not manage (must be untouched):");
 for (const field of ["memberships", "photos", "clientData", "coverPhotos"]) {
-  const b = strip((before as Record<string, unknown>)[field] ?? null);
-  const a = strip((after as Record<string, unknown>)[field] ?? null);
+  const b = canon(strip((before as Record<string, unknown>)[field] ?? null));
+  const a = canon(strip((after as Record<string, unknown>)[field] ?? null));
   const same = JSON.stringify(b) === JSON.stringify(a);
   if (b === null && a === null) continue;
   console.log(`   ${same ? "=" : "✗"} ${field}: ${same ? "untouched" : `CHANGED ${show(b)} → ${show(a)}`}`);

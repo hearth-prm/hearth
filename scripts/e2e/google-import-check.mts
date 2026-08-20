@@ -28,6 +28,9 @@ import {
   serializePerson,
   type PersonWithContacts,
 } from "@/lib/google/serialize-person";
+import { resolveMappings } from "@/lib/google/mappings";
+import type { FieldDef } from "@/lib/fields/types";
+import type { FieldMapping } from "@prisma/client";
 import type { ContactPoint, Person } from "@prisma/client";
 
 const ENV_FILE = path.join(process.cwd(), ".env.e2e");
@@ -66,6 +69,29 @@ const people = createPeopleClient(auth);
 // --- helpers ---------------------------------------------------------------
 
 /** Google decorates every value with `metadata`; only the meaning is compared. */
+/**
+ * Key order is not a difference.
+ *
+ * strip() preserved whatever order each side happened to build its objects in, so six
+ * organisations were reported as rewritten purely because Hearth emits title before
+ * department and Google returns them the other way round. Exactly the bug canonical() in
+ * person-history.ts exists for, in a second place — comparing serialised JSON is only
+ * meaningful once both sides are ordered the same way.
+ *
+ * Array order is left alone: a different order of addresses IS a difference.
+ */
+function canon(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canon);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((k) => [k, canon((value as Record<string, unknown>)[k])]),
+    );
+  }
+  return value;
+}
+
 function strip(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(strip);
   if (value && typeof value === "object") {
@@ -84,7 +110,7 @@ function strip(value: unknown): unknown {
 }
 
 function show(value: unknown): string {
-  return JSON.stringify(strip(value));
+  return JSON.stringify(canon(strip(value)));
 }
 
 const bareContactPoint = (over: Partial<ContactPoint>): ContactPoint =>
@@ -182,77 +208,155 @@ if (plan.newFieldKeys.length > 0) {
   console.log(`custom fields it would create: ${plan.newFieldKeys.join(", ")}`);
 }
 
-let lossCount = 0;
-let changeCount = 0;
+/**
+ * At three hundred contacts, printing each one is not a report — it is a haystack.
+ *
+ * So this counts, and then shows only what is worth reading: every contact a push would
+ * take something from, every distinct reason and rescue with an example, and a census of
+ * which of Google's field groups this address book actually uses. `--verbose` restores the
+ * per-contact dump for a small account.
+ */
+const verbose = process.argv.includes("--verbose");
+/** --field organizations: show every contact whose named group the push would change. */
+const onlyField = (() => {
+  const i = process.argv.indexOf("--field");
+  return i > 0 ? (process.argv[i + 1] ?? null) : null;
+})();
+
+// Which field groups Google actually returned, across the whole book. This is the answer to
+// "which of the things Hearth models has never been seen in the wild".
+const census = new Map<string, number>();
+for (const person of connections) {
+  for (const field of GOOGLE_IMPORT_FIELDS) {
+    const v = (person as Record<string, unknown>)[field];
+    const present = Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined;
+    if (present) census.set(field, (census.get(field) ?? 0) + 1);
+  }
+}
+
+const kinds = new Map<string, number>();
+const labelsSeen = new Map<string, number>();
+const reasons = new Map<string, { count: number; example: string }>();
+const rescues = new Map<string, { count: number; example: string }>();
+const fieldVerdicts = new Map<string, { same: number; rewritten: number; cleared: number }>();
+const losers: { name: string; field: string; had: string }[] = [];
 
 for (const contact of plan.contacts) {
   const source = connections.find((c) => c.resourceName === contact.resourceName)!;
-  console.log(`\n──────────── ${contact.displayName} (${contact.action})`);
 
-  const setColumns = Object.entries(contact.columns).filter(([, v]) => v !== null);
-  console.log(`  columns: ${setColumns.map(([k, v]) => `${k}=${v}`).join(", ") || "—"}`);
   for (const cp of contact.contactPoints) {
-    const detail = Object.entries(cp)
-      .filter(([k, v]) => v !== null && !["kind", "value", "label", "isPrimary", "order"].includes(k))
-      .map(([k, v]) => `${k}=${v}`);
-    console.log(
-      `  ${cp.kind}${cp.label ? ` (${cp.label})` : ""}: ${cp.value}` +
-        (detail.length ? `  [${detail.join(", ")}]` : ""),
-    );
+    kinds.set(cp.kind, (kinds.get(cp.kind) ?? 0) + 1);
+    if (cp.label) labelsSeen.set(`${cp.kind}:${cp.label}`, (labelsSeen.get(`${cp.kind}:${cp.label}`) ?? 0) + 1);
   }
-  for (const e of contact.events) {
-    console.log(`  date ${e.label ?? "—"}: ${e.year ?? "????"}-${e.month}-${e.day}`);
-  }
-  for (const r of contact.relations) {
-    console.log(`  relation ${r.label ?? "—"}: ${r.name}`);
+  for (const r of contact.reasons) {
+    const prev = reasons.get(r);
+    reasons.set(r, { count: (prev?.count ?? 0) + 1, example: prev?.example ?? contact.displayName });
   }
   for (const r of contact.rescued) {
-    console.log(`  RESCUED → custom field "${r.label}" (${r.key}) = ${r.value}`);
+    const prev = rescues.get(r.key);
+    rescues.set(r.key, {
+      count: (prev?.count ?? 0) + 1,
+      example: prev?.example ?? `${contact.displayName}: ${r.label} = ${r.value}`,
+    });
   }
-  if (contact.groupIds.length > 0) {
-    console.log(
-      `  labels: ${contact.groupIds.map((g) => groupName.get(g) ?? g).join(", ")}`,
-    );
-  }
-  for (const reason of contact.reasons) console.log(`  note: ${reason}`);
 
-  // --- the round trip ----------------------------------------------------
-  //
-  // Everything above is what Hearth would store. This is what it would send back, and
-  // the mask means anything missing from it is deleted rather than merely not updated.
+  // A rescued value is only preserved because the import also creates a mapping sending it
+  // BACK to userDefined — without that it would be "kept" in Hearth and deleted from Google
+  // on the next push, since userDefined is in the mask. So the probe has to build the same
+  // definitions and mappings ensureRescueField would, or it reports a round trip that the
+  // real import does not perform.
+  const customFields: FieldDef[] = contact.rescued.map((r, i) => ({
+    key: r.key, label: r.label, type: "TEXT", core: false, entity: "PERSON",
+    order: 100 + i, required: false, options: [], helpText: null, archived: false,
+    storage: "custom", generic: true, listed: false,
+  }) as unknown as FieldDef);
+  const mappings = resolveMappings(
+    contact.rescued.map((r) => ({
+      fieldKey: r.key, target: "userDefined", targetKey: r.label,
+    }) as unknown as FieldMapping),
+  );
+
   const { person: pushed } = serializePerson(
     barePerson({
       ...contact.columns,
       birthday: contact.columns.birthday ? new Date(contact.columns.birthday) : null,
       displayName: contact.displayName,
+      custom: Object.fromEntries(contact.rescued.map((r) => [r.key, r.value])),
       contactPoints: contact.contactPoints.map((cp, i) =>
         bareContactPoint({ ...cp, id: `cp${i}` }),
       ),
       googleEvents: contact.events,
       googleRelations: contact.relations,
     }),
+    { customFields, mappings },
   );
 
-  console.log("  ── if Hearth pushed this contact back to Google:");
+  if (verbose) console.log(`\n──────────── ${contact.displayName} (${contact.action})`);
+
   for (const field of MANAGED_PERSON_FIELDS) {
-    const before = strip((source as Record<string, unknown>)[field] ?? null);
-    const after = strip((pushed as Record<string, unknown>)[field] ?? null);
+    const before = canon(strip((source as Record<string, unknown>)[field] ?? null));
+    const after = canon(strip((pushed as Record<string, unknown>)[field] ?? null));
     const had = Array.isArray(before) ? before.length > 0 : before !== null;
     const has = Array.isArray(after) ? after.length > 0 : after !== null;
-
     if (!had && !has) continue;
-    if (JSON.stringify(before) === JSON.stringify(after)) {
-      console.log(`     = ${field}: unchanged`);
-      continue;
+
+    const verdict = fieldVerdicts.get(field) ?? { same: 0, rewritten: 0, cleared: 0 };
+    if (JSON.stringify(before) === JSON.stringify(after)) verdict.same += 1;
+    else if (had && !has) {
+      verdict.cleared += 1;
+      losers.push({ name: contact.displayName, field, had: show(before) });
+    } else verdict.rewritten += 1;
+    fieldVerdicts.set(field, verdict);
+
+    const differs = JSON.stringify(before) !== JSON.stringify(after);
+    if (verbose) {
+      const mark = !differs ? "=" : had && !has ? "✗" : "~";
+      console.log(`     ${mark} ${field}: ${show(before)}${mark === "=" ? "" : `  →  ${show(after)}`}`);
+    } else if (onlyField === field && differs) {
+      console.log(`   ${contact.displayName}\n      was ${show(before)}\n      now ${show(after)}`);
     }
-    if (had && !has) {
-      lossCount += 1;
-      console.log(`     ✗ ${field}: WOULD BE CLEARED — Google has ${show(before)}`);
-      continue;
-    }
-    changeCount += 1;
-    console.log(`     ~ ${field}: ${show(before)}  →  ${show(after)}`);
   }
+}
+
+console.log("\n── which of Google's field groups this address book uses");
+for (const field of GOOGLE_IMPORT_FIELDS) {
+  if (field === "metadata") continue;
+  const n = census.get(field) ?? 0;
+  console.log(`   ${n === 0 ? "·" : " "} ${field.padEnd(16)} ${n === 0 ? "never seen" : `${n} contacts`}`);
+}
+
+console.log("\n── what the import would store");
+console.log(`   contact point kinds: ${[...kinds].map(([k, n]) => `${k}×${n}`).join(", ")}`);
+console.log(`   distinct labels in use: ${labelsSeen.size}`);
+
+console.log("\n── round trip, across every contact");
+for (const [field, v] of fieldVerdicts) {
+  const flag = v.cleared > 0 ? "✗" : v.rewritten > 0 ? "~" : "=";
+  console.log(
+    `   ${flag} ${field.padEnd(16)} ${v.same} unchanged, ${v.rewritten} rewritten, ${v.cleared} CLEARED`,
+  );
+}
+
+if (reasons.size > 0) {
+  console.log("\n── notes the plan reported");
+  for (const [reason, { count, example }] of reasons) {
+    console.log(`   ${count}× ${reason}\n        e.g. ${example}`);
+  }
+}
+
+if (rescues.size > 0) {
+  console.log("\n── values with no column, kept as custom fields");
+  for (const [key, { count, example }] of rescues) {
+    console.log(`   ${count}× ${key}\n        e.g. ${example}`);
+  }
+}
+
+if (losers.length > 0) {
+  console.log(`\n── ${losers.length} FIELD(S) A PUSH WOULD CLEAR`);
+  for (const l of losers.slice(0, 40)) {
+    console.log(`   ✗ ${l.name} — ${l.field} — Google has ${l.had}`);
+  }
+  if (losers.length > 40) console.log(`   … and ${losers.length - 40} more (see plan-${slot}.json)`);
 }
 
 writeFileSync(
@@ -260,7 +364,10 @@ writeFileSync(
   JSON.stringify(plan, null, 2),
 );
 
+const totalCleared = [...fieldVerdicts.values()].reduce((n, v) => n + v.cleared, 0);
+const totalRewritten = [...fieldVerdicts.values()].reduce((n, v) => n + v.rewritten, 0);
 console.log(
-  `\n=== ${lossCount} field group(s) would be cleared, ${changeCount} would be rewritten ===`,
+  `\n=== ${totalCleared} field group(s) would be cleared, ${totalRewritten} rewritten, ` +
+    `across ${plan.contacts.length} contacts ===`,
 );
 console.log("Nothing was written to Google. `hearth_id` is expected under userDefined.\n");
