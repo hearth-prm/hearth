@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/access";
-import { listFields, loadRegistry } from "@/lib/fields/registry";
+import { genericFields, listFields, loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
 import { primaryEmail } from "@/lib/people";
@@ -23,12 +23,14 @@ import { SyncBadge } from "@/components/sync-badge";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
 import { effectivePhotoMap } from "@/lib/photos-db";
+import { getUserSettings } from "@/lib/settings";
 import { PeopleFilters } from "@/components/people-filters";
 import { PeopleBulkBar } from "@/components/people-bulk-bar";
 import { SelectAllPeople } from "@/components/select-all-people";
 import {
   bulkLabelPeople,
   bulkSetAddToGoogle,
+  bulkSetFields,
   bulkTrashPeople,
 } from "@/lib/actions/people-bulk";
 
@@ -44,7 +46,10 @@ export default async function PeoplePage({
   const filter = parseFilter(params);
   const where = peopleWhere(filter, user.id);
 
-  const defs = await loadRegistry(user.id, "PERSON");
+  const [defs, settings] = await Promise.all([
+    loadRegistry(user.id, "PERSON"),
+    getUserSettings(user.id),
+  ]);
   // displayName already covers the name fields, so don't repeat them as columns.
   const columns = listFields(defs).filter(
     (d) => d.key !== "givenName" && d.key !== "familyName",
@@ -255,6 +260,9 @@ export default async function PeoplePage({
 
             <PeopleBulkBar
               labelNames={labelRows.map((l) => l.name)}
+              fields={genericFields(defs).filter((d) => !d.archived)}
+              timeZone={settings.timeZone}
+              fieldAction={bulkSetFields}
               total={total}
               shown={people.length}
               filterFields={filterFields(params)}

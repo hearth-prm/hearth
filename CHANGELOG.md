@@ -214,8 +214,15 @@ that formally marks its milestone.
   - When the list is truncated, the bar offers **all N matching this filter** rather than only
     the rows on screen. The filter is re-read on the server rather than trusted as a list of
     ids from the browser.
-  - Bulk editing is deliberately limited to what means something for many people at once. A
-    name or an address is per person; custom fields are not offered yet.
+  - **Fields** — set or clear **any** field across the selection, core columns and your own
+    custom fields alike. Only a ticked field is written, so an untouched one is never
+    blanked; clearing is a separate tick, because an empty box on a ticked field is
+    indistinguishable from leaving it be. Values go through the same schemas the
+    single-contact form and the CSV import use, and every contact keeps a history entry.
+  - Contact points are deliberately absent: an email or an address is a repeatable row
+    belonging to one person, and there is no sense in which two hundred contacts share one.
+    The parts of a name are offered but labelled as such, since setting a first name across a
+    selection is almost never what somebody means.
 
 - **Importing from Google brings the picture, not a link to it.** A contact's photo is
   downloaded and becomes its picture in Hearth. Both places Google keeps one are read: the

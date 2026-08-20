@@ -9,6 +9,12 @@ import {
   writablePeopleWhere,
 } from "@/lib/access";
 import { parseFilter, peopleWhere, type RawParams } from "@/lib/people-filter";
+import { genericFields, loadRegistry } from "@/lib/fields/registry";
+import { fieldInputName } from "@/lib/fields/types";
+import { parseOneField } from "@/lib/fields/validation";
+import { partitionFieldValues, readCustomBag } from "@/lib/fields/values";
+import { computeDisplayName } from "@/lib/people";
+import { getUserSettings } from "@/lib/settings";
 import { ensureLabel } from "@/lib/actions/labels";
 import { normaliseLabelName } from "@/lib/labels";
 import { recordPersonVersionAfter } from "@/lib/person-versions";
@@ -245,6 +251,125 @@ export async function bulkTrashPeople(
         asked,
         ids.length,
         "delete",
+      )}`,
+    );
+  } catch (err) {
+    if (isFrameworkError(err)) throw err;
+    return toActionError(err);
+  }
+}
+
+/**
+ * Set or clear any registry field across a selection.
+ *
+ * Every field, core column and custom alike, because that is what "bulk edit" has to mean to
+ * be worth having — but only the ones ticked. A field nobody ticked is not written, which is
+ * the difference between "set the department on these twelve" and "overwrite these twelve
+ * with a mostly-empty form".
+ *
+ * Contact points are deliberately absent. An email or an address is a repeatable row that
+ * belongs to one person; there is no sense in which two hundred contacts share one.
+ *
+ * Validated through parseOneField — the same schemas the single-contact form and the CSV
+ * import use — because a second set of rules for bulk data is how a value the UI would have
+ * refused ends up stored anyway.
+ */
+export async function bulkSetFields(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  try {
+    const user = await requireUserForAction();
+    const registry = await loadRegistry(user.id, "PERSON");
+    // genericFields, not listFields: the latter is "shown as a column in list views", which
+    // is a display choice and has nothing to do with what can be edited. Using it offered
+    // three fields where there should have been thirty.
+    const editable = genericFields(registry).filter((d) => !d.archived);
+
+    const ticked = new Set(form.getAll("field").map(String));
+    const chosen = editable.filter((d) => ticked.has(d.key));
+    if (chosen.length === 0) return actionError("Tick at least one field to change.");
+
+    // "Clear" is asked for explicitly. An empty box on a ticked field would otherwise be
+    // indistinguishable from leaving it alone, and one of those blanks a column on every
+    // contact selected.
+    const clearing = new Set(form.getAll("clear").map(String));
+
+    const values: Record<string, unknown> = {};
+    const errors: Record<string, string> = {};
+    for (const def of chosen) {
+      if (clearing.has(def.key)) {
+        if (def.required) {
+          errors[def.key] = `${def.label} is required, so it cannot be cleared.`;
+          continue;
+        }
+        values[def.key] = null;
+        continue;
+      }
+      const raw = def.type === "MULTISELECT"
+        ? form.getAll(fieldInputName(def.key)).map(String)
+        : form.get(fieldInputName(def.key));
+      const parsed = parseOneField(def, def.type === "BOOLEAN" ? raw !== null : raw);
+      if (parsed.ok) values[def.key] = parsed.value;
+      else errors[def.key] = parsed.error;
+    }
+    if (Object.keys(errors).length > 0) {
+      return actionError("Please fix the highlighted fields.", errors);
+    }
+
+    const { ids, asked } = await selectedIds(form, user.id, writablePeopleWhere(user.id));
+    if (ids.length === 0) return actionError("Nothing selected that you can edit.");
+
+    const settings = await getUserSettings(user.id);
+    const people = await prisma.person.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true, custom: true, addToGoogle: true,
+        givenName: true, familyName: true, nickname: true, organization: true,
+      },
+    });
+
+    for (const person of people) {
+      // The person's OWN bag is merged, not replaced: partitionFieldValues keeps every key
+      // it is not given, so setting one custom field cannot drop the others — including the
+      // archived ones that are not in the registry at all.
+      const { columns, custom } = partitionFieldValues(
+        chosen,
+        values,
+        readCustomBag(person),
+        { timeZone: settings.timeZone },
+      );
+
+      // displayName is derived, so it has to be recomputed from what the row will hold
+      // rather than from what it holds now.
+      const nameParts = {
+        givenName: (("givenName" in columns ? columns.givenName : person.givenName) ?? null) as string | null,
+        familyName: (("familyName" in columns ? columns.familyName : person.familyName) ?? null) as string | null,
+        nickname: (("nickname" in columns ? columns.nickname : person.nickname) ?? null) as string | null,
+        organization: (("organization" in columns ? columns.organization : person.organization) ?? null) as string | null,
+      };
+
+      await prisma.$transaction(async (tx) => {
+        await tx.person.update({
+          where: { id: person.id },
+          data: {
+            ...(columns as Prisma.PersonUpdateInput),
+            custom: custom as Prisma.InputJsonValue,
+            displayName: computeDisplayName(nameParts),
+          },
+        });
+        await requeueEveryCopy(tx, person.id, person.addToGoogle);
+      });
+      await recordPersonVersionAfter(person.id, { byUserId: user.id, source: "EDITED" });
+    }
+
+    revalidatePath("/people");
+    const what = chosen.map((d) => d.label).join(", ");
+    return actionOk(
+      `${what} set on ${people.length} contact${people.length === 1 ? "" : "s"}.${skipped(
+        asked,
+        ids.length,
+        "edit",
       )}`,
     );
   } catch (err) {

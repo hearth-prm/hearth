@@ -277,7 +277,7 @@ Everything below needs your live install, a mailbox, a container, or an hour.
 | 9.8 | Container restart — needs Docker, which the test environment does not have |
 | 9.9 | An hour of logs |
 
-That is **8 rows** by hand, against 489 automated checks.
+That is **8 rows** by hand, against 498 automated checks.
 
 Run both suites first. If either fails, the manual pass is not worth starting.
 

@@ -55,7 +55,7 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A trash can that never empties itself | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 489 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 498 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -614,13 +614,21 @@ can bookmark and Back out of one step at a time.
 ### Doing one thing to many contacts
 
 Tick the rows you want — or the checkbox in the header to take everything listed — and a bar
-appears with what can be done to a selection: add or remove **labels**, turn **Add to
-Google** on or off, or **move them to the trash**. When the list is showing the first 200 of
-more, the bar offers *all N matching this filter* instead of only what is on screen.
+appears with what can be done to a selection: add or remove **labels**, set or clear **any
+field**, turn **Add to Google** on or off, or **move them to the trash**. When the list is
+showing the first 200 of more, the bar offers *all N matching this filter* instead of only
+what is on screen.
+
+**Fields** covers everything a contact form does — core fields and your own custom ones —
+with two rules that make it safe to use on two hundred rows at once. Only a field you tick is
+written, so nothing you left alone is blanked. And clearing is a separate tick, because an
+empty box on a ticked field cannot otherwise be told apart from not touching it. Values are
+validated exactly as the single-contact form validates them, and each contact records the
+change in its history.
 
 Deleting stays owner-only, per record, and the bar tells you when it left something alone
-rather than quietly doing most of what you asked. Only operations that mean something for
-many people at once are offered: a name or an address is per person.
+rather than quietly doing most of what you asked. Emails, phones and addresses are not
+offered: those are repeatable rows belonging to one person.
 
 ### Import and export
 
@@ -938,7 +946,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 489 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 498 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

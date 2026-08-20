@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 489 checks
+npm run e2e         # builds, then drives a real browser through 498 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -87,6 +87,13 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **A check that can pass without the feature working is not a check.** Assert painted
   colours over attributes, counted deltas over absences, a tooltip's own text over the
   page's. Say what failed as the third argument, never bare `true`.
+- **`listFields` is "shown as a list column", not "editable".** Using it to build the bulk
+  field editor offered three fields where there should have been thirty. `genericFields` is
+  the one that means "has a normal input".
+- **A test can be blocked by the browser rather than the code.** `page.fill` cannot type
+  letters into `input[type=number]`, so a check meant to prove the SERVER validates proved
+  nothing. Pick a value the browser will hand over — over-long text in a TEXT field, which
+  carries no maxlength — so the schema is what refuses it.
 - **`:has-text()` matches substrings.** "Add" found the "Add to Google" button above it, so
   two label checks failed for two runs while the code was right. Use `:text-is()` whenever
   one button's name is a prefix of another's.
@@ -94,6 +101,12 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   sweep the message away before it is read.
 - Leave state clean for later sections, and remember new fixtures invalidate old absence
   assertions.
+
+- **`npx next start` is a wrapper.** SIGTERM to it killed the wrapper and left the real
+  next-server behind, reparented to init — so even clean e2e runs leaked a server, and a
+  day's worth starved the machine until `tsc` and the editor were being OOM-killed. The
+  harness spawns `detached: true` and signals the process GROUP (`-pid`), and records the pid
+  so a killed run's server is reaped by the next one.
 
 ## Process
 

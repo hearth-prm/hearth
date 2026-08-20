@@ -158,18 +158,30 @@ function forgetApp(pid: number | undefined): void {
   writeFileSync(APP_PIDS, kept.length > 0 ? `${kept.join("\n")}\n` : "");
 }
 
+/**
+ * Signal a whole process group.
+ *
+ * The negative pid is the point: it reaches the wrapper AND the server it spawned. Killing
+ * the pid alone leaves the server running, which is the leak this exists to stop.
+ */
+function killGroup(pid: number | undefined, signal: NodeJS.Signals): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    // No such group: it already exited, which is the common case on a clean run.
+    return false;
+  }
+}
+
 function reapStaleApps(): void {
   if (!existsSync(APP_PIDS)) return;
   let reaped = 0;
   for (const line of readFileSync(APP_PIDS, "utf8").split("\n")) {
     const pid = Number(line.trim());
     if (!pid) continue;
-    try {
-      process.kill(pid, "SIGKILL");
-      reaped += 1;
-    } catch {
-      // Already gone, which is the common case and not worth saying anything about.
-    }
+    if (killGroup(pid, "SIGKILL")) reaped += 1;
   }
   writeFileSync(APP_PIDS, "");
   if (reaped > 0) console.log(`  harness: reaped ${reaped} app server(s) from a killed run`);
@@ -198,8 +210,15 @@ export async function start(): Promise<Harness> {
 
   reapStaleApps();
 
+  // detached, so the server gets a process GROUP of its own and can be killed as one.
+  //
+  // `npx next start` is a wrapper that spawns the actual next-server; SIGTERM to the wrapper
+  // killed the wrapper and left the server behind with init as its parent. So even runs that
+  // ended cleanly leaked a server, which is how fourteen of them accumulated in a day and
+  // starved the machine until tsc and the editor started being killed. The pid file said
+  // nothing was outstanding, because the pid it recorded had indeed died.
   const app: ChildProcess = spawn("npx", ["next", "start", "-p", String(appPort), "-H", "127.0.0.1"], {
-    env, cwd: REPO, stdio: ["ignore", "pipe", "pipe"],
+    env, cwd: REPO, stdio: ["ignore", "pipe", "pipe"], detached: true,
   });
   rememberApp(app.pid);
   const appLog: string[] = [];
@@ -269,7 +288,7 @@ export async function start(): Promise<Harness> {
     for (const c of contexts) await c.close().catch(() => {});
     await browser.close().catch(() => {});
     await prisma.$disconnect().catch(() => {});
-    app.kill("SIGTERM");
+    killGroup(app.pid, "SIGTERM");
     forgetApp(app.pid);
     await new Promise((r) => setTimeout(r, 500));
     await db.stop();

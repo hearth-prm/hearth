@@ -3565,9 +3565,144 @@ try {
        where: { personId: { in: bulkPeople.map((p) => p.id) }, source: "TRASHED" },
      })) === 3);
 
+  // --- bulk field edit -----------------------------------------------------
+  //
+  // Restored from the trash first, because §21.7 put them there and this needs live rows.
+  await prisma.person.updateMany({
+    where: { id: { in: bulkPeople.map((p) => p.id) } },
+    data: { deletedAt: null },
+  });
+  const bulkCustom = await prisma.fieldDefinition.create({
+    data: {
+      ownerId: A.id, entity: "PERSON", key: "howTheyVote", label: "How they vote",
+      type: "TEXT", order: 200,
+    },
+  });
+  // One of them already carries an unrelated custom value: setting a different custom field
+  // must not take it, which is the merge that a JSONB bag makes easy to get wrong.
+  await prisma.fieldDefinition.create({
+    data: {
+      ownerId: A.id, entity: "PERSON", key: "keepMe", label: "Keep me",
+      type: "TEXT", order: 201,
+    },
+  });
+  await prisma.person.update({
+    where: { id: bulkPeople[0]!.id },
+    data: { custom: { keepMe: "still here" }, jobTitle: "Old Title" },
+  });
+
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Fields")');
+  await A.page.check('form#people-bulk input[name="field"][value="jobTitle"]');
+  await A.page.check('form#people-bulk input[name="field"][value="howTheyVote"]');
+  await A.page.fill("#field-jobTitle", "Chief Bulk Officer");
+  await A.page.fill("#field-howTheyVote", "by post");
+  await A.page.click('form#people-bulk button:has-text("Apply to")');
+  await waitForDb("the job title to reach all four", async () =>
+    (await prisma.person.count({
+      where: {
+        id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] },
+        jobTitle: "Chief Bulk Officer",
+      },
+    })) === 4);
+  ok("21.8 a core column is set across the selection",
+     (await prisma.person.count({
+       where: {
+         id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] },
+         jobTitle: "Chief Bulk Officer",
+       },
+     })) === 4,
+     await A.page.textContent('form#people-bulk [role="status"]').catch(() => "no message"));
+  const votes = await prisma.person.findMany({
+    where: { id: { in: bulkPeople.map((p) => p.id) } },
+    select: { id: true, custom: true },
+  });
+  ok("21.8b and a custom field with it",
+     votes.every((v) => (v.custom as Record<string, unknown>).howTheyVote === "by post"),
+     votes.map((v) => v.custom));
+  ok("21.8c without taking the custom value that was already there",
+     (votes.find((v) => v.id === bulkPeople[0]!.id)!.custom as Record<string, unknown>).keepMe
+       === "still here",
+     votes.find((v) => v.id === bulkPeople[0]!.id)?.custom);
+  ok("21.8d and every contact keeps a history entry for it",
+     (await prisma.personVersion.count({
+       where: { personId: { in: bulkPeople.map((p) => p.id) }, source: "EDITED" },
+     })) >= 3);
+
+  // A field nobody ticked is not written. This is the whole safety property of the panel:
+  // it is an edit form for a selection, and an untouched field must not become a blank one.
+  const untouched = await prisma.person.findMany({
+    where: { id: { in: bulkPeople.map((p) => p.id) } },
+    select: { displayName: true, organization: true },
+  });
+  ok("21.9 a field nobody ticked is left alone",
+     untouched.every((u) => u.displayName.startsWith("Bulk") && u.organization === null),
+     untouched);
+
+  // Clearing is asked for explicitly, because an empty box on a ticked field is
+  // indistinguishable from leaving it be.
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Fields")');
+  await A.page.check('form#people-bulk input[name="field"][value="jobTitle"]');
+  await A.page.check('form#people-bulk input[name="clear"][value="jobTitle"]');
+  await A.page.click('form#people-bulk button:has-text("Apply to")');
+  await waitForDb("the job title to be cleared", async () =>
+    (await prisma.person.count({
+      where: { id: { in: bulkPeople.map((p) => p.id) }, jobTitle: null },
+    })) === 3);
+  ok("21.10 a ticked field can be cleared on purpose",
+     (await prisma.person.count({
+       where: { id: { in: bulkPeople.map((p) => p.id) }, jobTitle: null },
+     })) === 3);
+  ok("21.10b and clearing one field leaves the others",
+     (await prisma.person.count({
+       where: {
+         id: { in: bulkPeople.map((p) => p.id) },
+         custom: { path: ["howTheyVote"], equals: "by post" },
+       },
+     })) === 3);
+
+  // Validation is the form's, not a second set of rules for bulk data.
+  //
+  // Over-long text rather than "not a number" in a NUMBER field: a number input will not
+  // accept the letters at all, so the browser refuses before the server is asked and the
+  // check proves nothing about the server. A TEXT field carries no maxlength attribute, so
+  // 1001 characters reach the action and its schema is the thing that says no.
+  const numberField = await prisma.fieldDefinition.create({
+    data: {
+      ownerId: A.id, entity: "PERSON", key: "hatSize", label: "Hat size",
+      type: "TEXT", order: 202,
+    },
+  });
+  await A.page.goto("/people?q=Bulk");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Fields")');
+  await A.page.check('form#people-bulk input[name="field"][value="hatSize"]');
+  await A.page.fill("#field-hatSize", "x".repeat(1001));
+  await A.page.click('form#people-bulk button:has-text("Apply to")');
+  await A.page.waitForSelector('form#people-bulk [role="status"]', { timeout: 15_000 })
+    .catch(() => {});
+  // Read back and inspected rather than asked of jsonb: "is this key absent" needs
+  // DbNull/JsonNull care that says nothing extra here.
+  const hats = await prisma.person.findMany({
+    where: { id: { in: bulkPeople.map((p) => p.id) } },
+    select: { custom: true },
+  });
+  const hatMsg = await A.page.textContent('form#people-bulk [role="status"]').catch(() => "");
+  ok("21.11 a value the single-contact form would refuse is refused here too",
+     hats.every((h) => !("hatSize" in (h.custom as Record<string, unknown>))), hatMsg);
+  ok("21.11b and it says so rather than failing quietly",
+     (hatMsg ?? "").toLowerCase().includes("fix"), hatMsg);
+
   await prisma.person.deleteMany({
     where: { id: { in: [...bulkPeople.map((p) => p.id), bulkShared.id] } },
   });
+  await prisma.fieldDefinition.deleteMany({
+    where: { id: { in: [bulkCustom.id, numberField.id] } },
+  });
+  await prisma.fieldDefinition.deleteMany({ where: { ownerId: A.id, key: "keepMe" } });
   await prisma.label.deleteMany({ where: { name: "Bulk Label" } });
 
 } finally {
