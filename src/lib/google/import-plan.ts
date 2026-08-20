@@ -402,6 +402,15 @@ export function planGoogleImport(
       : "import";
     if (action === "linked") {
       reasons.push("Already linked to a Hearth contact, so it is left alone.");
+    } else if (existingHearthId) {
+      // It carries an id from a Hearth this install knows nothing about — another
+      // install, or this one restored from a backup that lost the link. Importing is
+      // still the right answer, since a contact nothing here points at is a contact
+      // nothing here can update, but the old id is about to be overwritten and that
+      // should be read rather than discovered.
+      reasons.push(
+        "Already carries a Hearth id from another install; importing will claim it and replace that id.",
+      );
     }
 
     if (rescued.length > 0) {

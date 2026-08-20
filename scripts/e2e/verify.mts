@@ -2210,6 +2210,21 @@ try {
        && prose.person.birthdays?.[0]?.date === undefined,
      prose.person.birthdays?.[0]);
 
+  // Also from the real account: a contact with an email and no name at all. Hearth shows
+  // the address as its name, which a list has to — but writing that into Google's given
+  // name would christen the contact "numbersix@six.com".
+  // emailAsName, not "nameless": §17.5 below already owns that identifier, and this file
+  // is one flat scope.
+  const emailAsName = serializePerson(
+    barePerson({ displayName: "numbersix@six.com" }),
+  );
+  ok("17.2k a display name that is only an email address is not written back as a name",
+     (emailAsName.person.names ?? []).length === 0, emailAsName.person.names);
+  const blobName = serializePerson(barePerson({ displayName: "Grandma Betty" }));
+  ok("17.2l but a real name with no parts still goes back as one",
+     blobName.person.names?.[0]?.givenName === "Grandma Betty",
+     blobName.person.names?.[0]);
+
   ok("17.3 memberships are reported so Google labels can become Hearth ones",
      ada.groupIds.includes("contactGroups/friends"));
 
@@ -2229,6 +2244,23 @@ try {
      nameless.columns.birthday === null
        && nameless.reasons.some((r) => r.includes("no year")),
      nameless.reasons);
+
+  // Found by pushing a real contact and reading it back: it then carried a hearth_id this
+  // install had no row for, and the plan offered to import it with nothing said about the
+  // id it was going to overwrite.
+  const strayId = planGoogleImport(
+    [{
+      resourceName: "people/stray", etag: "e",
+      names: [{ givenName: "Stray", familyName: "Id", displayName: "Stray Id" }],
+      userDefined: [{ key: "hearth_id", value: "from-another-install" }],
+    }],
+    { linkedResourceNames: new Set<string>() },
+  ).contacts[0]!;
+  ok("17.5c a contact carrying an unknown Hearth id is imported, and says the id will change",
+     strayId.action === "import"
+       && strayId.existingHearthId === "from-another-install"
+       && strayId.reasons.some((r) => r.includes("another install")),
+     strayId.reasons);
 
   // Every group Hearth overwrites must be one the import reads, or the first sync
   // deletes data nobody took a copy of. This is the check that would fail if somebody

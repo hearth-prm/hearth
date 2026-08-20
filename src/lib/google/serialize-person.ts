@@ -147,13 +147,30 @@ export function serializePerson(
     phoneticFamilyName: clean(person.phoneticFamilyName),
   };
 
-  // Google renders a contact with no name at all as a blank row, so fall back to
-  // the display name Hearth already computes (which itself falls back to
-  // nickname, then organisation). Names are never disableable.
+  // Google renders a contact with no name at all as a blank row, so fall back to the
+  // display name Hearth already computes (which itself falls back to nickname, then
+  // organisation). Names are never disableable.
+  //
+  // But NOT when that display name is only a placeholder. Hearth shows an email address
+  // as the name of a contact that has none, which is right for a list you have to read —
+  // and writing it into Google's given-name field is not the same thing at all: it turns
+  // "a contact with no name" into "a contact christened numbersix@six.com". A real Google
+  // account with a bare email contact is what surfaced this; no fixture had one.
+  //
+  // Nothing invented, either. There used to be an "Unnamed contact" literal here as a last
+  // resort, which would have written those words into somebody's address book.
+  const placeholderName = /\S+@\S+/.test(person.displayName ?? "");
+  const fallback = placeholderName ? null : clean(person.displayName);
   const names: GooglePerson["names"] =
     given || family
       ? [nameParts]
-      : [{ ...nameParts, givenName: clean(person.displayName) ?? "Unnamed contact" }];
+      : fallback
+        ? [{ ...nameParts, givenName: fallback }]
+        : // No name to send. The group is still listed in the mask, but a contact whose
+          // Hearth record has no name is one Google had no name for either — the plan
+          // takes its display name from Google's when there is one — so there is nothing
+          // here to clear.
+          [];
 
   // --- accumulators for mapped custom fields ---------------------------
   //

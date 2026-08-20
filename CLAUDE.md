@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 427 checks
+npm run e2e         # builds, then drives a real browser through 430 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -111,15 +111,19 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 
 ## Known open items
 
-- One real Google contact has been through the import and the round trip, read-only, via
-  `scripts/e2e/google-import-check.mts` — and it found a bug the fixtures could not (a
-  yearless birthday going back as prose). What is still unproven is an actual **write** to a
-  real account, and anything larger or messier than a single contact. Run the probe first
-  on any new address book; it flags what a push would clear before a push happens.
-- A name Google never broke into parts keeps only the parts on a push, so honorifics that
-  live only in `unstructuredName` are lost. Preferring `unstructuredName` over the parts
-  would be a change to the most dangerous write path in the app, so it is a stated limit
-  until there is evidence about which Google prefers.
+- Six real Google contacts have been through the import, and one has been **pushed back**
+  (`scripts/e2e/google-write-check.mts`). Nothing was lost: Google recomputes `displayName`,
+  `displayNameLastFirst`, `unstructuredName` and `canonicalForm` from what is sent, notes
+  with emoji and accents survive byte-for-byte, and — the one that mattered — `memberships`
+  is untouched, so a push does not drop a contact out of its labels. Still unproven: an
+  address book big or messy enough to hit paging, and the nine field groups no real contact
+  has yet carried (`imClients`, `locations`, `externalIds`, `skills`, `genders`, …).
+- Run the read-only probe first on any new address book; it says what a push would clear
+  before a push happens.
+- Honorifics are NOT lost — Google's own UI stores them structured and Hearth returns them
+  there. What is lost is a name that arrived from another client as one unsplit string: it
+  comes back as a first name. Preferring `unstructuredName` over the parts would be a change
+  to the most dangerous write path in the app, so this stays a stated limit.
 - One organisation per contact; `clientData` untouched.
 - Contact history is read-only — reverting would have to write back through the same
   validation and sync path as an edit.

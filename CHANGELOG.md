@@ -27,6 +27,19 @@ that formally marks its milestone.
 
 ### Fixed
 
+- **A contact with no name would have been christened with its own email address.** Hearth
+  shows the address as the name of a contact that has none, which a list has to do — and the
+  push wrote that straight into Google's given-name field, so importing a bare
+  `numbersix@six.com` would have given the contact a *name* reading numbersix@six.com. It
+  now sends no name at all in that case. An "Unnamed contact" literal that could have been
+  written into somebody's address book went with it.
+
+- **An import no longer says nothing about overwriting another install's Hearth id.** A
+  contact already carrying a `hearth_id` this install has no row for — another install, or a
+  restore that lost the link — is still imported, because a contact nothing here points at
+  is a contact nothing here can update. But the plan now says the id will be replaced
+  instead of letting that be discovered afterwards.
+
 - **A birthday with no year came back from Google as a date and went back as prose.** Google
   holds "12 October, year unknown" as a structured date without a year; a `@db.Date` column
   cannot express that, so the import keeps it as text — and the push then wrote it into
