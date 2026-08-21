@@ -137,10 +137,8 @@ and offers a reconnect when a scope or offline access is missing.
 > **Move the app to "In production" before you rely on it.** While the publishing status
 > is **Testing**, Google expires every refresh token after **seven days** — so a
 > long-running install stops syncing about once a week and asks you to reconnect, and it
-> will keep doing that however many times you do. Publishing removes the seven-day cap.
-> Verification is a separate thing, only needed to drop the "Google hasn't verified this
-> app" screen and to let people who are not test users sign in; an unverified published app
-> works fine for yourself past that warning.
+> will keep doing that however many times you do. See
+> [Publishing the OAuth app](#publishing-the-oauth-app).
 >
 > This is what a dead token looks like: sync stops, Settings shows a reconnect prompt, and
 > the server log carries `invalid_grant — Token has been expired or revoked`.
@@ -150,6 +148,61 @@ still works: the thank-you control refuses up front, saying to reconnect Google,
 than failing after a note has been written. If you add the scope to an install that has
 already signed in, press **Reconnect Google** in Settings — Google widens a grant only
 when it re-prompts for consent, and the stored grant is refreshed on every sign-in.
+
+---
+
+## Publishing the OAuth app
+
+Do this once, before you rely on the install. It takes about five minutes and it is the
+difference between sync that keeps working and sync that dies every seventh day.
+
+**What publishing is not.** Publishing is not verification. Three states are worth keeping
+apart:
+
+| Status | What it means for you |
+|---|---|
+| **Testing** | Only listed test users can authorise, and **every refresh token expires after 7 days** |
+| **In production**, unverified | Anyone you give the URL to can authorise, past a "Google hasn&rsquo;t verified this app" warning. Tokens have no 7-day cap. Fine for a personal install |
+| **In production**, verified | The warning disappears. Needs a privacy policy, terms, domain ownership through Search Console, a demo video, and per-scope justification — and for *restricted* scopes an annual third-party security assessment |
+
+For a Hearth install used by you and your household, the middle row is the destination. You
+click past one warning screen at sign-in and nothing else changes.
+
+**Before you start**, have ready: an app name, a support email address (your own), and a URL
+for a privacy policy. Google may ask for the last one even to publish; any page on your own
+domain saying what the app does with your data satisfies it, and it is worth writing anyway.
+
+1. Open <https://console.cloud.google.com> and **select the project** Hearth's client ID
+   belongs to. Getting this wrong is the commonest mistake — check the project picker at the
+   top rather than trusting whichever project opened.
+2. Go to **APIs & Services → OAuth consent screen**. Google has been reorganising this area
+   into a **Google Auth Platform** section with *Overview*, *Branding*, *Audience* and *Data
+   Access* pages; if that is what you see, the controls below live under **Branding** and
+   **Audience**. The names move; the settings are the same.
+3. Fill in the branding fields it marks required — app name, user support email, developer
+   contact email. Add the privacy policy URL if there is a box for it.
+4. Check **Data Access** (or *Scopes*) lists all five Hearth asks for:
+   `contacts`, `calendar.events`, `calendar.readonly`, `gmail.send`, plus the
+   email/profile/openid trio. A scope missing here is a permission the app can never be
+   granted, whatever the code requests.
+5. On **Audience** (or the consent screen summary), press **Publish app** and confirm. The
+   status should read **In production**. If Google offers to start verification, you can
+   decline and stay unverified — see the table above.
+6. **Now re-consent, and this is the step people miss.** The seven-day expiry was stamped on
+   the token when it was issued, so the token you already have does not become long-lived
+   just because the app did. In Hearth: **Settings → Reconnect Google**. Sign in, approve,
+   done.
+7. If you run the test suite, its tokens are in the same position: `npm run token -- A` and
+   `npm run token -- B` again.
+
+**How you know it worked.** Immediately: the consent screen page reports *In production*, and
+Settings stops showing a reconnect prompt. Properly: sync is still running eight days later.
+That is the only real confirmation, because the failure this fixes is one that only appears on
+the eighth day.
+
+**Do not** delete the OAuth client or create a new one to "start clean" — the client id is
+what every stored token is tied to, and replacing it invalidates all of them. Adding a new
+scope later is fine, but it re-prompts for consent, which is the intended behaviour.
 
 ---
 
