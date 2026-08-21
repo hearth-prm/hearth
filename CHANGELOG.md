@@ -26,6 +26,8 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-21
+
 ### Fixed
 
 - **Re-importing a contact you had deleted left it stranded: "Not in Google", and the sync
@@ -1065,7 +1067,8 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.5.0...main
+[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v0.6.0...main
+[0.6.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.6.0
 [0.5.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.5.0
 [0.4.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.4.0
 [0.3.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.3.0

@@ -1,6 +1,6 @@
 {
   "name": "hearth",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Self-hosted Personal Relationship Manager with extensible fields and one-way Google sync",
   "scripts": {
