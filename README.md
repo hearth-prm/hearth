@@ -13,8 +13,8 @@ already have in Google can be imported once, in place, when you first move in.
 
 ## Status
 
-**v0.5.0 — milestones 1–5 complete and confirmed working against real Google
-accounts.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
+**v0.6.0 — milestones 1–6 complete and confirmed working against a real Google
+account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
 [Versioning](#versioning) for what a minor version asserts.
 
 | | Feature | State |
@@ -39,10 +39,7 @@ Every original requirement is built and verified. Contacts, events, labels and p
 sync to Google; each field chooses where it lands; records can be shared with, or handed
 over to, other users on the same install.
 
-### Since v0.5.0, in `main`
-
-Written and covered by the automated suite, but not yet cut as a release — a minor
-version is only tagged once its work has been confirmed against a real Google account.
+### M6
 
 | | Feature | State |
 |---|---|---|
@@ -53,6 +50,8 @@ version is only tagged once its work has been confirmed against a real Google ac
 | ✅ | A real column for every Google contact field, preserving its shape | Done |
 | ✅ | Contact history — every version, who changed it, and what changed | Done |
 | ✅ | A trash can that never empties itself | Done |
+| ✅ | Multi-select on the people list, with bulk edit and bulk delete | Done |
+| ✅ | Pictures imported as pictures, not as URLs | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
 built app through 498 checks, and `npm run e2e:google` runs the Google-facing half

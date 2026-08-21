@@ -21,6 +21,7 @@ that formally marks its milestone.
 | `0.3.0` | M3 — calendar push, attendee invites, RSVP writeback |
 | `0.4.0` | M4 — field↔Google mapping settings, record sharing |
 | `0.5.0` | M5 — labels, CSV import/export, contact filtering |
+| `0.6.0` | M6 — appearance, gifts and thank-yous, household cards, in-place Google import, contact history, the trash, bulk actions |
 | `1.0.0` | All milestones shipped and stable |
 
 ## [Unreleased]
