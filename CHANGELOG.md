@@ -26,6 +26,18 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`update-hearth.sh` now says it is out of disk before spending three minutes proving
+  it.** Docker on Unraid lives in a fixed-size `docker.img`, and building a Node app fills
+  it with BuildKit cache — every `npm ci` layer from every build ever run. Running out
+  surfaced as an `ENOSPC` buried in a page of BuildKit output, on a server with a hundred
+  spare gigabytes on the array. The script checks free space first and stops with the
+  commands that reclaim it, having changed nothing.
+- **`--prune` was only clearing half of what fills up.** It pruned dangling images and left
+  the BuildKit cache, which is the larger of the two after a few rebuilds. It now clears
+  both and reports what is free afterwards.
+
 ## [0.6.0] — 2026-08-21
 
 ### Fixed

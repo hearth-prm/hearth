@@ -492,6 +492,29 @@ If a wildcard certificate already covers your domain, `hearth.example.com` works
 immediately. Otherwise add `hearth` to SWAG's `SUBDOMAINS` and restart it to have
 a certificate issued.
 
+### When a rebuild runs out of disk
+
+Unraid keeps Docker inside a fixed-size `docker.img`, and building Hearth locally fills it
+with BuildKit cache — one layer per `npm ci`, per build, forever. The array having plenty of
+room is no help: this is a separate, smaller disk.
+
+`update-hearth.sh` checks before it builds and stops with the fix rather than failing three
+minutes in. To reclaim by hand:
+
+```bash
+docker system df              # "Build Cache" is usually the bulk of it
+docker builder prune -af
+docker image prune -f
+```
+
+Do **not** use `docker image prune -a` on Unraid: it removes images no *running* container
+references, which means re-downloading anything you have stopped.
+
+For a durable fix, either grow the vDisk (Settings → Docker, with the service stopped) or
+switch Docker from a vDisk to a directory so it draws on the pool's real free space. The
+other answer is to stop building on the server at all — build the image elsewhere and have
+Unraid only ever pull it.
+
 ### Afterwards
 
 - **Autostart** is handled by `restart: unless-stopped` once Docker is up. To get

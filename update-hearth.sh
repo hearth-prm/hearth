@@ -15,7 +15,8 @@
 #                    or making local changes.
 #   --no-backup      Skip the pre-update dump. Not advised.
 #   --branch <name>  Switch to this branch before rebuilding.
-#   --prune          Remove dangling images afterwards to reclaim docker.img space.
+#   --prune          Reclaim docker.img space afterwards: dangling images AND the
+#                    BuildKit cache, which is the one that actually fills up.
 #   --keep <n>       Backups to retain. Default 10
 #   -h, --help       This message
 # ===========================================================================
@@ -184,6 +185,45 @@ else
   note "skipping pull (--no-pull)"
 fi
 
+# --- room to build in -----------------------------------------------------
+#
+# Docker on Unraid lives inside a fixed-size docker.img, and building a Node app
+# fills it with BuildKit cache: every npm ci layer from every build ever run is
+# still in there. Running out shows up as an ENOSPC three minutes into a build,
+# buried under a page of BuildKit output — so it is worth saying beforehand, with
+# the commands that fix it, rather than after.
+#
+# Skipped silently where /var/lib/docker is not a mount point of its own, since
+# then the number would be the host filesystem's and mean nothing.
+say "Checking there is room to build"
+DOCKER_DIR=/var/lib/docker
+if [ -d "$DOCKER_DIR" ] && command -v df >/dev/null 2>&1; then
+  FREE_MB=$(df -Pm "$DOCKER_DIR" 2>/dev/null | awk 'NR==2 {print $4}')
+  case "$FREE_MB" in
+  '' | *[!0-9]*) note "could not read free space for $DOCKER_DIR; carrying on" ;;
+  *)
+    if [ "$FREE_MB" -lt 2048 ]; then
+      printf '\033[1;31mERROR\033[0m only %sMB free in %s — a build needs a few GB.\n' \
+        "$FREE_MB" "$DOCKER_DIR" >&2
+      printf '      Reclaim it:\n' >&2
+      printf '        docker builder prune -af   # build cache, usually the bulk of it\n' >&2
+      printf '        docker image prune -f      # dangling images\n' >&2
+      printf '      Or grow docker.img: Unraid Settings -> Docker (stop the service first),\n' >&2
+      printf '      or switch Docker from a vDisk to a directory so it uses the pool.\n' >&2
+      printf '      Nothing has been changed; the running container is untouched.\n' >&2
+      exit 1
+    fi
+    if [ "$FREE_MB" -lt 5120 ]; then
+      note "$FREE_MB MB free in $DOCKER_DIR — tight. Consider --prune after this."
+    else
+      ok "$FREE_MB MB free in $DOCKER_DIR"
+    fi
+    ;;
+  esac
+else
+  note "no $DOCKER_DIR to measure; skipping the space check"
+fi
+
 # --- rebuild --------------------------------------------------------------
 say "Rebuilding and restarting"
 note "migrations apply automatically as the container starts"
@@ -215,9 +255,18 @@ fi
 
 # --- prune ----------------------------------------------------------------
 if [ "$DO_PRUNE" = yes ]; then
-  say "Pruning dangling images"
+  say "Reclaiming space"
+  # Both stores, because they fill up separately and only one of them was being
+  # cleared. The build cache is the larger by far after a few rebuilds — which is
+  # how a disk with a hundred spare gigabytes on the array still ran out mid-build.
   docker image prune -f >/dev/null
-  ok "done"
+  ok "dangling images"
+  docker builder prune -f >/dev/null 2>&1 || note "build cache: nothing to prune"
+  ok "build cache"
+  if [ -d /var/lib/docker ] && command -v df >/dev/null 2>&1; then
+    AFTER_MB=$(df -Pm /var/lib/docker 2>/dev/null | awk 'NR==2 {print $4}')
+    [ -n "$AFTER_MB" ] && ok "$AFTER_MB MB free in /var/lib/docker"
+  fi
 fi
 
 # --- summary --------------------------------------------------------------
