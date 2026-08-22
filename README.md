@@ -13,9 +13,9 @@ already have in Google can be imported once, in place, when you first move in.
 
 ## Status
 
-**v0.6.0 — milestones 1–6 complete and confirmed working against a real Google
-account.** See [CHANGELOG.md](CHANGELOG.md) for what landed, and
-[Versioning](#versioning) for what a minor version asserts.
+**v1.0.0 — every milestone shipped, and the Google round trip verified in both
+directions against a real address book.** 330 contacts read and pushed back with
+nothing lost; 503 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -1035,9 +1035,12 @@ expected.
 
 ## Versioning
 
-Hearth follows [Semantic Versioning](https://semver.org). Below `1.0.0`, each
-milestone lands as a **minor** bump and may break things; patches are fixes only.
-`1.0.0` means every milestone is shipped and stable.
+Hearth follows [Semantic Versioning](https://semver.org). From `1.0.0` onward: a
+breaking change to the database, the environment or the Google contract is a
+**major**, a feature is a **minor**, a fix is a **patch**.
+
+Below `1.0.0` each milestone landed as a minor bump, cut only once it had been
+confirmed against a real Google account rather than on a green test suite.
 
 `package.json` is the single source of truth. Everything else derives from it —
 there is no second place to remember to edit.

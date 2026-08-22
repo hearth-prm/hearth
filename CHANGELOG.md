@@ -5,14 +5,14 @@ All notable changes to Hearth are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 Hearth uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-While the version is below `1.0.0`, each planned milestone lands as a **minor**
-bump and may include breaking changes.
+From `1.0.0` onward this is ordinary Semantic Versioning: a breaking change to the
+database, the environment or the Google contract is a **major**, a feature is a
+**minor**, a fix is a **patch**.
 
-A milestone's minor version is cut once that milestone has been confirmed working
-against a real Google account — not when the code is written. Patch releases carry
-deployment fixes and milestone work that is complete but not yet verified in
-production, so a feature can ship in a patch release ahead of the minor version
-that formally marks its milestone.
+Up to `1.0.0`, each planned milestone landed as a minor bump, cut once that
+milestone had been confirmed working against a real Google account — not when the
+code was written. That rule survives in spirit: nothing is released on the strength
+of a green test suite alone where a real address book can be asked instead.
 
 | Version | Milestone |
 |---|---|
@@ -22,7 +22,7 @@ that formally marks its milestone.
 | `0.4.0` | M4 — field↔Google mapping settings, record sharing |
 | `0.5.0` | M5 — labels, CSV import/export, contact filtering |
 | `0.6.0` | M6 — appearance, gifts and thank-yous, household cards, in-place Google import, contact history, the trash, bulk actions |
-| `1.0.0` | All milestones shipped and stable |
+| `1.0.0` | M1–M6 shipped, and verified against a real Google address book in both directions |
 
 ## [Unreleased]
 
