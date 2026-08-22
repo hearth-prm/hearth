@@ -96,7 +96,13 @@ export async function updateMappings(
             data: { googleSyncStatus: "PENDING", googleSyncAttempts: 0, googleSyncNextAttemptAt: null },
           });
 
-    revalidatePath(`/settings/mappings/${slug}`);
+    // The dynamic route PATTERN, not the resolved path.
+    //
+    // revalidatePath("/settings/mappings/people") matched nothing, so the client was never
+    // told its data was stale: the save landed, the page kept rendering the values it had
+    // fetched, and only a manual refresh showed the truth. A route with a [param] in it has
+    // to be named the way the router knows it.
+    revalidatePath("/settings/mappings/[entity]", "page");
     return actionOk(
       `Mappings saved. ${requeued.count} record${requeued.count === 1 ? "" : "s"} queued for a fresh push.`,
     );

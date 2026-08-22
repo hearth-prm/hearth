@@ -3732,6 +3732,77 @@ try {
   await prisma.label.deleteMany({ where: { name: "Bulk Label" } });
 
   // ════════════════════════════════════════════════════════════════════════
+  section("§23 Saving a field mapping shows what was saved");
+
+  // Reported from a real install: choose a Google destination, press Save mappings, and the
+  // dropdown snaps back to "Not synced" — while the database holds the choice and a refresh
+  // displays it. React resets a form once its action settles, and that reset lands AFTER the
+  // re-render the revalidation causes, so a controlled select was left showing the reset
+  // value with no further render to put it back.
+  //
+  // The check is deliberately "without reloading". A reload has always shown the truth; that
+  // is what made this confusing rather than obviously broken.
+  const mapField = await prisma.fieldDefinition.create({
+    data: {
+      ownerId: A.id, entity: "PERSON", key: "howTheyTakeTea", label: "How they take tea",
+      type: "TEXT", order: 300,
+    },
+  });
+  const mapSel = 'select[name="target_howTheyTakeTea"]';
+  await A.page.goto("/settings/mappings/people");
+  await A.page.waitForSelector(mapSel, { timeout: 10_000 });
+  ok("23.1 an unmapped custom field starts as not synced",
+     (await A.page.inputValue(mapSel)) === "none", await A.page.inputValue(mapSel));
+
+  await A.page.selectOption(mapSel, "biographies");
+  await A.page.click('button:has-text("Save mappings")');
+  await waitForDb("the mapping to be stored", async () =>
+    (await prisma.fieldMapping.findFirst({
+      where: { ownerId: A.id, fieldKey: "howTheyTakeTea" },
+    }))?.target === "biographies");
+  ok("23.2 the mapping is stored",
+     (await prisma.fieldMapping.findFirst({
+       where: { ownerId: A.id, fieldKey: "howTheyTakeTea" },
+     }))?.target === "biographies");
+
+  // The bug. data-saved carries what the server says, so a stale DOM and a stale prop can be
+  // told apart — they look identical from outside and need opposite fixes.
+  ok("23.3 and the dropdown still shows it, with no reload",
+     (await A.page.inputValue(mapSel)) === "biographies",
+     `select=${await A.page.inputValue(mapSel)} prop=${await A.page.getAttribute(mapSel, "data-saved")}`);
+  ok("23.3b the select and the server agree",
+     (await A.page.inputValue(mapSel)) === (await A.page.getAttribute(mapSel, "data-saved")));
+
+  // Saving again without changing anything must not undo the display either — that is the
+  // same reset, and keying only on a changed value would miss it.
+  await A.page.click('button:has-text("Save mappings")');
+  await A.page.waitForTimeout(1500);
+  ok("23.4 saving again with nothing changed leaves it alone",
+     (await A.page.inputValue(mapSel)) === "biographies", await A.page.inputValue(mapSel));
+
+  // And changing it a second time, since the first change was from the initial state.
+  await A.page.selectOption(mapSel, "nicknames");
+  await A.page.click('button:has-text("Save mappings")');
+  await waitForDb("the second mapping to be stored", async () =>
+    (await prisma.fieldMapping.findFirst({
+      where: { ownerId: A.id, fieldKey: "howTheyTakeTea" },
+    }))?.target === "nicknames");
+  ok("23.5 a second change sticks too",
+     (await A.page.inputValue(mapSel)) === "nicknames", await A.page.inputValue(mapSel));
+
+  // Back to not synced, which is a removal rather than an update.
+  await A.page.selectOption(mapSel, "none");
+  await A.page.click('button:has-text("Save mappings")');
+  await waitForDb("the mapping to be removed", async () =>
+    (await prisma.fieldMapping.count({
+      where: { ownerId: A.id, fieldKey: "howTheyTakeTea" },
+    })) === 0);
+  ok("23.6 and it can be set back to not synced",
+     (await A.page.inputValue(mapSel)) === "none", await A.page.inputValue(mapSel));
+
+  await prisma.fieldDefinition.delete({ where: { id: mapField.id } });
+
+  // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

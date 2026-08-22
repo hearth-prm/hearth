@@ -28,6 +28,20 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Fixed
 
+- **Saving a field mapping showed "Not synced" while storing the value you chose.** Pick a
+  Google destination for a custom field, press Save mappings, and the dropdown snapped back —
+  yet the database held the choice and a refresh displayed it, which is what made it confusing
+  rather than obviously broken. React resets a form once its action settles, and that reset
+  lands *after* the re-render the revalidation causes, so a controlled select was left showing
+  the reset value with no further render to correct it. The select is uncontrolled now and the
+  row is remounted per submission, so whichever order those happen in they land on the same
+  value: the one the server just stored.
+  - The select carries a `data-saved` attribute with the stored value, so a stale DOM and a
+    stale prop can be told apart. They look identical from outside and need opposite fixes;
+    measuring showed `data-saved="userDefined"` on a select whose own value was `none`.
+  - §23 checks it without reloading, including saving twice with nothing changed — keying the
+    remount only on a *changed* value would have missed that case.
+
 - **Every page scrolled sideways on a phone.** At a 390px viewport the app measured 529px
   wide, which is the most visible way to look unfinished. The cause was one flex row: the
   header's theme toggle, avatar, name and Sign out could always be squeezed a little

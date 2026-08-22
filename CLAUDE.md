@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 511 checks
+npm run e2e         # builds, then drives a real browser through 518 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -63,8 +63,13 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **Auth.js's adapter writes `Account` once and never updates it.** Reconnect Google did
   nothing for weeks. `persistGoogleGrant` on `events.signIn` fixes it, and leaves a missing
   `refresh_token` alone.
-- **React 19 resets an uncontrolled form after its action settles, failure included.** A
-  failed thank-you lost what was typed; the textarea is controlled now.
+- **React 19 resets a form after its action settles, and the reset lands AFTER the re-render
+  the revalidation causes.** Two opposite consequences, both hit: a failed thank-you lost
+  what was typed (so that textarea is *controlled*), and a saved mapping displayed the reset
+  value with no later render to correct it (so that select is *uncontrolled*, remounted per
+  submission, and the DOM's default is always what the server just said). Cancelling the
+  reset via `onReset` does not work. When a form goes wrong after an action, first establish
+  whether the PROP or the DOM is stale — they look identical and need opposite fixes.
 - **`textContent("body")` sees the RSC flight payload** inlined in a `<script>`, so
   `"thanked":false` satisfied a positive assertion. Use Playwright's `text=` engine.
 - **Next's build worker OOMs where `tsc` passes.** One unused

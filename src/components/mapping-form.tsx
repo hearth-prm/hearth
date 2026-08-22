@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import type { FieldType } from "@prisma/client";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
 import { FIELD_TYPE_LABELS } from "@/lib/fields/types";
@@ -36,6 +36,30 @@ export function MappingForm({
   rows: MappingRow[];
 }) {
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
+
+  /**
+   * A number that changes once per submission, used to remount the rows.
+   *
+   * React resets a form after its action settles, and that reset lands AFTER the re-render
+   * the revalidation causes — so a controlled select ends up showing the reset value with no
+   * further render to put it back. Saving a mapping displayed "Not synced" while the database
+   * held what you picked, and only a refresh told the truth. Cancelling the reset through
+   * onReset does not work; React is not going through a cancellable event.
+   *
+   * So the rows are remounted instead, which re-reads every value from the server's answer.
+   * That is right whether the save succeeded, failed, or changed nothing: after a submission
+   * the thing to show is what is stored, not what the DOM was left holding.
+   *
+   * Set during render rather than in an effect — the conditional makes it converge in one
+   * extra pass, and an effect would paint the wrong value first.
+   */
+  const lastResult = useRef(state);
+  const [saves, setSaves] = useState(0);
+  if (lastResult.current !== state) {
+    lastResult.current = state;
+    setSaves((n) => n + 1);
+  }
+
   const core = rows.filter((r) => r.core);
   const custom = rows.filter((r) => !r.core);
 
@@ -97,7 +121,10 @@ export function MappingForm({
         ) : (
           <ul className="divide-y divide-neutral-100 dark:divide-neutral-800/60">
             {custom.map((row) => (
-              <CustomRow key={row.fieldKey} row={row} />
+              <CustomRow
+                key={`${row.fieldKey}:${row.target}:${row.targetKey}:${saves}`}
+                row={row}
+              />
             ))}
           </ul>
         )}
@@ -109,6 +136,21 @@ export function MappingForm({
 }
 
 function CustomRow({ row }: { row: MappingRow }) {
+  /**
+   * The select is UNCONTROLLED, and that is the fix rather than an oversight.
+   *
+   * React resets a form once its action settles, and the reset lands after the re-render the
+   * revalidation causes. A controlled select therefore ended up displaying the reset value
+   * with no further render to correct it: saving showed "Not synced" while the database, and
+   * the prop, both said otherwise. Measured rather than guessed — the select reported
+   * data-saved="userDefined" while its own value was "none".
+   *
+   * Uncontrolled makes the order stop mattering. The row is remounted on every submission,
+   * so the node's defaultValue is always what the server just said; whether the reset runs
+   * before or after that remount, it lands on the same value.
+   *
+   * Local state only decides whether the key input and description are shown.
+   */
   const [target, setTarget] = useState(row.target);
   const chosen = row.targets.find((t) => t.id === target);
 
@@ -130,7 +172,10 @@ function CustomRow({ row }: { row: MappingRow }) {
         <div>
           <select
             name={`target_${row.fieldKey}`}
-            value={target}
+            /* What the server says is stored, so a test can tell a stale prop apart from a
+               stale DOM — the two look identical from outside and need opposite fixes. */
+            data-saved={row.target}
+            defaultValue={row.target}
             onChange={(e) => setTarget(e.target.value)}
             className={inputClass}
             aria-label={`Where to send ${row.label}`}
