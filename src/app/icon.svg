@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Hearth's mark: a fire in a fireplace opening.
+
+    The tab icon cannot follow the accent colour somebody picked — it is a static file with
+    no access to their settings — so it uses the teal Hearth ships with and switches for a
+    dark tab strip. An SVG favicon can carry its own media query, which is the only way to
+    stay legible against both white and near-black browser chrome.
+  -->
+  <style>
+    .stroke { fill: none; stroke: #0f766e; stroke-linecap: round; }
+    .fill { fill: #0f766e; }
+    @media (prefers-color-scheme: dark) {
+      .stroke { stroke: #5eead4; }
+      .fill { fill: #5eead4; }
+    }
+  </style>
+  <!--
+    The opening. Rounded top corners rather than a semicircular arch: an arch reads as a
+    headstone at 16px, where a squarer opening reads as a fireplace.
+  -->
+  <path class="stroke" d="M4.4 26.2V12A5.9 5.9 0 0 1 10.3 6.1h11.4a5.9 5.9 0 0 1 5.9 5.9v14.2"
+        stroke-width="3" />
+  <!-- The floor, wider than the opening so the mark stands on something. -->
+  <path class="stroke" d="M2.4 28.9h27.2" stroke-width="3" />
+  <!--
+    The fire, with the curl on one side only. A symmetrical teardrop reads as water; the
+    asymmetry is what makes it fire, and it survives being shrunk because the silhouette
+    carries it even once the inner lobe has closed up.
+  -->
+  <path class="fill" d="M16.6 10.4c2.4 3.5 5.3 5.3 5.3 9.2a5.5 5.5 0 0 1-11 0c0-2 .9-3.5 2.1-4.9.3 1.1 1 1.8 1.9 2.1-.9-2.8-.4-5.1 1.7-6.4z" />
+</svg>

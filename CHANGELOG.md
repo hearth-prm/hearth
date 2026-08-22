@@ -26,6 +26,17 @@ that formally marks its milestone.
 
 ## [Unreleased]
 
+### Changed
+
+- **Hearth has a mark of its own instead of a house emoji, and the browser tab finally has an
+  icon at all.** A drawn fireplace with a fire in it, in the nav and on the sign-in page,
+  taking whatever accent colour you chose — which an emoji cannot do. The tab icon is the same
+  drawing as a file, so it stays sharp at any size, and it carries its own light/dark switch
+  so it reads against both a white and a near-black tab strip.
+  - Squarer opening rather than a semicircular arch: an arch reads as a headstone at 16px.
+  - The flame's curl is on one side only. A symmetrical teardrop reads as water; the asymmetry
+    is what makes it fire, and the silhouette carries it once the inner lobe closes up.
+
 ### Fixed
 
 - **`update-hearth.sh` now says it is out of disk before spending three minutes proving

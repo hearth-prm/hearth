@@ -1462,6 +1462,32 @@ try {
   ok("15.6b and a keyboard change saves like a dragged one",
      (await settingsRow())?.lightAccentHue === 301, (await settingsRow())?.lightAccentHue);
 
+  // --- the mark -------------------------------------------------------------
+  //
+  // A drawing rather than an emoji, so it can take the accent colour. Asserted as painted
+  // colour and as a change under a different scheme, because "an svg is present" would pass
+  // for a mark rendered in the wrong colour or in no colour at all.
+  await A.page.goto("/people");
+  const markColour = () =>
+    A.page.$eval("header a svg", (el) => getComputedStyle(el).color).catch(() => "");
+  ok("15.9 the nav shows a drawn mark, not an emoji",
+     (await A.page.$$("header a svg")).length === 1
+       && !((await A.page.textContent("header")) ?? "").includes("🏠"),
+     await A.page.textContent("header"));
+  const markAt301 = await markColour();
+  ok("15.9b painted in the accent rather than inheriting the text colour",
+     markAt301 !== "" && markAt301 !== (await A.page.$eval("header", (el) => getComputedStyle(el).color)),
+     markAt301);
+
+  const iconRes = await A.page.request.get("/icon.svg");
+  ok("15.9c the tab icon exists and is an SVG",
+     iconRes.status() === 200 && (iconRes.headers()["content-type"] ?? "").includes("svg"),
+     `${iconRes.status()} ${iconRes.headers()["content-type"]}`);
+  ok("15.9d it carries its own dark-mode switch, being a file with no CSS around it",
+     (await iconRes.text()).includes("prefers-color-scheme"));
+  ok("15.9e and the page is linked to it",
+     (await A.page.$$eval('link[rel*="icon"]', (ls) => ls.length)) >= 1);
+
   // An accent for light and a different one for dark. This is the part the server
   // cannot decide, so the checks below read painted colour rather than stored values.
   /**

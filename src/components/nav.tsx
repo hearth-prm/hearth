@@ -4,6 +4,7 @@ import type { CurrentUser } from "@/lib/access";
 import { btnGhost } from "@/components/ui";
 import { UserAvatar } from "@/components/avatar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { HearthMark } from "@/components/hearth-mark";
 
 const links = [
   { href: "/people", label: "People" },
@@ -20,9 +21,7 @@ export function AppNav({ user }: { user: CurrentUser }) {
           href="/people"
           className="flex items-center gap-2 text-sm font-semibold tracking-tight"
         >
-          <span aria-hidden className="text-base">
-            🏠
-          </span>
+          <HearthMark className="size-5 text-accent-600 dark:text-accent-400" />
           Hearth
         </Link>
 

@@ -3,6 +3,7 @@ import { signIn } from "@/lib/auth";
 import { currentUser } from "@/lib/access";
 import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
 import { btnPrimary, Card } from "@/components/ui";
+import { HearthMark } from "@/components/hearth-mark";
 
 const AUTH_ERRORS: Record<string, string> = {
   OAuthAccountNotLinked:
@@ -28,9 +29,7 @@ export default async function SignInPage({
   return (
     <div className="mx-auto flex max-w-md flex-col gap-6 py-10">
       <div className="text-center">
-        <p aria-hidden className="text-4xl">
-          🏠
-        </p>
+        <HearthMark className="mx-auto size-14 text-accent-600 dark:text-accent-400" />
         <h1 className="mt-3 text-2xl font-semibold tracking-tight">Hearth</h1>
         <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
           Your own personal relationship manager. Keep track of the people in
