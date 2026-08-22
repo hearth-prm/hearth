@@ -26,6 +26,23 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every page scrolled sideways on a phone.** At a 390px viewport the app measured 529px
+  wide, which is the most visible way to look unfinished. The cause was one flex row: the
+  header's theme toggle, avatar, name and Sign out could always be squeezed a little
+  narrower, so they never wrapped and instead pushed the page out. Below `sm` that cluster
+  now takes a row of its own. The pages themselves were already fine — their columns
+  collapse — which is why nothing on them had to change.
+- **A hover tooltip was the second cause.** The `?` hint is a 16rem box centred on its
+  button, so any hint near the right edge hung 14px past the screen and made the page
+  scrollable again. On a phone it is no longer anchored to its button at all, which cannot
+  overflow by construction; on a real screen it is unchanged.
+- **§22 measures this rather than trusting a screenshot**, because a page that scrolls
+  sideways still screenshots perfectly. Four pages, the bulk bar open, a contact page and
+  every control in the header are checked against the viewport width, and a failure names
+  the narrowest element responsible rather than reporting a number nobody can act on.
+
 ## [1.0.0] — 2026-08-22
 
 ### Changed

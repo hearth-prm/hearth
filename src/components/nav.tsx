@@ -16,7 +16,14 @@ const links = [
 export function AppNav({ user }: { user: CurrentUser }) {
   return (
     <header className="border-b border-neutral-200 bg-white/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80">
-      <div className="mx-auto flex w-full max-w-7xl items-center gap-6 px-4 py-3 sm:px-6 2xl:max-w-[88rem]">
+      {/*
+        flex-wrap, and a tighter gap below sm. Without it the right-hand cluster — theme
+        toggle, avatar, name, sign out — pushed every page to 529px against a 390px phone
+        viewport, so the whole app scrolled sideways. The header was the only thing doing it;
+        the pages themselves already stack. Wrapping to two rows on a narrow screen is the
+        least clever fix and the one that cannot push anything off-screen again.
+      */}
+      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:gap-x-6 sm:px-6 2xl:max-w-[88rem]">
         <Link
           href="/people"
           className="flex items-center gap-2 text-sm font-semibold tracking-tight"
@@ -25,7 +32,7 @@ export function AppNav({ user }: { user: CurrentUser }) {
           Hearth
         </Link>
 
-        <nav className="flex flex-1 items-center gap-1">
+        <nav className="flex flex-1 flex-wrap items-center gap-1">
           {links.map((l) => (
             <Link
               key={l.href}
@@ -37,7 +44,13 @@ export function AppNav({ user }: { user: CurrentUser }) {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2.5">
+        {/*
+          w-full below sm, so this cluster takes a row of its own rather than being crushed
+          into the links. Letting it merely shrink produced overlapping text: flex-wrap only
+          moves an item to the next line when it cannot fit, and these items can always be
+          squeezed a little further.
+        */}
+        <div className="flex w-full items-center justify-end gap-2.5 sm:w-auto">
           <ThemeToggle />
           {/* Google already gives us a profile picture at sign-in; it was simply never
               shown. On a shared install it is the quickest way to tell whose session

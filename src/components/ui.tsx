@@ -275,7 +275,17 @@ export function Hint({ children, label = "What is this?" }: { children: ReactNod
       </button>
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 top-full z-30 mt-1.5 w-64 -translate-x-1/2 rounded-md border border-neutral-200 bg-white p-2 text-xs font-normal leading-relaxed text-neutral-600 opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+        /*
+          Anchored under the button on a real screen; pinned to the bottom of the viewport
+          on a phone.
+          
+          A 16rem box centred on its button is 14px too wide for a 390px screen whenever the
+          button sits near the right edge, and that made the whole PAGE scroll sideways — the
+          overflow of a hover tooltip becoming the most visible thing about the app on a
+          phone. Width alone cannot fix it: max-width clamps the box without moving it. So
+          below sm it stops being anchored at all, which cannot overflow by construction.
+        */
+        className="pointer-events-none fixed inset-x-3 bottom-3 z-30 rounded-md border border-neutral-200 bg-white p-2 text-xs font-normal leading-relaxed text-neutral-600 opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100 sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-full sm:mt-1.5 sm:w-64 sm:-translate-x-1/2 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
       >
         {children}
       </span>

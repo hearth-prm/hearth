@@ -3731,6 +3731,96 @@ try {
   await prisma.fieldDefinition.deleteMany({ where: { ownerId: A.id, key: "keepMe" } });
   await prisma.label.deleteMany({ where: { name: "Bulk Label" } });
 
+  // ════════════════════════════════════════════════════════════════════════
+  section("§22 On a phone");
+
+  // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the
+  // whole app scrolled sideways — and the cause was one flex row in the header rather than
+  // anything on the pages themselves, which already stack. A number is the only way to
+  // notice that again: a screenshot of a page that scrolls looks fine.
+  const PHONE = { width: 390, height: 844 };
+  await A.page.setViewportSize(PHONE);
+
+  const pageWidth = () =>
+    A.page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      view: window.innerWidth,
+    }));
+
+  /**
+   * The narrowest element actually responsible for an overflow.
+   *
+   * A width is enough to fail on but useless to fix from — every ancestor of the offender
+   * is also too wide, so a naive report names <body>. This skips any element that has a
+   * child sticking out too, which leaves the one to change.
+   */
+  const overflowing = () =>
+    A.page.evaluate(() => {
+      const vw = window.innerWidth;
+      const out: string[] = [];
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>("body *"))) {
+        const r = el.getBoundingClientRect();
+        if (r.right <= vw + 1) continue;
+        if (Array.from(el.children).some(
+          (k) => (k as HTMLElement).getBoundingClientRect().right > vw + 1)) continue;
+        out.push(`${el.tagName.toLowerCase()} right=${Math.round(r.right)} "${(el.textContent ?? "").trim().slice(0, 24)}" .${(el.className || "").toString().split(" ").slice(0, 4).join(".")}`);
+      }
+      return out.slice(0, 3).join(" | ") || "nothing";
+    });
+
+  for (const [path, label] of [
+    ["/people", "the people list"],
+    ["/settings", "settings"],
+    ["/events", "events"],
+    ["/trash", "the trash"],
+  ] as [string, string][]) {
+    await A.page.goto(path);
+    const w = await pageWidth();
+    // One pixel of slack for sub-pixel rounding; anything more is a real overflow.
+    ok(`22.1 ${label} fits a phone without scrolling sideways`,
+       w.scroll <= w.view + 1, `${w.scroll} vs ${w.view} — ${await overflowing()}`);
+  }
+
+  // The bulk bar is the densest thing on the page and the newest, so it is the most likely
+  // to push the page wide again.
+  await A.page.goto("/people");
+  const firstRow = await A.page.$('input[name="personId"]');
+  if (firstRow) {
+    await firstRow.check();
+    await A.page.waitForSelector('form#people-bulk >> text=selected', { timeout: 10_000 })
+      .catch(() => {});
+    const withBar = await pageWidth();
+    ok("22.2 and still fits with the bulk bar open",
+       withBar.scroll <= withBar.view + 1, `${withBar.scroll} vs ${withBar.view}`);
+    ok("22.2b with every one of its buttons reachable rather than clipped",
+       (await A.page.$$eval('form#people-bulk button', (bs) =>
+         bs.every((b) => b.getBoundingClientRect().right <= window.innerWidth + 1))) === true);
+  }
+
+  // A contact page is the one people will actually read on a phone. Its columns collapse,
+  // so the test is that nothing inside it reaches past the edge.
+  const phonePerson = await prisma.person.findFirst({
+    where: { ownerId: A.id, deletedAt: null },
+    select: { id: true },
+  });
+  if (phonePerson) {
+    await A.page.goto(`/people/${phonePerson.id}`);
+    const detail = await pageWidth();
+    ok("22.3 a contact reads on a phone without sideways scrolling",
+       detail.scroll <= detail.view + 1,
+       `${detail.scroll} vs ${detail.view} — ${await overflowing()}`);
+  }
+
+  // The nav is what broke, so assert the shape of the fix rather than only its effect:
+  // nothing in the header may sit past the right edge.
+  await A.page.goto("/people");
+  ok("22.4 nothing in the header is pushed off the screen",
+     (await A.page.$$eval("header a, header button, header span", (els) =>
+       els.every((e) => e.getBoundingClientRect().right <= window.innerWidth + 1))) === true);
+
+  // Left as it was found, so a later section is not measured through a phone.
+  await A.page.setViewportSize({ width: 1280, height: 900 });
+
 } finally {
   await h.stop();
 }

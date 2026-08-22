@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 503 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 511 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -54,7 +54,7 @@ over to, other users on the same install.
 | ✅ | Pictures imported as pictures, not as URLs | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 503 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 511 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -915,6 +915,19 @@ built-in schemes, or a hue of your own on a slider.
 The choice is stored against your user and applied on the server, so there is no flash of
 the wrong theme on the first paint, and it follows you to another browser.
 
+## On a phone
+
+Hearth is one responsive app rather than a desktop site with a mobile version: the two-column
+card layouts collapse to one, the contact page reads top to bottom, and the bulk bar wraps to
+as many rows as it needs. There is no separate mobile build and no app to install.
+
+The people list keeps its table and scrolls **inside its own card** on a narrow screen, which
+is deliberate — a table of contacts is still the fastest way to scan for one, and turning it
+into cards would cost more than it buys. Nothing else scrolls sideways: §22 of the automated
+suite measures four pages, a contact, and the bulk bar against a 390px viewport, so a
+component that pushes the page wide fails the build rather than being noticed on a phone
+later.
+
 ## Using it
 
 **People** — add contacts with as many emails, phones, addresses and links as you
@@ -1021,7 +1034,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 503 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 511 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 
