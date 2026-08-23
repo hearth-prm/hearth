@@ -31,7 +31,13 @@ function valueSchema(def: FieldDef): ZodType {
     case "PHONE":
       return z.string().trim().min(1).max(64);
     case "LONGTEXT":
-      return z.string().trim().min(1).max(20_000);
+      // Same CRLF normalisation as a contact point's value, and for the same reason: a
+      // textarea submits CRLF whatever was typed, so notes gained carriage returns on every
+      // save and a push to Google reported the whole field as changed.
+      return z
+        .string()
+        .transform((v) => v.replace(/\r\n?/g, "\n"))
+        .pipe(z.string().trim().min(1).max(20_000));
     case "EMAIL":
       return z.email().max(320);
     case "URL":

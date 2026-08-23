@@ -130,7 +130,11 @@ export function parseContactPoints(
   const primaryTaken = new Set<string>();
 
   for (let i = 0; i < kinds.length; i++) {
-    const value = (values[i] ?? "").trim();
+    // CRLF out, LF in. An address is a multi-line block and is edited in a textarea, and the
+    // HTML form spec normalises a textarea's value to CRLF on submission — so saving a
+    // contact without touching its address still rewrote every newline in it. Nobody typed a
+    // carriage return; the form put them there.
+    const value = (values[i] ?? "").replace(/\r\n?/g, "\n").trim();
     if (!value) continue;
 
     const rawKind = kinds[i] ?? "";

@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 518 checks
+npm run e2e         # builds, then drives a real browser through 525 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -77,6 +77,12 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **Tailwind variant guards are tested against the element the utility sits on**, not the
   root. `:not([data-theme="light"])` on `<body>` matched everything; every branch of the
   `dark:` variant is anchored at `:root`.
+
+- **An `<input>` strips CR and LF from its value; a `<textarea>` submits CRLF.** Both bit the
+  same field: an address round-tripped through a single-line input lost its newlines on every
+  save of anything, and moving it to a textarea then added carriage returns. Multi-line values
+  are normalised to `\n` on the way in — `parseContactPoints` and the `LONGTEXT` schema.
+  Anything storing a formatted block from Google has this trap.
 
 ## Tests
 

@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 518 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 525 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -54,7 +54,7 @@ over to, other users on the same install.
 | ✅ | Pictures imported as pictures, not as URLs | Done |
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 518 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 525 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -1034,7 +1034,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 518 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 525 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

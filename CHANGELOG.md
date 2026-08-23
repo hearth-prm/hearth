@@ -28,6 +28,21 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Fixed
 
+- **Editing a contact flattened its address, even when you never touched the address.** A
+  three-line address came back as `784 Broadway DrSun Prairie, WI 53590USA` after a rename.
+  An address value is the formatted block Google returns, newlines and all, and it was being
+  edited in a single-line `<input>` — which strips CR and LF from its value. So every save of
+  anything on a contact rewrote its address a little flatter. Addresses are edited in a
+  textarea now.
+  - And then they gained **carriage returns** instead: the HTML form spec normalises a
+    textarea's value to CRLF on submission, so the newlines came back as `\r\n` — still a
+    change nobody asked for, and one that would report the whole field as modified on the
+    next push to Google. Contact point values are normalised to `\n` on the way in.
+  - Notes had the same problem for the same reason, so `LONGTEXT` fields are normalised too.
+  - §24 drives all of this through the browser rather than the action, because the bug was in
+    the form: calling `updatePerson` directly would have passed while the page kept mangling
+    addresses.
+
 - **Saving a field mapping showed "Not synced" while storing the value you chose.** Pick a
   Google destination for a custom field, press Save mappings, and the dropdown snapped back —
   yet the database held the choice and a refresh displayed it, which is what made it confusing

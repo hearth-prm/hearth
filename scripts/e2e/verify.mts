@@ -2596,7 +2596,10 @@ try {
     },
   });
   await A.page.goto(`/people/${addrPerson.id}/edit`);
-  await A.page.fill('input[name="cp_value"] >> nth=1', "changed@e2e.test");
+  // Not "nth=1": an ADDRESS is edited in a textarea now, so the only INPUT named cp_value on
+  // this contact is the email. Naming the control by what it is beats counting positions,
+  // which is what made this check break when the address grew a second line.
+  await A.page.fill('input[name="cp_value"]', "changed@e2e.test");
   await A.page.click('button:has-text("Save")');
   await waitForDb("the email change to be saved", async () =>
     (await prisma.contactPoint.count({
@@ -3801,6 +3804,107 @@ try {
      (await A.page.inputValue(mapSel)) === "none", await A.page.inputValue(mapSel));
 
   await prisma.fieldDefinition.delete({ where: { id: mapField.id } });
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§24 Editing a contact leaves its address alone");
+
+  // Reported from a real install: rename a contact imported from Google and its address came
+  // back as "784 Broadway DrSun Prairie, WI 53590USA" — the newlines gone, the parts intact.
+  // An address value is the formatted block Google returns, and an <input> strips CR and LF
+  // from its value, so the form flattened it on every save of anything.
+  //
+  // Driven through the browser because the bug is in the form, not in the action: calling
+  // updatePerson directly would have passed while the page kept mangling addresses.
+  const ADDR = "784 Broadway Dr\nSun Prairie, WI 53590\nUSA";
+  const lineAddrPerson = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Addie Line", givenName: "Addie", familyName: "Line",
+      contactPoints: {
+        create: [{
+          kind: "ADDRESS", label: "home", value: ADDR, order: 0,
+          streetAddress: "784 Broadway Dr", city: "Sun Prairie", region: "WI",
+          postalCode: "53590", country: "USA",
+        }],
+      },
+    },
+  });
+
+  await A.page.goto(`/people/${lineAddrPerson.id}/edit`);
+  await A.page.waitForSelector('[name="cp_value"]', { timeout: 10_000 });
+  ok("24.1 an address is edited in a control that can hold more than one line",
+     (await A.page.$eval('[name="cp_value"]', (el) => el.tagName.toLowerCase())) === "textarea",
+     await A.page.$eval('[name="cp_value"]', (el) => el.tagName.toLowerCase()));
+  ok("24.1b showing the address as stored, newlines and all",
+     (await A.page.inputValue('[name="cp_value"]')) === ADDR,
+     JSON.stringify(await A.page.inputValue('[name="cp_value"]')));
+
+  // The reported action: change the NAME, touch nothing else.
+  await A.page.fill("#field-givenName", "Adelaide");
+  await A.page.click('button:has-text("Save")');
+  await waitForDb("the rename to land", async () =>
+    (await prisma.person.findUnique({
+      where: { id: lineAddrPerson.id }, select: { givenName: true },
+    }))?.givenName === "Adelaide");
+
+  const lineAddrAfter = await prisma.contactPoint.findFirstOrThrow({
+    where: { personId: lineAddrPerson.id, kind: "ADDRESS" },
+  });
+  ok("24.2 renaming a contact does not touch its address",
+     lineAddrAfter.value === ADDR, JSON.stringify(lineAddrAfter.value));
+  ok("24.2b and the structured parts are still there",
+     lineAddrAfter.streetAddress === "784 Broadway Dr" && lineAddrAfter.city === "Sun Prairie"
+       && lineAddrAfter.region === "WI" && lineAddrAfter.postalCode === "53590"
+       && lineAddrAfter.country === "USA",
+     lineAddrAfter);
+
+  // Twice, because the flattening was cumulative: each save through a single-line control
+  // removed whatever newlines were left.
+  await A.page.goto(`/people/${lineAddrPerson.id}/edit`);
+  await A.page.fill("#field-givenName", "Addie");
+  await A.page.click('button:has-text("Save")');
+  await waitForDb("the second rename to land", async () =>
+    (await prisma.person.findUnique({
+      where: { id: lineAddrPerson.id }, select: { givenName: true },
+    }))?.givenName === "Addie");
+  ok("24.3 and still does not on a second save",
+     (await prisma.contactPoint.findFirstOrThrow({
+       where: { personId: lineAddrPerson.id, kind: "ADDRESS" },
+     })).value === ADDR);
+
+  // An address somebody types over should of course still save.
+  await A.page.goto(`/people/${lineAddrPerson.id}/edit`);
+  await A.page.fill('[name="cp_value"]', "1 New Road\nLeeds\nLS1 1AA");
+  await A.page.click('button:has-text("Save")');
+  await waitForDb("the edited address to land", async () =>
+    (await prisma.contactPoint.findFirstOrThrow({
+      where: { personId: lineAddrPerson.id, kind: "ADDRESS" },
+    })).value.includes("Leeds"));
+  ok("24.4 an address that IS edited saves, newlines included",
+     (await prisma.contactPoint.findFirstOrThrow({
+       where: { personId: lineAddrPerson.id, kind: "ADDRESS" },
+     })).value === "1 New Road\nLeeds\nLS1 1AA");
+
+  // Notes are a textarea too, and the same CRLF normalisation applies — a push to Google
+  // reported the whole biography as changed on every save otherwise.
+  await prisma.person.update({
+    where: { id: lineAddrPerson.id },
+    data: { notes: "Line one\nLine two\nLine three" },
+  });
+  await A.page.goto(`/people/${lineAddrPerson.id}/edit`);
+  await A.page.fill("#field-givenName", "Adela");
+  await A.page.click('button:has-text("Save")');
+  await waitForDb("the third rename to land", async () =>
+    (await prisma.person.findUnique({
+      where: { id: lineAddrPerson.id }, select: { givenName: true },
+    }))?.givenName === "Adela");
+  ok("24.5 multi-line notes keep their newlines rather than gaining carriage returns",
+     (await prisma.person.findUniqueOrThrow({ where: { id: lineAddrPerson.id } })).notes
+       === "Line one\nLine two\nLine three",
+     JSON.stringify((await prisma.person.findUniqueOrThrow({
+       where: { id: lineAddrPerson.id },
+     })).notes));
+
+  await prisma.person.delete({ where: { id: lineAddrPerson.id } });
 
   // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");

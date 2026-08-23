@@ -131,15 +131,35 @@ export function ContactPointsEditor({
 
           <div className="min-w-48 flex-1">
             {index === 0 ? <span className={labelClass}>Detail</span> : null}
-            <input
-              name="cp_value"
-              value={row.value}
-              onChange={(e) => patchRow(row.uid, { value: e.target.value })}
-              type={row.kind === "EMAIL" ? "email" : row.kind === "URL" ? "url" : "text"}
-              placeholder={placeholderFor(row.kind)}
-              className={`${inputClass} mt-1.5`}
-              aria-label="Contact detail"
-            />
+            {/*
+              An address gets a textarea, and that is a data-integrity fix rather than a
+              nicety. An address value is the formatted block Google returns — three lines,
+              newlines and all — and an <input> silently strips CR and LF from its value. So
+              editing a contact's NAME rewrote its address as
+              "784 Broadway DrSun Prairie, WI 53590USA": the form round-tripped a multi-line
+              string through a single-line control, and every save flattened it a little more.
+            */}
+            {row.kind === "ADDRESS" ? (
+              <textarea
+                name="cp_value"
+                value={row.value}
+                onChange={(e) => patchRow(row.uid, { value: e.target.value })}
+                rows={3}
+                placeholder={placeholderFor(row.kind)}
+                className={`${inputClass} mt-1.5`}
+                aria-label="Contact detail"
+              />
+            ) : (
+              <input
+                name="cp_value"
+                value={row.value}
+                onChange={(e) => patchRow(row.uid, { value: e.target.value })}
+                type={row.kind === "EMAIL" ? "email" : row.kind === "URL" ? "url" : "text"}
+                placeholder={placeholderFor(row.kind)}
+                className={`${inputClass} mt-1.5`}
+                aria-label="Contact detail"
+              />
+            )}
           </div>
 
           <button
