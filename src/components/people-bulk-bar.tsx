@@ -32,6 +32,7 @@ const NAME_FIELDS = ["givenName", "middleName", "familyName", "nickname"];
  */
 export function PeopleBulkBar({
   labelNames,
+  users,
   fields,
   timeZone,
   total,
@@ -41,6 +42,7 @@ export function PeopleBulkBar({
   googleAction,
   trashAction,
   fieldAction,
+  shareAction,
 }: {
   /** The viewer's own label names, offered as the things to add or remove. */
   labelNames: readonly string[];
@@ -49,6 +51,8 @@ export function PeopleBulkBar({
   shown: number;
   /** The current filter, as hidden f.* fields, so "all matching" can be resolved server-side. */
   filterFields: readonly { name: string; value: string }[];
+  /** Other users of the install, who a selection can be shared with. */
+  users: readonly { id: string; email: string; name: string | null }[];
   /** Every field that can be set in bulk — core columns and custom alike. */
   fields: readonly FieldDef[];
   timeZone: string;
@@ -56,6 +60,7 @@ export function PeopleBulkBar({
   googleAction: Action;
   trashAction: Action;
   fieldAction: Action;
+  shareAction: Action;
 }) {
   const [count, setCount] = useState(0);
   // Which button was pressed travels in a hidden input, not on the button: React drops a
@@ -63,8 +68,9 @@ export function PeopleBulkBar({
   // silently became its "remove" fallback.
   const mode = useRef<HTMLInputElement>(null);
   const google = useRef<HTMLInputElement>(null);
+  const shareMode = useRef<HTMLInputElement>(null);
   const [allMatching, setAllMatching] = useState(false);
-  const [open, setOpen] = useState<"labels" | "fields" | null>(null);
+  const [open, setOpen] = useState<"labels" | "fields" | "share" | null>(null);
   // Which fields are ticked, so an input only appears for a field somebody asked to change
   // — two hundred inputs for forty fields would bury the two that matter.
   const [chosen, setChosen] = useState<Set<string>>(new Set());
@@ -73,13 +79,16 @@ export function PeopleBulkBar({
   const [googleState, runGoogle] = useActionState(googleAction, { ok: false });
   const [trashState, runTrash] = useActionState(trashAction, { ok: false });
   const [fieldState, runFields] = useActionState(fieldAction, { ok: false });
+  const [shareState, runShare] = useActionState(shareAction, { ok: false });
   const state = labelState.message
     ? labelState
     : googleState.message
       ? googleState
       : fieldState.message
         ? fieldState
-        : trashState;
+        : shareState.message
+          ? shareState
+          : trashState;
 
   // Counted from the DOM, and recounted on every change anywhere in the form — which
   // includes the header's select-all, so one listener covers both.
@@ -156,6 +165,17 @@ export function PeopleBulkBar({
             >
               Fields
             </button>
+            {/* Only when there is somebody to share with. A control that can never do
+                anything is worse than no control. */}
+            {users.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setOpen(open === "share" ? null : "share")}
+                className={btnSecondary}
+              >
+                Sharing
+              </button>
+            ) : null}
             <SubmitButton
               className={btnSecondary}
               pendingLabel="Saving…"
@@ -181,6 +201,59 @@ export function PeopleBulkBar({
               Move to trash
             </SubmitButton>
           </div>
+
+          {open === "share" ? (
+            <div className="mt-3 border-t border-accent-200 pt-3 dark:border-accent-900">
+              <span className={labelClass}>
+                Share {acting} contact{acting === 1 ? "" : "s"} with
+              </span>
+              <div className="mt-1 flex flex-wrap items-end gap-x-4 gap-y-2">
+                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                  {users.map((u) => (
+                    <label key={u.id} className="flex items-center gap-1.5 text-sm">
+                      <input
+                        type="checkbox"
+                        name="userId"
+                        value={u.id}
+                        className="size-3.5 rounded border-neutral-300 dark:border-neutral-600"
+                      />
+                      {u.name ?? u.email}
+                    </label>
+                  ))}
+                </div>
+                <select name="permission" defaultValue="VIEW" className={`${inputClass} w-44`}>
+                  <option value="VIEW">can view</option>
+                  <option value="EDIT">can view and edit</option>
+                </select>
+                <SubmitButton
+                  className={btnSecondary}
+                  pendingLabel="Sharing…"
+                  formAction={runShare}
+                  beforeSubmit={() => {
+                    if (shareMode.current) shareMode.current.value = "share";
+                  }}
+                >
+                  Share
+                </SubmitButton>
+                <SubmitButton
+                  className={btnSecondary}
+                  pendingLabel="Revoking…"
+                  formAction={runShare}
+                  beforeSubmit={() => {
+                    if (shareMode.current) shareMode.current.value = "revoke";
+                  }}
+                >
+                  Stop sharing
+                </SubmitButton>
+              </div>
+              {/* Both consequences said before they happen, because neither is obvious and
+                  one of them reaches somebody else's phone. */}
+              <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+                A shared contact reaches that person&rsquo;s Google Contacts too. Only
+                contacts you own can be shared, and only you can share them.
+              </p>
+            </div>
+          ) : null}
 
           {open === "fields" ? (
             <div className="mt-3 border-t border-accent-200 pt-3 dark:border-accent-900">
@@ -308,6 +381,7 @@ export function PeopleBulkBar({
 
       <input ref={mode} type="hidden" name="mode" defaultValue="add" />
       <input ref={google} type="hidden" name="addToGoogle" defaultValue="on" />
+      <input ref={shareMode} type="hidden" name="shareMode" defaultValue="share" />
 
       {/* The filter travels with the request so "all matching" can be rebuilt server-side
           rather than trusted as a list of ids from the browser. */}

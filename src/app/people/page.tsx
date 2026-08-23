@@ -24,6 +24,7 @@ import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
 import { effectivePhotoMap } from "@/lib/photos-db";
 import { getUserSettings } from "@/lib/settings";
+import { listOtherUsers } from "@/lib/users";
 import { PeopleFilters } from "@/components/people-filters";
 import { PeopleBulkBar } from "@/components/people-bulk-bar";
 import { SelectAllPeople } from "@/components/select-all-people";
@@ -31,6 +32,7 @@ import {
   bulkLabelPeople,
   bulkSetAddToGoogle,
   bulkSetFields,
+  bulkSharePeople,
   bulkTrashPeople,
 } from "@/lib/actions/people-bulk";
 
@@ -46,9 +48,10 @@ export default async function PeoplePage({
   const filter = parseFilter(params);
   const where = peopleWhere(filter, user.id);
 
-  const [defs, settings] = await Promise.all([
+  const [defs, settings, shareableUsers] = await Promise.all([
     loadRegistry(user.id, "PERSON"),
     getUserSettings(user.id),
+    listOtherUsers(user.id),
   ]);
   // displayName already covers the name fields, so don't repeat them as columns.
   const columns = listFields(defs).filter(
@@ -261,6 +264,8 @@ export default async function PeoplePage({
             <PeopleBulkBar
               labelNames={labelRows.map((l) => l.name)}
               fields={genericFields(defs).filter((d) => !d.archived)}
+              users={shareableUsers}
+              shareAction={bulkSharePeople}
               timeZone={settings.timeZone}
               fieldAction={bulkSetFields}
               total={total}

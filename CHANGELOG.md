@@ -26,6 +26,22 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Added
+
+- **Bulk sharing from the people list.** Tick a selection, open **Sharing**, choose who and
+  whether they can edit, and press Share — or **Stop sharing** to withdraw the lot.
+  - **Owner-only, per contact.** An edit grant is permission to help maintain a record, not
+    to pass it on, so anything in the selection that somebody shared with *you* is left alone
+    and the message says how many. Sharing your whole address book is a different thing and
+    still lives in Settings, because it covers records added later.
+  - Sharing the same contacts again **changes the permission** rather than duplicating the
+    grant, exactly as the per-contact control does.
+  - Withdrawing removes the contacts from that person's Google, since Hearth has stopped
+    managing their copy and a copy nothing will ever update again is worse than none.
+  - **If a blanket "share everything" grant still gives them access, the message says so.**
+    Per-contact withdrawal cannot undo a standing grant, and reporting "stopped sharing"
+    without that caveat would be untrue in the one case where it matters.
+
 ### Fixed
 
 - **Editing a contact flattened its address, even when you never touched the address.** A

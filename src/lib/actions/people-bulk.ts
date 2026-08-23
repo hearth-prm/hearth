@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, SharePermission } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   ownedPeopleWhere,
@@ -21,6 +21,7 @@ import { recordPersonVersionAfter } from "@/lib/person-versions";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
 import { queueContactDeletionEverywhere } from "@/lib/sync/tombstones";
+import { reapUnreachableCopies } from "@/lib/sync/reap";
 import { requeueEveryCopy } from "@/lib/sync/requeue";
 
 /**
@@ -371,6 +372,123 @@ export async function bulkSetFields(
         ids.length,
         "edit",
       )}`,
+    );
+  } catch (err) {
+    if (isFrameworkError(err)) throw err;
+    return toActionError(err);
+  }
+}
+
+/**
+ * Share, or stop sharing, a selection with other users of the install.
+ *
+ * Owner-only, like deleting: an EDIT grant is permission to help maintain a record, not to
+ * hand it on. And per-contact, deliberately — "share everything I have" already exists as a
+ * standing grant in Settings, which covers records added later. This is the other thing:
+ * these fourteen, now.
+ *
+ * Granting needs no sync nudge. The contacts queue matches on readablePeopleWhere plus
+ * "googleSyncs: none for this account", so a newly shared contact enters the recipient's
+ * queue by itself. Revoking does need one, because Hearth has stopped managing their copy
+ * and a copy nothing will ever update again is worse than none.
+ */
+export async function bulkSharePeople(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  try {
+    const user = await requireUserForAction();
+    const revoking = readString(form, "shareMode") === "revoke";
+    const permission: SharePermission =
+      readString(form, "permission") === "EDIT" ? "EDIT" : "VIEW";
+
+    const wanted = [...new Set(form.getAll("userId").map(String).filter(Boolean))]
+      .filter((id) => id !== user.id);
+    if (wanted.length === 0) return actionError("Choose who to share with.");
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: wanted } },
+      select: { id: true, email: true },
+    });
+    if (recipients.length === 0) return actionError("Choose who to share with.");
+
+    // Sharing is the owner's alone, so the selection narrows to what this user owns.
+    const { ids, asked } = await selectedIds(form, user.id, ownedPeopleWhere(user.id));
+    if (ids.length === 0) return actionError("Nothing selected that is yours to share.");
+
+    let touched = 0;
+    for (const recipient of recipients) {
+      if (revoking) {
+        const { count } = await prisma.share.deleteMany({
+          where: {
+            ownerId: user.id,
+            withUserId: recipient.id,
+            scope: "PERSON",
+            personId: { in: ids },
+          },
+        });
+        touched += count;
+      } else {
+        for (const personId of ids) {
+          // Upsert by hand: the unique key here is a composite nobody declared, and an
+          // existing share should have its permission updated rather than being refused.
+          const existing = await prisma.share.findFirst({
+            where: {
+              ownerId: user.id, withUserId: recipient.id, scope: "PERSON", personId,
+            },
+            select: { id: true, permission: true },
+          });
+          if (!existing) {
+            await prisma.share.create({
+              data: {
+                ownerId: user.id, withUserId: recipient.id, scope: "PERSON",
+                permission, personId,
+              },
+            });
+            touched += 1;
+          } else if (existing.permission !== permission) {
+            await prisma.share.update({
+              where: { id: existing.id }, data: { permission },
+            });
+            touched += 1;
+          }
+        }
+      }
+    }
+
+    if (revoking) {
+      // One sweep per recipient rather than per contact: reap asks "which copies should this
+      // account no longer hold", which is the same answer however many shares were withdrawn.
+      for (const recipient of recipients) await reapUnreachableCopies(recipient.id);
+    }
+
+    // A blanket grant outranks anything done here, and saying so is the difference between
+    // "revoked" and "revoked, and they can still see them".
+    const blanket = revoking
+      ? await prisma.share.findMany({
+          where: {
+            ownerId: user.id,
+            withUserId: { in: recipients.map((r) => r.id) },
+            scope: "ALL_PEOPLE",
+          },
+          select: { withUser: { select: { email: true } } },
+        })
+      : [];
+
+    revalidatePath("/people");
+    revalidatePath("/settings/sharing");
+    const who = recipients.map((r) => r.email ?? "someone").join(", ");
+    return actionOk(
+      revoking
+        ? `Stopped sharing ${touched} contact${touched === 1 ? "" : "s"} with ${who}.` +
+            skipped(asked, ids.length, "share") +
+            (blanket.length > 0
+              ? ` Note that ${blanket
+                  .map((b) => b.withUser.email ?? "someone")
+                  .join(", ")} can still see all your contacts through a blanket share in Settings.`
+              : "")
+        : `Shared ${ids.length} contact${ids.length === 1 ? "" : "s"} with ${who}` +
+            `${permission === "EDIT" ? ", who can edit them" : " to view"}.` +
+            skipped(asked, ids.length, "share"),
     );
   } catch (err) {
     if (isFrameworkError(err)) throw err;

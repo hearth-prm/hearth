@@ -3907,6 +3907,113 @@ try {
   await prisma.person.delete({ where: { id: lineAddrPerson.id } });
 
   // ════════════════════════════════════════════════════════════════════════
+  section("§25 Bulk sharing from the people list");
+
+  const shareLabelName = "Bulk Share Set";
+  const sharePeople: { id: string }[] = [];
+  for (const n of ["Zshare One", "Zshare Two", "Zshare Three"]) {
+    sharePeople.push(await prisma.person.create({
+      data: { ownerId: A.id, displayName: n, givenName: n.split(" ")[0], familyName: n.split(" ")[1] },
+    }));
+  }
+  // Owned by B: sharing is the owner's alone, so this must be left out of everything below
+  // even though A may edit it.
+  const shareNotMine = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Zshare Foreign" },
+  });
+  await prisma.share.create({
+    data: { ownerId: B.id, withUserId: A.id, personId: shareNotMine.id, scope: "PERSON", permission: "EDIT" },
+  });
+
+  await A.page.goto("/people?q=Zshare");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Sharing")');
+  await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
+  await A.page.selectOption('form#people-bulk select[name="permission"]', "EDIT");
+  await A.page.click('form#people-bulk button:text-is("Share")');
+  await waitForDb("the three to be shared", async () =>
+    (await prisma.share.count({
+      where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+               personId: { in: sharePeople.map((p) => p.id) } },
+    })) === 3);
+  ok("25.1 a selection can be shared in one go",
+     (await prisma.share.count({
+       where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+                personId: { in: sharePeople.map((p) => p.id) }, permission: "EDIT" },
+     })) === 3);
+  // The rule sharing must not break: an edit grant is help maintaining a record, not the
+  // right to pass it on.
+  ok("25.1b and a contact somebody shared with YOU is not yours to share on",
+     (await prisma.share.count({
+       where: { ownerId: A.id, personId: shareNotMine.id },
+     })) === 0);
+  const shareMsg = (await A.page.textContent('form#people-bulk [role="status"]')) ?? "";
+  ok("25.1c saying what it did and what it left alone",
+     shareMsg.includes("3 contact") && shareMsg.includes("not yours to share"), shareMsg);
+
+  // The recipient really can see them — the assertion that matters, rather than a row count.
+  await B.page.goto("/people?q=Zshare");
+  const bSees = (await B.page.textContent("body")) ?? "";
+  ok("25.2 the recipient sees them in their own list",
+     bSees.includes("Zshare One") && bSees.includes("Zshare Two") && bSees.includes("Zshare Three"));
+
+  // Raising or lowering the permission is an update, not a second share.
+  await A.page.goto("/people?q=Zshare");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Sharing")');
+  await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
+  await A.page.selectOption('form#people-bulk select[name="permission"]', "VIEW");
+  await A.page.click('form#people-bulk button:text-is("Share")');
+  await waitForDb("the permission to drop to VIEW", async () =>
+    (await prisma.share.count({
+      where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+               personId: { in: sharePeople.map((p) => p.id) }, permission: "VIEW" },
+    })) === 3);
+  ok("25.3 sharing again changes the permission rather than duplicating the share",
+     (await prisma.share.count({
+       where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+                personId: { in: sharePeople.map((p) => p.id) } },
+     })) === 3);
+
+  // And withdrawing it.
+  await A.page.goto("/people?q=Zshare");
+  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await A.page.click('form#people-bulk button:text-is("Sharing")');
+  await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
+  await A.page.click('form#people-bulk button:has-text("Stop sharing")');
+  await waitForDb("the shares to be withdrawn", async () =>
+    (await prisma.share.count({
+      where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+               personId: { in: sharePeople.map((p) => p.id) } },
+    })) === 0);
+  ok("25.4 and withdrawn in one go",
+     (await prisma.share.count({
+       where: { ownerId: A.id, withUserId: B.id, scope: "PERSON",
+                personId: { in: sharePeople.map((p) => p.id) } },
+     })) === 0);
+  // Whether the recipient can still see them depends on something this control cannot
+  // undo: a blanket "share everything" grant outranks any per-contact withdrawal. Earlier
+  // sections may have created one, so this asks which world it is in rather than assuming —
+  // and the interesting half is that the message SAYS so.
+  const blanketToB = await prisma.share.count({
+    where: { ownerId: A.id, withUserId: B.id, scope: "ALL_PEOPLE" },
+  });
+  const revokeMsg = (await A.page.textContent('form#people-bulk [role="status"]')) ?? "";
+  if (blanketToB > 0) {
+    ok("25.4b and when a blanket share still grants access, it says so rather than implying otherwise",
+       revokeMsg.includes("blanket share"), revokeMsg);
+  } else {
+    await B.page.goto("/people?q=Zshare");
+    ok("25.4b after which the recipient cannot see them",
+       !((await B.page.textContent("body")) ?? "").includes("Zshare One"));
+  }
+
+  await prisma.person.deleteMany({
+    where: { id: { in: [...sharePeople.map((p) => p.id), shareNotMine.id] } },
+  });
+  await prisma.label.deleteMany({ where: { name: shareLabelName } });
+
+  // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the
