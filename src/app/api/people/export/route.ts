@@ -40,12 +40,14 @@ export async function GET(request: NextRequest) {
   }
 
   const filter = parseFilter(params);
-  const where = peopleWhere(filter, user.id);
 
   // The exporter's own registry decides the custom columns. A shared contact's
   // owner may have fields this user does not, and inventing columns for them would
   // produce a file whose headers change depending on which rows came back.
   const defs = await loadRegistry(user.id, "PERSON");
+  // The same registry the list uses, so "export these" exports what the query selected
+  // rather than a differently-parsed version of it.
+  const where = peopleWhere(filter, user.id, defs);
   const customFields = defs.filter((d) => !d.core);
 
   const people = await prisma.person.findMany({

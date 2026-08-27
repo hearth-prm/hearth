@@ -63,7 +63,15 @@ async function selectedIds(
           ? [...existing, next]
           : [existing, next];
     }
-    const filtered = peopleWhere(parseFilter(params), userId);
+    // With the registry, so "all matching this filter" resolves the SAME query the page
+    // resolved. Without it a custom-field term degrades to a text search here and to a field
+    // lookup there, and the two select different contacts — which for a bulk delete is the
+    // worst possible place for a disagreement.
+    const filtered = peopleWhere(
+      parseFilter(params),
+      userId,
+      await loadRegistry(userId, "PERSON"),
+    );
     const [all, allowed] = await Promise.all([
       prisma.person.count({ where: filtered }),
       prisma.person.findMany({

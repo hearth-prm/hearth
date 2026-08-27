@@ -1,5 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { readablePeopleWhere } from "@/lib/access";
+import type { FieldDef } from "@/lib/fields/types";
+import { compileQuery, QueryError } from "@/lib/search/compile";
+import { googleClause, relationClause } from "@/lib/search/predicates";
 
 /**
  * Contact list filtering.
@@ -97,25 +100,6 @@ export function isFilterActive(f: PeopleFilter): boolean {
   );
 }
 
-/** Text search across the columns and contact points a person is findable by. */
-function searchClause(q: string): Prisma.PersonWhereInput {
-  if (!q) return {};
-  const contains = { contains: q, mode: "insensitive" } as const;
-  return {
-    OR: [
-      { displayName: contains },
-      { nickname: contains },
-      { organization: contains },
-      { jobTitle: contains },
-      { notes: contains },
-      { contactPoints: { some: { value: contains } } },
-      // Labels are searchable by name too: typing "family" into the box should
-      // find the label's members even if the user never touched the filter UI.
-      { labels: { some: { label: { name: contains } } } },
-    ],
-  };
-}
-
 function labelClause(f: PeopleFilter): Prisma.PersonWhereInput {
   if (f.labelIds.length === 0) return {};
   if (!f.allLabels) {
@@ -124,56 +108,6 @@ function labelClause(f: PeopleFilter): Prisma.PersonWhereInput {
   // "All of these" cannot be one `some`: a single PersonLabel row matches one label,
   // so requiring three means three separate existence checks.
   return { AND: f.labelIds.map((labelId) => ({ labels: { some: { labelId } } })) };
-}
-
-function relationClause(relation: Relation, userId: string): Prisma.PersonWhereInput {
-  /**
-   * "Somebody else can see this" is two different facts: a share naming the record,
-   * or a blanket grant from its owner that sweeps it up. A blanket grant is not
-   * recorded per record — that is the whole point of it — so it has to be tested
-   * through the owner.
-   */
-  const visibleToSomeoneElse: Prisma.PersonWhereInput = {
-    OR: [
-      { shares: { some: {} } },
-      { owner: { sharesGiven: { some: { scope: "ALL_PEOPLE" } } } },
-    ],
-  };
-
-  switch (relation) {
-    case "mine":
-      return { ownerId: userId };
-    case "shared-with-me":
-      return { ownerId: { not: userId } };
-    case "shared-by-me":
-      return { ownerId: userId, ...visibleToSomeoneElse };
-    case "private":
-      return { ownerId: userId, NOT: visibleToSomeoneElse };
-  }
-}
-
-function googleClause(state: GoogleState, userId: string): Prisma.PersonWhereInput {
-  switch (state) {
-    case "on":
-      return { addToGoogle: true };
-    case "off":
-      return { addToGoogle: false };
-    case "synced":
-      return { googleSyncs: { some: { userId, googleSyncStatus: "SYNCED" } } };
-    case "error":
-      return { googleSyncs: { some: { userId, googleSyncStatus: "ERROR" } } };
-    case "pending":
-      // A contact with no PersonSync row for this account has never been pushed, so
-      // it is waiting just as much as one explicitly marked PENDING. Leaving that
-      // case out would make the filter miss every newly added contact.
-      return {
-        addToGoogle: true,
-        OR: [
-          { googleSyncs: { some: { userId, googleSyncStatus: "PENDING" } } },
-          { googleSyncs: { none: { userId } } },
-        ],
-      };
-  }
 }
 
 function hasClause(has: HasOption): Prisma.PersonWhereInput {
@@ -187,14 +121,36 @@ function hasClause(has: HasOption): Prisma.PersonWhereInput {
   }
 }
 
-/** The complete where-clause: access first, then every active filter. */
+/**
+ * The complete where-clause: access first, then every active filter.
+ *
+ * `q` is a query language now rather than a bare phrase, and the two are compatible on
+ * purpose: anything without a `field:` prefix is still the seven-column text search it always
+ * was, so every bookmarked URL keeps meaning what it meant. The chips are unchanged and ANDed
+ * alongside, which is why they can stay while the language grows.
+ *
+ * A registry is needed to resolve custom field names. A caller without one gets the language
+ * minus custom fields rather than an error — a where-clause builder is not the place to make
+ * loading the registry compulsory.
+ */
 export function peopleWhere(
   f: PeopleFilter,
   userId: string,
+  registry: readonly FieldDef[] = [],
 ): Prisma.PersonWhereInput {
   const clauses: Prisma.PersonWhereInput[] = [readablePeopleWhere(userId)];
 
-  if (f.q) clauses.push(searchClause(f.q));
+  if (f.q) {
+    try {
+      clauses.push(compileQuery(f.q, userId, registry).where);
+    } catch (err) {
+      // A malformed query narrows to nothing rather than widening to everything. The page
+      // reports the message through parsePeopleQuery; this is the safety net for callers that
+      // only want a clause — the export endpoint and the bulk actions.
+      if (!(err instanceof QueryError)) throw err;
+      clauses.push({ id: "" });
+    }
+  }
   const labels = labelClause(f);
   if (Object.keys(labels).length) clauses.push(labels);
   if (f.relation) clauses.push(relationClause(f.relation, userId));
@@ -297,4 +253,25 @@ export function toggleLabelHref(f: PeopleFilter, labelId: string): string {
     ? f.labelIds.filter((id) => id !== labelId)
     : [...f.labelIds, labelId];
   return filterHref(f, { label: next });
+}
+
+/**
+ * The query, and anything worth saying about it.
+ *
+ * Separate from peopleWhere because a page wants the message and a clause builder does not:
+ * the export endpoint and the bulk actions need a clause and nothing else, while the list
+ * needs to say "there is a quote without a closing quote" beside the box.
+ */
+export function parsePeopleQuery(
+  q: string,
+  userId: string,
+  registry: readonly FieldDef[],
+): { error: string | null; warnings: string[] } {
+  if (!q) return { error: null, warnings: [] };
+  try {
+    return { error: null, warnings: compileQuery(q, userId, registry).warnings };
+  } catch (err) {
+    if (err instanceof QueryError) return { error: err.message, warnings: [] };
+    throw err;
+  }
 }

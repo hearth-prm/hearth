@@ -1407,9 +1407,19 @@ try {
     systemLightBg,
     { timeout: 10_000 },
   ).catch(() => {});
+  // This one still flakes about one run in three and the cause is NOT identified. The detail
+  // therefore carries all three halves, because a paint that disagrees with the attribute and
+  // an attribute that disagrees with the row need opposite investigations — the same
+  // distinction that cracked the mapping bug in §23. Do not "fix" it by retrying until it is
+  // clear which of the three is stale.
   ok("15.4d and comes back server-rendered, still beating the device",
      (await htmlState()).theme === "light" && (await bodyPaint()) === systemLightBg,
-     `${systemLightBg} -> ${await bodyPaint()}`);
+     {
+       wantBg: systemLightBg,
+       gotBg: await bodyPaint(),
+       htmlAttr: (await htmlState()).theme,
+       storedTheme: (await settingsRow())?.theme,
+     });
   await A.page.emulateMedia({ colorScheme: "light" });
 
   // A hue of one's own.
@@ -3475,6 +3485,29 @@ try {
     data: { ownerId: B.id, withUserId: A.id, personId: bulkShared.id, scope: "PERSON", permission: "EDIT" },
   });
 
+  /**
+   * Tick every listed row, and make sure it took.
+   *
+   * The header checkbox is a client component: its onChange sets the row boxes, so a click
+   * that lands before hydration does nothing at all. The action then reports "nothing
+   * selected", the labels stay put, and §21.5 fails about one run in three for a reason that
+   * has nothing to do with labels. Waiting for the bar to appear is the confirmation that the
+   * click was heard.
+   */
+  const selectAllRows = async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await A.page.click('th input[aria-label="Select all listed contacts"]');
+      try {
+        await A.page.waitForSelector('form#people-bulk >> text=selected', { timeout: 5_000 });
+        return;
+      } catch {
+        // Not hydrated yet. Untick and try again, so the second click is not a toggle-off.
+        await A.page.click('th input[aria-label="Select all listed contacts"]').catch(() => {});
+      }
+    }
+    throw new Error("the select-all checkbox never took effect");
+  };
+
   const tick = async (name: string) => {
     await A.page.check(`tr:has-text("${name}") input[name="personId"]`);
   };
@@ -3492,7 +3525,7 @@ try {
   ok("21.2 ticking a row shows what is selected", ((await bulkBar()) ?? "").includes("1 selected"),
      await bulkBar());
 
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.waitForFunction(
     () => document.querySelectorAll('input[name="personId"]:not(:checked)').length === 0,
     undefined, { timeout: 10_000 },
@@ -3533,21 +3566,31 @@ try {
   });
   const beforeRemoval = await prisma.personLabel.count({ where: { labelId: bulkLabel.id } });
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:has-text("Labels")');
   await A.page.check(`form#people-bulk input[name="labelName"][value="Bulk Label"]`);
   await A.page.click('form#people-bulk button:text-is("Remove")');
-  await waitForDb("the label to be taken off", async () =>
-    (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 0);
+  // Both label ids, not just A's. The action removes one contact at a time, and the shared
+  // one carries its OWNER's label of that name — a different id — so waiting only for A's
+  // returned while B's removal was still in flight. Third time this shape has bitten: one
+  // wait per write.
+  await waitForDb("the label to be taken off all four", async () =>
+    (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 0
+      && (await prisma.personLabel.count({ where: { personId: bulkShared.id } })) === 0);
+  const leftOn = await prisma.personLabel.findMany({
+    where: { personId: bulkShared.id },
+    include: { label: true },
+  });
   ok("21.5 and can be taken off the same way",
      beforeRemoval === 3
        && (await prisma.personLabel.count({ where: { labelId: bulkLabel.id } })) === 0
        && (await prisma.personLabel.count({ where: { personId: bulkShared.id } })) === 0,
-     beforeRemoval);
+     { beforeRemoval, leftOn: leftOn.map((pl) => `${pl.label.name}/${pl.label.ownerId}`),
+       msg: await A.page.textContent('form#people-bulk [role="status"]').catch(() => null) });
 
   // --- bulk Add to Google --------------------------------------------------
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:has-text("Add to Google")');
   await waitForDb("all four to be marked for Google", async () =>
     (await prisma.person.count({
@@ -3559,7 +3602,7 @@ try {
      })) === 4);
 
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:has-text("Remove from Google")');
   await waitForDb("all four to be unmarked", async () =>
     (await prisma.person.count({
@@ -3572,7 +3615,7 @@ try {
 
   // --- bulk delete ---------------------------------------------------------
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:has-text("Move to trash")');
   await waitForDb("the three owned contacts to be trashed", async () =>
     (await prisma.person.count({
@@ -3621,7 +3664,7 @@ try {
   });
 
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Fields")');
   await A.page.check('form#people-bulk input[name="field"][value="jobTitle"]');
   await A.page.check('form#people-bulk input[name="field"][value="howTheyVote"]');
@@ -3672,7 +3715,7 @@ try {
   // Clearing is asked for explicitly, because an empty box on a ticked field is
   // indistinguishable from leaving it be.
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Fields")');
   await A.page.check('form#people-bulk input[name="field"][value="jobTitle"]');
   await A.page.check('form#people-bulk input[name="clear"][value="jobTitle"]');
@@ -3706,7 +3749,7 @@ try {
     },
   });
   await A.page.goto("/people?q=Bulk");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Fields")');
   await A.page.check('form#people-bulk input[name="field"][value="hatSize"]');
   await A.page.fill("#field-hatSize", "x".repeat(1001));
@@ -3926,7 +3969,7 @@ try {
   });
 
   await A.page.goto("/people?q=Zshare");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Sharing")');
   await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
   await A.page.selectOption('form#people-bulk select[name="permission"]', "EDIT");
@@ -3959,7 +4002,7 @@ try {
 
   // Raising or lowering the permission is an update, not a second share.
   await A.page.goto("/people?q=Zshare");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Sharing")');
   await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
   await A.page.selectOption('form#people-bulk select[name="permission"]', "VIEW");
@@ -3977,7 +4020,7 @@ try {
 
   // And withdrawing it.
   await A.page.goto("/people?q=Zshare");
-  await A.page.click('th input[aria-label="Select all listed contacts"]');
+  await selectAllRows();
   await A.page.click('form#people-bulk button:text-is("Sharing")');
   await A.page.check(`form#people-bulk input[name="userId"][value="${B.id}"]`);
   await A.page.click('form#people-bulk button:has-text("Stop sharing")');
@@ -4012,6 +4055,195 @@ try {
     where: { id: { in: [...sharePeople.map((p) => p.id), shareNotMine.id] } },
   });
   await prisma.label.deleteMany({ where: { name: shareLabelName } });
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§26 The query language");
+
+  const { parseQuery, QueryError: QErr } = await import("@/lib/search/parse");
+  const { compileQuery } = await import("@/lib/search/compile");
+
+  // --- the parser, which is pure and has hundreds of inputs -----------------
+  const shape = (q: string) => JSON.stringify(parseQuery(q));
+  ok("26.1 a bare word is a text search",
+     shape("hammerling") === '{"kind":"term","field":null,"op":":","value":"hammerling","quoted":false}',
+     shape("hammerling"));
+  ok("26.1b a field and value split on the FIRST colon",
+     shape("notes:see me:tomorrow").includes('"field":"notes"')
+       && shape("notes:see me:tomorrow").includes('see'),
+     shape("notes:see me:tomorrow"));
+  ok("26.1c a quoted value keeps its spaces and never splits on a colon",
+     shape('city:"Sun Prairie"').includes('"value":"Sun Prairie"'),
+     shape('city:"Sun Prairie"'));
+  ok("26.2 juxtaposition is AND", JSON.parse(shape("a b"))!.kind === "and");
+  ok("26.2b or is looser than and, so a b or c reads as (a and b) or c",
+     JSON.parse(shape("a b or c"))!.kind === "or"
+       && JSON.parse(shape("a b or c"))!.nodes[0].kind === "and",
+     shape("a b or c"));
+  ok("26.2c parentheses override that",
+     JSON.parse(shape("a (b or c)"))!.kind === "and", shape("a (b or c)"));
+  ok("26.3 a leading minus negates", JSON.parse(shape("-has:email"))!.kind === "not");
+  ok("26.3b but a hyphen inside a word does not",
+     JSON.parse(shape("well-known"))!.kind === "term", shape("well-known"));
+  ok("26.3c and neither does one in a label name",
+     shape("label:Work-Friends").includes('"value":"Work-Friends"'), shape("label:Work-Friends"));
+  ok("26.4 comparisons are recognised",
+     shape("created:>2026-01-01").includes('"op":">"'), shape("created:>2026-01-01"));
+  ok("26.4b an empty query is nothing rather than an error", parseQuery("   ") === null);
+
+  const rejects = (q: string) => {
+    try {
+      parseQuery(q);
+      return "no error";
+    } catch (err) {
+      return err instanceof QErr ? "rejected" : "wrong error";
+    }
+  };
+  for (const [q, why] of [
+    ['city:"Sun', "an unclosed quote"],
+    ["(label:Family", "an unclosed bracket"],
+    ["label:Family)", "a stray closing bracket"],
+    ["label:", "a field with no value"],
+    ["a or", "a trailing or"],
+    ["or a", "a leading or"],
+  ] as [string, string][]) {
+    ok(`26.5 ${why} is refused`, rejects(q) === "rejected", `${q} -> ${rejects(q)}`);
+  }
+
+  // --- the compiler, against the real database -----------------------------
+  // Loaded AFTER the fixtures below, which is not tidiness: a custom field's name is only a
+  // field once its definition exists, so a registry read before the create left `qhow:` as an
+  // unknown name and the query degraded to a text search. The check failed and the code was
+  // right.
+  const { loadRegistry: loadRegistryForQuery } = await import("@/lib/fields/registry");
+  const run = async (q: string) => {
+    const { where } = compileQuery(q, A.id, qDefs);
+    return prisma.person.count({
+      where: { AND: [(await import("@/lib/access")).readablePeopleWhere(A.id), where] },
+    });
+  };
+  const qNames = async (q: string) => {
+    const { where } = compileQuery(q, A.id, qDefs);
+    const rows = await prisma.person.findMany({
+      where: { AND: [(await import("@/lib/access")).readablePeopleWhere(A.id), where] },
+      select: { displayName: true },
+      orderBy: { displayName: "asc" },
+    });
+    return rows.map((r) => r.displayName);
+  };
+
+  const qLabel = await prisma.label.create({ data: { ownerId: A.id, name: "Qtest" } });
+  const qCustom = await prisma.fieldDefinition.create({
+    data: { ownerId: A.id, entity: "PERSON", key: "qhow", label: "Qhow", type: "TEXT", order: 400 },
+  });
+  const qPeople: { id: string }[] = [];
+  for (const [n, city, org, custom] of [
+    ["Qa One", "Sun Prairie", "Acme", "at work"],
+    ["Qa Two", "Madison", "Acme", "at school"],
+    ["Qa Three", "Sun Prairie", "Beta", null],
+  ] as [string, string, string, string | null][]) {
+    qPeople.push(await prisma.person.create({
+      data: {
+        ownerId: A.id, displayName: n, givenName: "Qa", familyName: n.split(" ")[1],
+        organization: org, custom: custom ? { qhow: custom } : {},
+        labels: n === "Qa One" ? { create: [{ labelId: qLabel.id }] } : undefined,
+        contactPoints: {
+          create: [
+            { kind: "ADDRESS", value: `1 Road\n${city}`, city, order: 0 },
+            ...(n === "Qa Two" ? [] : [{ kind: "EMAIL" as const, value: `${n.replace(" ", "")}@e2e.test`, order: 0 }]),
+          ],
+        },
+      },
+    }));
+  }
+
+  const qDefs = await loadRegistryForQuery(A.id, "PERSON");
+
+  ok("26.6 an address part is queryable",
+     (await qNames('Qa city:"Sun Prairie"')).join() === "Qa One,Qa Three",
+     await qNames('Qa city:"Sun Prairie"'));
+  ok("26.6b a column alias resolves — org means organization",
+     (await qNames("Qa org:Acme")).join() === "Qa One,Qa Two", await qNames("Qa org:Acme"));
+  ok("26.6c a label by name", (await qNames("label:Qtest")).join() === "Qa One");
+  ok("26.7 presence, and its negation",
+     (await qNames("Qa -has:email")).join() === "Qa Two", await qNames("Qa -has:email"));
+  ok("26.8 a custom field by its own key",
+     (await qNames('Qa qhow:"at work"')).join() === "Qa One", await qNames('Qa qhow:"at work"'));
+  ok("26.9 AND narrows",
+     (await qNames('Qa city:"Sun Prairie" org:Acme')).join() === "Qa One");
+  ok("26.9b OR widens",
+     (await qNames("Qa (org:Beta or label:Qtest)")).join() === "Qa One,Qa Three",
+     await qNames("Qa (org:Beta or label:Qtest)"));
+  ok("26.9c and NOT excludes",
+     (await qNames("Qa -org:Acme")).join() === "Qa Three", await qNames("Qa -org:Acme"));
+  ok("26.10 a bare phrase still searches the old seven columns",
+     (await qNames('"Qa One"')).join() === "Qa One", await qNames('"Qa One"'));
+
+  // An unknown field is text, not an error: 10:30 and re:union predate this language.
+  const unknown = compileQuery("re:union", A.id, qDefs);
+  ok("26.11 an unknown field is searched for as text",
+     unknown.warnings.length === 1 && unknown.warnings[0]!.includes("not a field"),
+     unknown.warnings);
+  // A KNOWN field with an impossible value is worth stopping for.
+  let badValue = "no error";
+  try {
+    compileQuery("google:banana", A.id, qDefs);
+  } catch (err) {
+    badValue = err instanceof QErr ? "rejected" : "wrong error";
+  }
+  ok("26.11b but a known field with an impossible value is refused", badValue === "rejected");
+
+  // --- the property that matters most --------------------------------------
+  //
+  // No query may widen what its asker can see. Asserted by running every form of query as B
+  // against a contact of A's that B has no access to — the one thing a query language is most
+  // likely to break, and the reason the compiler returns a clause to be ANDed rather than a
+  // whole where.
+  // Owned by B and shared with nobody, queried as A. The other direction would prove nothing
+  // here: A shares their whole address book with B in §14, so no contact of A's is private
+  // from B and the check would pass without testing anything.
+  const qPrivate = await prisma.person.create({
+    data: {
+      ownerId: B.id, displayName: "Qprivate Person", organization: "Acme",
+      contactPoints: { create: [{ kind: "ADDRESS", value: "x", city: "Sun Prairie", order: 0 }] },
+    },
+  });
+  const { readablePeopleWhere: readableForQuery } = await import("@/lib/access");
+  const reachableByA = async (q: string) => {
+    const { where } = compileQuery(q, A.id, qDefs);
+    return prisma.person.count({
+      where: { AND: [readableForQuery(A.id), where, { id: qPrivate.id }] },
+    });
+  };
+  // The premise, asserted rather than assumed: without it a passing check might only mean the
+  // contact was never there to find.
+  ok("26.12 the premise — a contact owned by somebody else and shared with nobody",
+     (await prisma.person.count({
+       where: { AND: [readableForQuery(A.id), { id: qPrivate.id }] },
+     })) === 0
+       && (await prisma.person.count({ where: { id: qPrivate.id } })) === 1);
+  let leaked = 0;
+  for (const q of [
+    "Qprivate", 'city:"Sun Prairie"', "org:Acme", "-org:Zzz", "is:mine", "google:off",
+    "(org:Acme or org:Beta)", "-has:phone", "created:>2000-01-01", 'qhow:"at work"',
+    "label:Qtest or Qprivate", "-label:Qtest", "-Qzzz",
+  ]) {
+    leaked += await reachableByA(q);
+  }
+  ok("26.12b and no query reaches it anyway", leaked === 0, leaked);
+
+  // And the trash stays out, which the access clause gives for free but a query language is
+  // exactly how somebody would reach around it.
+  await prisma.person.update({
+    where: { id: qPeople[0]!.id }, data: { deletedAt: new Date() },
+  });
+  ok("26.13 a trashed contact is not findable by any query",
+     (await run("label:Qtest")) === 0 && (await run("Qa One")) === 0);
+
+  await prisma.person.deleteMany({
+    where: { id: { in: [...qPeople.map((p) => p.id), qPrivate.id] } },
+  });
+  await prisma.label.delete({ where: { id: qLabel.id } });
+  await prisma.fieldDefinition.delete({ where: { id: qCustom.id } });
 
   // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");

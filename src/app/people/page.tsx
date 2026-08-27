@@ -9,6 +9,7 @@ import {
   isFilterActive,
   NON_FILTER_PARAMS,
   parseFilter,
+  parsePeopleQuery,
   peopleWhere,
   type RawParams,
 } from "@/lib/people-filter";
@@ -46,13 +47,17 @@ export default async function PeoplePage({
   const user = await requireUser();
   const params = await searchParams;
   const filter = parseFilter(params);
-  const where = peopleWhere(filter, user.id);
 
   const [defs, settings, shareableUsers] = await Promise.all([
     loadRegistry(user.id, "PERSON"),
     getUserSettings(user.id),
     listOtherUsers(user.id),
   ]);
+
+  // After the registry, because a custom field's name is only queryable once its definition
+  // is known — `howWeMet:x` is a field on this install and a text search on another.
+  const where = peopleWhere(filter, user.id, defs);
+  const query = parsePeopleQuery(filter.q, user.id, defs);
   // displayName already covers the name fields, so don't repeat them as columns.
   const columns = listFields(defs).filter(
     (d) => d.key !== "givenName" && d.key !== "familyName",
@@ -137,6 +142,25 @@ export default async function PeoplePage({
       ) : null}
 
       <PeopleFilters filter={filter} labels={labels} resultCount={total} />
+
+      {/* A query that cannot be read narrows to nothing rather than widening to everything,
+          so without this the page would look like a filter that matched no one. */}
+      {query.error ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+        >
+          {query.error}
+        </p>
+      ) : null}
+      {query.warnings.map((warning, i) => (
+        <p
+          key={i}
+          className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+        >
+          {warning}
+        </p>
+      ))}
 
       <Card>
         {people.length === 0 ? (

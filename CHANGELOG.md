@@ -28,6 +28,32 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **The search box is a query language.** Everything that had no filter now has one:
+
+  ```
+  label:Family city:"Sun Prairie" -has:email
+  org:TheStreet or dept:Technology
+  howWeMet:"at work"            your own custom fields, by their own key
+  updated:>30d  created:2026-08  is:private  google:error
+  ```
+
+  Bare words still mean what they meant, so every bookmarked search keeps working — and the
+  filter chips are unchanged and still narrow alongside it.
+  - Fields come from the registry, so a custom field is queryable the moment you create it,
+    with no second place to edit.
+  - Parentheses, `or`, `and`, and a leading `-` to negate. `label:Work-Friends` is not a
+    negation and `well-known` is one word.
+  - An **unknown** field name is searched for as text, because `10:30` and `re:union` predate
+    this language — with a warning, since a mistyped `labl:Family` would otherwise silently
+    match nobody. A **known** field with an impossible value is refused: `google:banana` is a
+    mistake worth stopping for.
+  - A query that cannot be read narrows to nothing and says why, rather than widening to
+    everything and looking like a filter that matched no one.
+  - The export and "select all matching this filter" resolve the same query the page did,
+    using the same registry — a disagreement there would be worst in front of a bulk delete.
+
+### Added
+
 - **Bulk sharing from the people list.** Tick a selection, open **Sharing**, choose who and
   whether they can edit, and press Share — or **Stop sharing** to withdraw the lot.
   - **Owner-only, per contact.** An edit grant is permission to help maintain a record, not
