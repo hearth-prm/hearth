@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import {
   applySuggestion,
   suggestQuery,
   type SuggestResult,
   type Vocabulary,
 } from "@/lib/search/suggest";
+import type { Translation } from "@/lib/search/nl";
 
 /**
  * The search input, with completion for the query language.
@@ -25,18 +26,39 @@ export function SearchBox({
   placeholder,
   vocab,
   className,
+  interpret,
 }: {
   name: string;
   defaultValue: string;
   placeholder: string;
   vocab: Vocabulary;
   className?: string;
+  /**
+   * Turns a sentence into a query, when a model is configured for this install. Absent means
+   * no model, and then no button — a control that can never work is worse than none.
+   */
+  interpret?: (prev: Translation, form: FormData) => Promise<Translation>;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(defaultValue);
   const [result, setResult] = useState<SuggestResult>({ from: 0, to: 0, items: [] });
   const [active, setActive] = useState(0);
   const [open, setOpen] = useState(false);
+
+  // The translator writes into this box, which is the point: what the model understood is
+  // visible and editable before anything is searched.
+  const [asked, setAsked] = useState<string | null>(null);
+  const [translation, runInterpret, interpreting] = useActionState<Translation, FormData>(
+    // A no-op stand-in when no model is configured, so the hook is called unconditionally.
+    interpret ?? (async () => ({ ok: false })),
+    { ok: false },
+  );
+  useEffect(() => {
+    if (translation.ok && translation.query) {
+      setValue(translation.query);
+      setOpen(false);
+    }
+  }, [translation]);
 
   const recompute = (text: string, cursor: number) => {
     const next = suggestQuery(text, cursor, vocab);
@@ -107,6 +129,41 @@ export function SearchBox({
           setTimeout(() => setOpen(false), 120);
         }}
       />
+
+      {interpret ? (
+        <>
+          {/*
+            type="button" with a manual dispatch, rather than formAction: this sits inside the
+            page's GET search form, and a submit button would navigate instead of calling the
+            action. Enter therefore still means "search", which is what it should mean.
+          */}
+          <button
+            type="button"
+            disabled={interpreting || value.trim().length === 0}
+            onClick={() => {
+              const data = new FormData();
+              data.set("sentence", value);
+              setAsked(value);
+              runInterpret(data);
+            }}
+            title="Describe what you are looking for in words, and have it turned into a query"
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-medium text-accent-700 transition hover:bg-accent-50 disabled:opacity-40 dark:text-accent-400 dark:hover:bg-accent-950/60"
+          >
+            {interpreting ? "asking…" : "ask"}
+          </button>
+        </>
+      ) : null}
+
+      {/* What it made of the sentence, or why it could not. Below the box so it does not
+          move the box, and dismissable by typing. */}
+      {translation.ok && asked && !interpreting ? (
+        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          Read “{asked}” as the query above. Edit it, or press Enter to search.
+        </p>
+      ) : null}
+      {!translation.ok && translation.message && !interpreting ? (
+        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{translation.message}</p>
+      ) : null}
 
       {open && result.items.length > 0 ? (
         <ul

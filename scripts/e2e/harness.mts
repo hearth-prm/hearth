@@ -204,6 +204,9 @@ export async function start(): Promise<Harness> {
     AUTH_TRUST_HOST: "true",
     // The whole point: no background reach for Google with credentials that cannot work.
     SYNC_ENABLED: "false",
+    // Passed through so a test can stand a fake Ollama up on a known port and exercise the
+    // "ask" button for real. Empty means no model, which is what an ordinary install has.
+    OLLAMA_URL: process.env.OLLAMA_URL ?? "",
     NODE_ENV: "production" as const,
     PORT: String(appPort),
   };

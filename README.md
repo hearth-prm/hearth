@@ -52,14 +52,17 @@ over to, other users on the same install.
 | ✅ | A trash can that never empties itself | Done |
 | ✅ | Multi-select on the people list, with bulk edit and bulk delete | Done |
 | ✅ | Pictures imported as pictures, not as URLs | Done |
+| ✅ | A query language for the people list, with autocomplete | Done |
+| ✅ | A sentence turned into a query by a model on your own network | Done |
 
-Two pieces of work are designed and queued rather than built:
-[search and filtering](docs/design-search.md) — a query language, then natural language into
-it through a local model — and [sticky shares](docs/design-sticky-shares.md), where a label
-carries standing sharing intentions.
+[Search and filtering](docs/design-search.md) is built through its third phase: a query
+language, autocomplete for it, and a sentence turned into a query by a model on your own
+network. One piece of work is designed and queued rather than built —
+[sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
+intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 586 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 601 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -110,6 +113,8 @@ docker compose down -v         # stop and destroy the database
 | `AUTH_TRUST_HOST` | behind a proxy | `true` when running behind Caddy/nginx/Traefik. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
 | `APP_PORT` | no | Host port, default `3000`. |
+| `OLLAMA_URL` | no | A model on your own network for [asking in words](#asking-in-words). Unset means the feature is not offered. |
+| `OLLAMA_CHAT_MODEL` | no | Default `qwen2.5:7b-instruct`. |
 
 ### Google Cloud setup
 
@@ -701,6 +706,49 @@ The box completes as you type — `ci` offers `city:`, `label:` offers your own 
 and a panel under it lists every key with an example, for when you do not yet know there is
 anything to complete.
 
+#### Asking in words
+
+With `OLLAMA_URL` set (setup at the end of this section), the box grows an **ask** button. Type what you are after in
+plain words — *family in sun prairie with no email* — and it writes
+`label:Family city:"Sun Prairie" -has:email` **into the box** rather than searching. What the
+model understood is therefore visible and editable before anything runs, and it says which
+sentence it read so a misunderstanding is obvious rather than mysterious.
+
+Every answer goes through the same parser as anything typed by hand. A model that replies with
+prose, with a field that does not exist, or with something that will not parse is refused with
+the parser's own reason, and the box is left as you had it. Enter still means *search*, not
+*ask*, so the keyboard path never changes.
+
+Only the sentence, the field names and your label names are sent, and only to the host you
+named. No contact data leaves the machine. With `OLLAMA_URL` unset there is no button at all —
+a control that can never work is worse than none — and with it set but unreachable the
+ordinary search carries on working and the box says the model could not be reached.
+
+To set it up, run [Ollama](https://ollama.com) as its own container — on Unraid it is in the
+Community Applications — and pull one instruction model:
+
+```bash
+ollama pull qwen2.5:7b-instruct
+```
+
+Then point Hearth at it and restart:
+
+```
+OLLAMA_URL=http://192.168.1.10:11434
+OLLAMA_CHAT_MODEL=qwen2.5:7b-instruct
+```
+
+Set `OLLAMA_KEEP_ALIVE` to something long (`24h`) on the Ollama side. A cold model takes tens
+of seconds to load and then answers in about a second, so keeping it resident is the
+difference between the first search of the day being slow and it being fine; Hearth waits a
+full minute before giving up, for exactly that reason.
+
+Ollama deliberately stays a separate container rather than being folded into Hearth's image.
+The weights are gigabytes, an Unraid install would put them inside `docker.img`, and updating
+Hearth would mean re-downloading a model that has not changed. A 7B model is chosen for
+latency rather than memory — a larger one translates no better on a task this constrained, and
+every extra second is a second somebody spends looking at a search box.
+
 The contact list also filters by label (any or all of them), by who can see a contact
 (mine, private, shared by me, shared with me), by Google sync state, and by whether
 there is an email or phone. Every filter is a link, so a filtered list is a URL you
@@ -1060,7 +1108,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 586 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 601 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

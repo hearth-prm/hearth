@@ -26,6 +26,31 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Added
+
+- **Ask for what you want in words.** With `OLLAMA_URL` pointing at a model on your own
+  network, the search box grows an **ask** button: *family in sun prairie with no email*
+  becomes `label:Family city:"Sun Prairie" -has:email`.
+  - It writes the query **into the box** rather than searching. That is the whole design: a
+    misunderstanding produces a visibly wrong query you can edit, not a quietly wrong list you
+    then bulk-delete from. The box also says which sentence it read.
+  - Every answer goes back through the same parser as anything typed by hand, so prose, a
+    fenced code block or an invented field is refused — with the parser's own reason — and the
+    box is left alone. A model is not trusted to have produced a query just because it was
+    asked for one.
+  - The prompt carries the field list and your label names from the same vocabulary the
+    autocomplete uses, so the three cannot drift apart. Only the sentence, the field names and
+    the label names are sent, and only to the host you named.
+  - `type="button"` with a manual dispatch, not `formAction`: the button sits inside the
+    page's GET search form, and a submit button would navigate instead of calling the action.
+    Enter therefore still means *search*.
+  - Unset `OLLAMA_URL` and there is no button at all — a control that can never work is worse
+    than none. Set but unreachable, the ordinary search carries on and the box says so.
+  - Ollama stays its own container by design: the weights are gigabytes, on Unraid they would
+    land inside `docker.img`, and updating Hearth would re-download a model that has not
+    changed. §28 drives all of this against a fake Ollama on a loopback port, so the checks
+    need no model and no network.
+
 ## [1.1.0] — 2026-08-27
 
 ### Added

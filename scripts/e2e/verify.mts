@@ -68,6 +68,16 @@ async function waitForDb(
   console.log(`     (gave up waiting for ${label})`);
 }
 
+/**
+ * A port for the stand-in Ollama of §28, agreed before the app starts.
+ *
+ * The app reads OLLAMA_URL when it renders, so whether the "ask" button exists is decided at
+ * boot — which means the address has to be settled here rather than when the fake server is
+ * finally stood up. Nothing listens on it until §28.
+ */
+const OLLAMA_PORT = 57391;
+process.env.OLLAMA_URL = `http://127.0.0.1:${OLLAMA_PORT}`;
+
 const h = await start();
 const { prisma } = h;
 
@@ -4392,6 +4402,140 @@ try {
   ok("27.12 the keys are written down for somebody who does not know to try",
      help.includes("label:Family") && help.includes("-has:email") && help.includes("updated:>30d"),
      help.slice(0, 120));
+
+  // ════════════════════════════════════════════════════════════════════════
+  section("§28 Asking in words");
+
+  // A stand-in for Ollama, so every branch is deterministic. The real model is exercised by
+  // hand against the host; what is worth testing here is the plumbing around it — the JSON,
+  // the validation, the failure messages, and whether the button is wired to any of it.
+  const { createServer: createOllama } = await import("node:http");
+  let ollamaReply: { status: number; body: string } = {
+    status: 200,
+    body: JSON.stringify({ response: JSON.stringify({ query: 'label:Family -has:email' }) }),
+  };
+  let lastPrompt = "";
+  const fakeOllama = createOllama((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += String(c); });
+    req.on("end", () => {
+      try {
+        lastPrompt = String((JSON.parse(raw) as { prompt?: string }).prompt ?? "");
+      } catch {
+        lastPrompt = "";
+      }
+      res.writeHead(ollamaReply.status, { "content-type": "application/json" });
+      res.end(ollamaReply.body);
+    });
+  });
+  await new Promise<void>((done) => fakeOllama.listen(OLLAMA_PORT, "127.0.0.1", done));
+
+  const { translateToQuery, naturalLanguageConfigured } = await import("@/lib/search/nl");
+  const { searchVocabulary: vocabFor } = await import("@/lib/search/compile");
+  const nlDefs = await loadRegistryForQuery(A.id, "PERSON");
+  const nlVocab = vocabFor(nlDefs, ["Family", "Medical"]);
+
+  ok("28.1 a model is considered configured when a URL is set", naturalLanguageConfigured());
+  // The gate the whole feature hangs on: with no URL there is no button, rather than a button
+  // that always fails. Toggled here because the harness sets the variable for every test.
+  const savedOllama = process.env.OLLAMA_URL;
+  delete process.env.OLLAMA_URL;
+  ok("28.1b and not configured when there is none", !naturalLanguageConfigured());
+  ok("28.1c which the translator says rather than trying to connect",
+     !(await translateToQuery("family", nlVocab)).ok);
+  process.env.OLLAMA_URL = savedOllama;
+
+  const good = await translateToQuery("family with no email", nlVocab);
+  ok("28.2 a sentence comes back as a query",
+     good.ok && good.query === "label:Family -has:email", good);
+  ok("28.2b and the prompt carries the fields and label names, so the model is not guessing",
+     lastPrompt.includes("label:Family") && lastPrompt.includes("Medical")
+       && lastPrompt.includes("city"),
+     lastPrompt.slice(0, 80));
+
+  // The reason validation is not a formality: models reply with prose, fences and invented
+  // fields, and the parser is the only thing that decides whether a string is a query.
+  ollamaReply = { status: 200, body: JSON.stringify({ response: "Sure! Here you go." }) };
+  const nlProse = await translateToQuery("family", nlVocab);
+  ok("28.3 prose instead of JSON is refused",
+     !nlProse.ok && nlProse.message!.includes("unreadable"), nlProse);
+
+  ollamaReply = {
+    status: 200,
+    body: JSON.stringify({ response: JSON.stringify({ query: 'city:"Sun' }) }),
+  };
+  const unparseable = await translateToQuery("family", nlVocab);
+  ok("28.4 a query that does not parse is refused, with the parser's own reason",
+     !unparseable.ok && unparseable.message!.includes("closing quote"), unparseable);
+
+  ollamaReply = { status: 200, body: JSON.stringify({ response: JSON.stringify({}) }) };
+  const empty = await translateToQuery("family", nlVocab);
+  ok("28.5 no query in the reply is refused",
+     !empty.ok && empty.message!.includes("did not produce"), empty);
+
+  ollamaReply = { status: 404, body: JSON.stringify({ error: "model not found" }) };
+  const missing = await translateToQuery("family", nlVocab);
+  ok("28.6 a missing model says which model it looked for",
+     !missing.ok && missing.message!.includes("404"), missing);
+
+  ok("28.7 an empty sentence is refused before the model is troubled",
+     !(await translateToQuery("   ", nlVocab)).ok);
+
+  // An unknown FIELD from the model parses fine — the compiler treats it as text with a
+  // warning — so it reaches the box rather than being refused. That is the right outcome: the
+  // person sees what it made of their sentence and can fix it.
+  ollamaReply = {
+    status: 200,
+    body: JSON.stringify({ response: JSON.stringify({ query: "favouritecheese:brie" }) }),
+  };
+  const invented = await translateToQuery("who likes brie", nlVocab);
+  ok("28.8 an invented field still reaches the box, since the box is editable",
+     invented.ok && invented.query === "favouritecheese:brie", invented);
+
+  // --- and the button, in the page -----------------------------------------
+  ollamaReply = {
+    status: 200,
+    body: JSON.stringify({ response: JSON.stringify({ query: "label:Family -has:email" }) }),
+  };
+  await A.page.goto("/people");
+  await A.page.fill('input[name="q"]', "family with no email");
+  await A.page.click('button:text-is("ask")');
+  await A.page.waitForFunction(
+    () => (document.querySelector('input[name="q"]') as HTMLInputElement | null)?.value
+      === "label:Family -has:email",
+    undefined, { timeout: 20_000 },
+  ).catch(() => {});
+  ok("28.9 the button writes the query INTO the box rather than searching",
+     (await A.page.inputValue('input[name="q"]')) === "label:Family -has:email"
+       && new URL(A.page.url()).searchParams.get("q") === null,
+     { value: await A.page.inputValue('input[name="q"]'), url: A.page.url() });
+  ok("28.9b and says what it read, so a misunderstanding is visible",
+     ((await A.page.textContent("body")) ?? "").includes("family with no email"));
+
+  // Then Enter searches, which is the ordinary path — the model has not run anything.
+  await A.page.keyboard.press("Escape");
+  await A.page.focus('input[name="q"]');
+  await A.page.keyboard.press("Enter");
+  await A.page.waitForURL(/[?&]q=/, { timeout: 10_000 }).catch(() => {});
+  ok("28.10 pressing Enter afterwards searches for the query it wrote",
+     (new URL(A.page.url()).searchParams.get("q") ?? "") === "label:Family -has:email",
+     A.page.url());
+
+  // A failure has to leave the ordinary search working rather than breaking the page.
+  ollamaReply = { status: 500, body: "boom" };
+  await A.page.goto("/people");
+  await A.page.fill('input[name="q"]', "anything at all");
+  await A.page.click('button:text-is("ask")');
+  await A.page.waitForFunction(
+    () => (document.body.textContent ?? "").includes("answered with 500"),
+    undefined, { timeout: 20_000 },
+  ).catch(() => {});
+  ok("28.11 a model that fails says so and leaves the box alone",
+     ((await A.page.textContent("body")) ?? "").includes("answered with 500")
+       && (await A.page.inputValue('input[name="q"]')) === "anything at all",
+     await A.page.inputValue('input[name="q"]'));
+
+  fakeOllama.close();
 
   // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");

@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { SearchBox } from "@/components/search-box";
 import type { Vocabulary } from "@/lib/search/suggest";
+import type { Translation } from "@/lib/search/nl";
 import {
   activePills,
   filterHref,
@@ -52,6 +53,7 @@ export function PeopleFilters({
   labels,
   resultCount,
   vocab,
+  interpret,
 }: {
   filter: PeopleFilter;
   labels: readonly (LabelSummary & { count: number })[];
@@ -59,6 +61,8 @@ export function PeopleFilters({
   /** Field and value names for completing a query; built from the same tables the compiler
       accepts, so the box can never teach a language the compiler refuses. */
   vocab: Vocabulary;
+  /** Absent when no model is configured, and then the box shows no "ask" button. */
+  interpret?: (prev: Translation, form: FormData) => Promise<Translation>;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
 
@@ -107,6 +111,7 @@ export function PeopleFilters({
               defaultValue={filter.q}
               placeholder="Search, or try label:Family -has:email"
               vocab={vocab}
+              interpret={interpret}
               className="w-full bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
             />
             {pills.map((p) => (
@@ -242,6 +247,12 @@ export function PeopleFilters({
               </li>
             ))}
           </ul>
+          {interpret ? (
+            <p className="mt-2 text-neutral-600 dark:text-neutral-400">
+              Or type what you want in words and press <strong>ask</strong> — it writes a query
+              into the box for you to check before searching.
+            </p>
+          ) : null}
           <p className="mt-2 text-neutral-500 dark:text-neutral-400">
             Also available: {vocab.fields.slice(0, 24).join(", ")}
             {vocab.fields.length > 24 ? ", …" : ""}

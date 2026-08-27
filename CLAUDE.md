@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 586 checks
+npm run e2e         # builds, then drives a real browser through 601 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 

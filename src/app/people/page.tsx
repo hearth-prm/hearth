@@ -26,6 +26,8 @@ import { Avatar } from "@/components/avatar";
 import { effectivePhotoMap } from "@/lib/photos-db";
 import { getUserSettings } from "@/lib/settings";
 import { searchVocabulary } from "@/lib/search/compile";
+import { naturalLanguageConfigured } from "@/lib/search/nl";
+import { interpretSearch } from "@/lib/actions/search";
 import { listOtherUsers } from "@/lib/users";
 import { PeopleFilters } from "@/components/people-filters";
 import { PeopleBulkBar } from "@/components/people-bulk-bar";
@@ -147,6 +149,9 @@ export default async function PeoplePage({
         labels={labels}
         resultCount={total}
         vocab={searchVocabulary(defs, labelRows.map((l) => l.name))}
+        // Passed only when a model is configured, so an install without one shows no button
+        // rather than a button that always fails. Same shape as the Places provider.
+        interpret={naturalLanguageConfigured() ? interpretSearch : undefined}
       />
 
       {/* A query that cannot be read narrows to nothing rather than widening to everything,

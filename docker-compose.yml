@@ -66,6 +66,10 @@ services:
       # Background sync. SYNC_ENABLED=false leaves the app running but stops the
       # in-process scheduler, for anyone driving sync from outside.
       GOOGLE_PLACES_API_KEY: "${GOOGLE_PLACES_API_KEY:-}"
+      # Optional: a model on your own network for turning a sentence into a search
+      # query. Empty means the feature is not offered.
+      OLLAMA_URL: "${OLLAMA_URL:-}"
+      OLLAMA_CHAT_MODEL: "${OLLAMA_CHAT_MODEL:-}"
       SYNC_ENABLED: "${SYNC_ENABLED:-true}"
       SYNC_INTERVAL_SECONDS: "${SYNC_INTERVAL_SECONDS:-300}"
       NODE_ENV: production
