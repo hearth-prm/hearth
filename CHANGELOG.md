@@ -28,6 +28,60 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **`has:` covers everything Hearth stores**, not eleven hand-picked things. Forty-odd
+  options — `has:middle`, `has:phonetic`, `has:city`, `has:skill`, `has:custom`,
+  `has:relationship`, `has:event`, `has:gift` — derived from the same tables the field names
+  come from, so a field you can search for is always a field you can ask about. That is the
+  mirror of the bug where `gender` and `birthdayText` were stored and synced while being
+  invisible everywhere else.
+  - `has:address -has:postcode` is the hygiene question before a Google push, in one query.
+  - Empty string counts as absent, not present. The form normalises a cleared field to null
+    but an import writes whatever the other system sent, and `{ not: null }` alone would call
+    an empty organisation an organisation.
+  - The options are ordered most-asked first, because the box shows eight at a time. Left in
+    table order, typing `has:` offered eight kinds of phonetic name and never `email` — which
+    §27.4 caught, having been rewritten to assert the head of the list rather than mere
+    membership.
+  - Each option now says what it means in the suggestion list. Forty bare names would not be
+    navigable.
+- **`has:unthanked` — the people you owe a thank-you.** They gave a present and nobody who can
+  speak for the recipient has written yet.
+  - Scoped to the cards you may WRITE FOR, not the ones you may read, and that is the whole
+    difference between a to-do list and a list of things nobody can ever do: a contact who is
+    not a user of the install has nobody to write for them, so a gift to them is not a note
+    waiting to happen.
+  - `thankableCardsWhere` is now the single definition of that rule, used both by the id list
+    the actions check against and by this clause. It is also slightly narrower than before: a
+    card in the trash is not thankable, since a trashed contact is invisible everywhere else.
+  - **Needs a thank-you** is in the Filter menu too, along with No phone, Has an address, Has
+    a picture and Has a birthday. The chips and the query language now share one definition,
+    where they used to be two implementations of the same idea.
+- **A gift is only visible through a recipient you can see**, asked from the giver's side as
+  well. §29.12 proves it in both directions — the viewer who cannot see the recipient is not
+  told the gift exists, and the viewer who can is, so the check cannot pass on an empty clause.
+- §29, thirty-two checks, and §27.9 upgraded to walk **every** value the box offers through
+  the compiler rather than the first of each — with forty `has:` options, "the first one
+  compiles" is not evidence about the other thirty-nine.
+
+### Changed
+
+- The query language is handed a **viewer** rather than a user id: who is asking, whether they
+  are head of the household, and the three access clauses that decide what they may see. A
+  predicate can no longer build its own idea of what is readable, and `peopleWhere`'s callers
+  are forced by the compiler to supply the same one the page used — which matters most for
+  "select all matching", where a disagreement would select a different set than was shown.
+- `people-filter.ts` no longer imports the access module at all. A client component imports it
+  for its links and labels, and that import put `auth.ts` — and through it googleapis — one
+  tree-shake away from the browser bundle.
+
+### Fixed
+
+- `has:name` failed with a Prisma error inside the search box. `displayName` is the one
+  contact column the schema declares NOT NULL, and asking whether it is null is not a
+  comparison Postgres will make. It compiled perfectly: the column name is a computed key, so
+  TypeScript checks nothing about it. Found by §29.2, which runs all hundred and one options —
+  aliases included — against the database rather than inspecting them.
+
 - **Ask for what you want in words.** With `OLLAMA_URL` pointing at a model on your own
   network, the search box grows an **ask** button: *family in sun prairie with no email*
   becomes `label:Family city:"Sun Prairie" -has:email`.

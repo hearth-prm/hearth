@@ -18,13 +18,31 @@ export interface Suggestion {
   detail?: string;
 }
 
+/**
+ * A value worth offering, with an optional line about what it means.
+ *
+ * A bare string was enough while `has:` had eleven options whose names said everything;
+ * with forty it does not, so a value may now describe itself. The union rather than a
+ * required object because most value lists — label names, sync states — have nothing to add
+ * beyond the name itself.
+ */
+export type ValueOption = string | { value: string; detail: string };
+
 export interface Vocabulary {
   /** Every field name the language accepts. */
   fields: readonly string[];
   /** Values worth offering for a field, keyed by field name. */
-  values: Readonly<Record<string, readonly string[]>>;
+  values: Readonly<Record<string, readonly ValueOption[]>>;
   /** One-line description per field, for the list and the help panel. */
   describe?: Readonly<Record<string, string>>;
+}
+
+function optionValue(option: ValueOption): string {
+  return typeof option === "string" ? option : option.value;
+}
+
+function optionDetail(option: ValueOption, field: string): string {
+  return typeof option === "string" ? field : option.detail;
 }
 
 export interface SuggestResult {
@@ -111,12 +129,12 @@ export function suggestQuery(
 
   const lower = partial.toLowerCase();
   const items = values
-    .filter((v) => v.toLowerCase().includes(lower))
+    .filter((v) => optionValue(v).toLowerCase().includes(lower))
     .slice(0, MAX)
     .map((v) => ({
-      insert: `${prefix}${field}:${quoteIfNeeded(v)}`,
-      label: v,
-      detail: field,
+      insert: `${prefix}${field}:${quoteIfNeeded(optionValue(v))}`,
+      label: optionValue(v),
+      detail: optionDetail(v, field),
     }));
   return { from, to: cursor, items };
 }

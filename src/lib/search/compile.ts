@@ -3,11 +3,18 @@ import type { FieldDef } from "@/lib/fields/types";
 import { GOOGLE_STATES, RELATIONS, type GoogleState, type Relation } from "@/lib/people-filter";
 import {
   ADDRESS_PARTS,
+  ALSO_POINT,
+  COLUMNS,
+  FIELD_KEYS,
+  FIELD_LABELS,
   POINT_KINDS,
-  PRESENCE,
+  PRESENCE_KEYS,
+  PRESENCE_LABELS,
   anywhereClause,
   googleClause,
+  presenceClause,
   relationClause,
+  type Viewer,
 } from "./predicates";
 import { QueryError, parseQuery, type Comparison, type Node, type Term } from "./parse";
 import type { Vocabulary } from "./suggest";
@@ -35,35 +42,6 @@ export interface Compiled {
   /** Things worth telling the user that are not errors. */
   warnings: string[];
 }
-
-/** Person columns addressable by name, including the aliases people actually type. */
-const COLUMNS: Record<string, string> = {
-  name: "displayName",
-  displayname: "displayName",
-  first: "givenName",
-  firstname: "givenName",
-  given: "givenName",
-  middle: "middleName",
-  last: "familyName",
-  lastname: "familyName",
-  surname: "familyName",
-  family: "familyName",
-  nickname: "nickname",
-  nick: "nickname",
-  org: "organization",
-  organisation: "organization",
-  organization: "organization",
-  company: "organization",
-  title: "jobTitle",
-  job: "jobTitle",
-  jobtitle: "jobTitle",
-  dept: "orgDepartment",
-  department: "orgDepartment",
-  office: "orgLocation",
-  notes: "notes",
-  note: "notes",
-  gender: "gender",
-};
 
 /** Columns compared as dates rather than as text. */
 const DATES: Record<string, string> = {
@@ -155,7 +133,7 @@ function oneOf(value: string, allowed: readonly string[], field: string): string
 
 function compileTerm(
   term: Term,
-  userId: string,
+  viewer: Viewer,
   custom: Map<string, FieldDef>,
   warnings: string[],
 ): Prisma.PersonWhereInput {
@@ -177,22 +155,23 @@ function compileTerm(
     return { labels: { some: { label: { name: text(value, term.op) } } } };
   }
   if (field === "has") {
-    const key = value.toLowerCase();
-    const clause = PRESENCE[key];
+    const clause = presenceClause(value, viewer);
     if (!clause) {
+      // Truncated on purpose: there are forty-odd of these and an error message that lists
+      // them all is one nobody reads. The panel under the box has the whole list.
       throw new QueryError(
-        `“has:${value}” is not something to look for. Try ${Object.keys(PRESENCE)
-          .filter((k) => k !== "organization")
-          .join(", ")}.`,
+        `“has:${value}” is not something to look for. Try ${PRESENCE_KEYS.slice(0, 10).join(
+          ", ",
+        )} — the panel under the search box lists them all.`,
       );
     }
     return clause;
   }
   if (field === "google" || field === "sync") {
-    return googleClause(oneOf(value, GOOGLE_STATES, field) as GoogleState, userId);
+    return googleClause(oneOf(value, GOOGLE_STATES, field) as GoogleState, viewer);
   }
   if (field === "is" || field === "rel" || field === "relation") {
-    return relationClause(oneOf(value, RELATIONS, field) as Relation, userId);
+    return relationClause(oneOf(value, RELATIONS, field) as Relation, viewer);
   }
   if (field in DATES) {
     return dateClause(DATES[field]!, term.op, value, field);
@@ -210,7 +189,14 @@ function compileTerm(
     };
   }
   if (field in COLUMNS) {
-    return { [COLUMNS[field]!]: text(value, term.op) };
+    const column = { [COLUMNS[field]!]: text(value, term.op) };
+    // A couple of columns have a contact-point kind holding the same sort of value —
+    // Google keeps one nickname on the name and any others as a list — so asking about
+    // the column alone would silently miss half the answer.
+    const kind = ALSO_POINT[field];
+    return kind
+      ? { OR: [column, { contactPoints: { some: { kind, value: text(value, term.op) } } }] }
+      : column;
   }
 
   // A custom field, by its own key. Resolved against the ASKER's registry, because a shared
@@ -233,19 +219,19 @@ function compileTerm(
 
 function compileNode(
   node: Node,
-  userId: string,
+  viewer: Viewer,
   custom: Map<string, FieldDef>,
   warnings: string[],
 ): Prisma.PersonWhereInput {
   switch (node.kind) {
     case "term":
-      return compileTerm(node, userId, custom, warnings);
+      return compileTerm(node, viewer, custom, warnings);
     case "and":
-      return { AND: node.nodes.map((n) => compileNode(n, userId, custom, warnings)) };
+      return { AND: node.nodes.map((n) => compileNode(n, viewer, custom, warnings)) };
     case "or":
-      return { OR: node.nodes.map((n) => compileNode(n, userId, custom, warnings)) };
+      return { OR: node.nodes.map((n) => compileNode(n, viewer, custom, warnings)) };
     case "not":
-      return { NOT: compileNode(node.node, userId, custom, warnings) };
+      return { NOT: compileNode(node.node, viewer, custom, warnings) };
   }
 }
 
@@ -257,7 +243,7 @@ function compileNode(
  */
 export function compileQuery(
   input: string,
-  userId: string,
+  viewer: Viewer,
   registry: readonly FieldDef[],
 ): Compiled {
   const tree = parseQuery(input);
@@ -269,7 +255,7 @@ export function compileQuery(
   }
 
   const warnings: string[] = [];
-  return { where: compileNode(tree, userId, custom, warnings), warnings };
+  return { where: compileNode(tree, viewer, custom, warnings), warnings };
 }
 
 /** Every field name the language accepts, for autocomplete and for the help panel. */
@@ -280,9 +266,9 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
     "google",
     "is",
     ...Object.keys(DATES),
-    ...Object.keys(ADDRESS_PARTS),
-    ...Object.keys(POINT_KINDS),
-    ...Object.keys(COLUMNS),
+    // The offered spelling of each, not every alias: `surname` still works, but a list
+    // holding both `last` and `surname` teaches that they are different fields.
+    ...FIELD_KEYS,
     ...registry.filter((d) => !d.core).map((d) => d.key),
   ].sort();
 }
@@ -304,9 +290,9 @@ export function searchVocabulary(
     google: "how it stands with Google",
     is: "how it relates to you",
     ...Object.fromEntries(Object.keys(DATES).map((k) => [k, "a date, or 30d for “30 days ago”"])),
-    ...Object.fromEntries(Object.keys(ADDRESS_PARTS).map((k) => [k, "part of an address"])),
-    ...Object.fromEntries(Object.keys(POINT_KINDS).map((k) => [k, "a contact detail"])),
-    ...Object.fromEntries(Object.keys(COLUMNS).map((k) => [k, `the ${COLUMNS[k]} field`])),
+    // The field's own description, from the table that defines it — so the box says
+    // "middle name" rather than "the middleName field".
+    ...FIELD_LABELS,
     ...Object.fromEntries(
       registry.filter((d) => !d.core).map((d) => [d.key, `your “${d.label}” field`]),
     ),
@@ -316,7 +302,9 @@ export function searchVocabulary(
     fields: knownFields(registry),
     values: {
       label: [...labelNames],
-      has: Object.keys(PRESENCE).filter((k) => k !== "organization"),
+      // Each with what it means: there are forty of these, and a bare list of names is a
+      // list nobody can navigate.
+      has: PRESENCE_KEYS.map((k) => ({ value: k, detail: PRESENCE_LABELS[k] ?? "" })),
       google: [...GOOGLE_STATES],
       sync: [...GOOGLE_STATES],
       is: [...RELATIONS],

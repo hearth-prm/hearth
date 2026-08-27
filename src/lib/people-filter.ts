@@ -1,8 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import { readablePeopleWhere } from "@/lib/access";
 import type { FieldDef } from "@/lib/fields/types";
 import { compileQuery, QueryError } from "@/lib/search/compile";
-import { googleClause, relationClause } from "@/lib/search/predicates";
+import {
+  googleClause,
+  presenceClause,
+  relationClause,
+  type Viewer,
+} from "@/lib/search/predicates";
 
 /**
  * Contact list filtering.
@@ -13,8 +17,11 @@ import { googleClause, relationClause } from "@/lib/search/predicates";
  * in component state: a label chip anywhere in the app can link straight to
  * "contacts labelled Family" without coordinating with the list page.
  *
- * Every clause is ANDed with readablePeopleWhere, so no filter can widen what the
- * viewer is allowed to see — filters narrow, access decides.
+ * Every clause is ANDed with the viewer's own readable-people clause, so no filter can
+ * widen what the viewer is allowed to see — filters narrow, access decides. The clause is
+ * passed in rather than imported because a client component imports this module for its
+ * links and labels, and an import of access.ts here puts auth.ts and googleapis one
+ * tree-shake away from the browser bundle.
  */
 
 /** How a contact relates to the viewer. */
@@ -40,13 +47,38 @@ export const GOOGLE_STATE_LABELS: Record<GoogleState, string> = {
   error: "Sync failed",
 };
 
-export const HAS_OPTIONS = ["email", "phone", "no-email"] as const;
+/**
+ * The Details section of the Filter menu.
+ *
+ * Deliberately a short curated list where `has:` in the query language has forty options: a
+ * menu is read top to bottom by somebody who does not yet know what they want, and forty
+ * entries in a dropdown is not a menu. These are the questions worth a single click; the
+ * rest are worth typing.
+ *
+ * A `no-` prefix negates the option it names, which is how one enum covers both directions
+ * without a second table to keep in step.
+ */
+export const HAS_OPTIONS = [
+  "email",
+  "no-email",
+  "phone",
+  "no-phone",
+  "address",
+  "photo",
+  "birthday",
+  "unthanked",
+] as const;
 export type HasOption = (typeof HAS_OPTIONS)[number];
 
 export const HAS_LABELS: Record<HasOption, string> = {
   email: "Has an email",
-  phone: "Has a phone",
   "no-email": "No email",
+  phone: "Has a phone",
+  "no-phone": "No phone",
+  address: "Has an address",
+  photo: "Has a picture",
+  birthday: "Has a birthday",
+  unthanked: "Needs a thank-you",
 };
 
 export interface PeopleFilter {
@@ -110,15 +142,22 @@ function labelClause(f: PeopleFilter): Prisma.PersonWhereInput {
   return { AND: f.labelIds.map((labelId) => ({ labels: { some: { labelId } } })) };
 }
 
-function hasClause(has: HasOption): Prisma.PersonWhereInput {
-  switch (has) {
-    case "email":
-      return { contactPoints: { some: { kind: "EMAIL" } } };
-    case "phone":
-      return { contactPoints: { some: { kind: "PHONE" } } };
-    case "no-email":
-      return { contactPoints: { none: { kind: "EMAIL" } } };
-  }
+/**
+ * The chip and the query language answer the same question with the same clause.
+ *
+ * Written out separately at first, which meant `has=email` in a URL and `has:email` in the
+ * box were two implementations of one idea — and the sort of pair where a fix lands on one of
+ * them. The presence table is now the only definition; a `no-` option is its negation.
+ */
+function hasClause(has: HasOption, viewer: Viewer): Prisma.PersonWhereInput {
+  const negated = has.startsWith("no-");
+  const key = negated ? has.slice(3) : has;
+  const clause = presenceClause(key, viewer);
+  // Unreachable while HAS_OPTIONS only names presence keys, which §29.17 checks. Narrowed
+  // rather than asserted so that adding an option the table does not know cannot silently
+  // become "match everything".
+  if (!clause) return { id: "" };
+  return negated ? { NOT: clause } : clause;
 }
 
 /**
@@ -135,14 +174,14 @@ function hasClause(has: HasOption): Prisma.PersonWhereInput {
  */
 export function peopleWhere(
   f: PeopleFilter,
-  userId: string,
+  viewer: Viewer,
   registry: readonly FieldDef[] = [],
 ): Prisma.PersonWhereInput {
-  const clauses: Prisma.PersonWhereInput[] = [readablePeopleWhere(userId)];
+  const clauses: Prisma.PersonWhereInput[] = [viewer.readablePeople];
 
   if (f.q) {
     try {
-      clauses.push(compileQuery(f.q, userId, registry).where);
+      clauses.push(compileQuery(f.q, viewer, registry).where);
     } catch (err) {
       // A malformed query narrows to nothing rather than widening to everything. The page
       // reports the message through parsePeopleQuery; this is the safety net for callers that
@@ -153,9 +192,9 @@ export function peopleWhere(
   }
   const labels = labelClause(f);
   if (Object.keys(labels).length) clauses.push(labels);
-  if (f.relation) clauses.push(relationClause(f.relation, userId));
-  if (f.google) clauses.push(googleClause(f.google, userId));
-  if (f.has) clauses.push(hasClause(f.has));
+  if (f.relation) clauses.push(relationClause(f.relation, viewer));
+  if (f.google) clauses.push(googleClause(f.google, viewer));
+  if (f.has) clauses.push(hasClause(f.has, viewer));
 
   return { AND: clauses };
 }
@@ -264,12 +303,12 @@ export function toggleLabelHref(f: PeopleFilter, labelId: string): string {
  */
 export function parsePeopleQuery(
   q: string,
-  userId: string,
+  viewer: Viewer,
   registry: readonly FieldDef[],
 ): { error: string | null; warnings: string[] } {
   if (!q) return { error: null, warnings: [] };
   try {
-    return { error: null, warnings: compileQuery(q, userId, registry).warnings };
+    return { error: null, warnings: compileQuery(q, viewer, registry).warnings };
   } catch (err) {
     if (err instanceof QueryError) return { error: err.message, warnings: [] };
     throw err;

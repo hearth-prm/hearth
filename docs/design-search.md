@@ -70,6 +70,20 @@ for the whole value. A comparison on a text field is refused rather than ignored
 custom fields, labels, presence, Google state, relation, dates. Events, relationships and
 gifts wait for phase 5 — they need their own access clauses and roughly double the compiler.
 
+**Amended after phase 3** — the *presence* half of the cross-entity work came forward, because
+it turned out not to need the compiler at all. `has:relationship`, `has:event`, `has:gift` and
+`has:unthanked` are one-word questions whose answer is a nested `some`, and the access clauses
+they need are the ones `loadViewer` already assembles. What still waits for phase 5 is the part
+that has a *value* to compare — `attended:"Christmas 2026"`, `related:Mary`, `gift:kite` — which
+is where the second entity's own field names, aliases and dates enter the grammar.
+
+`has:unthanked` deserves its own note, because the obvious reading of it is wrong. Scoping it
+to the gifts a viewer may READ produces a list of things nobody can ever do: a contact who is
+not a user of the install has nobody to write their thanks, so a gift to them is unthanked
+forever. Scoped instead to the cards the viewer may WRITE FOR — `thankableCardsWhere` — it is a
+to-do list that empties. That distinction is the difference between a feature and a permanent
+badge nobody can clear.
+
 ### Field names come from the registry, not a list
 
 `loadRegistry(viewerId, "PERSON")` already describes every field including custom ones, so

@@ -2,6 +2,10 @@ import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+// Type-only: the query language is handed its clauses by loadViewer below rather than
+// importing this module, so that a client component importing people-filter.ts does not
+// reach auth.ts through it. See the note in search/predicates.ts.
+import type { Viewer } from "@/lib/search/predicates";
 
 /**
  * Authorisation boundary.
@@ -181,25 +185,67 @@ export function writableGiftsWhere(userId: string): Prisma.GiftWhereInput {
  * Hearth. A recipient who needs one written has an account.
  */
 export async function thankableCardIds(userId: string): Promise<Set<string>> {
-  const me = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { isHeadOfHousehold: true, contactCard: { select: { id: true } } },
-  });
-
-  const ids = new Set<string>();
-  if (me?.contactCard) ids.add(me.contactCard.id);
-  if (!me?.isHeadOfHousehold) return ids;
-
-  const delegated = await prisma.person.findMany({
-    where: {
-      linkedUserId: { not: null },
-      deletedAt: null,
-      linkedUser: { settings: { allowHeadThankYous: true } },
-    },
+  const isHead = await isHeadOfHousehold(userId);
+  const rows = await prisma.person.findMany({
+    where: thankableCardsWhere(userId, isHead),
     select: { id: true },
   });
-  for (const person of delegated) ids.add(person.id);
-  return ids;
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * The same question as a where-clause, so it can be a condition inside a larger query.
+ *
+ * One definition for both: the id list above is what an action needs to check a request,
+ * and this is what `has:unthanked` needs to ask "does this contact owe anybody a note" in
+ * one round trip instead of loading every gift. Two spellings of a permission rule is how
+ * one of them comes to be fixed alone.
+ *
+ * Narrower than the id list used to be in one respect, deliberately: a card in the trash is
+ * not thankable, because a trashed contact is invisible everywhere else too.
+ */
+export function thankableCardsWhere(
+  userId: string,
+  isHead: boolean,
+): Prisma.PersonWhereInput {
+  return {
+    deletedAt: null,
+    OR: [
+      // Your own card, always.
+      { linkedUserId: userId },
+      // And anybody who ticked "let the head of the household write my thank-yous", if you
+      // are that head. The relation implies linkedUserId is set, so no separate test.
+      ...(isHead ? [{ linkedUser: { settings: { allowHeadThankYous: true } } }] : []),
+    ],
+  };
+}
+
+export async function isHeadOfHousehold(userId: string): Promise<boolean> {
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isHeadOfHousehold: true },
+  });
+  return me?.isHeadOfHousehold ?? false;
+}
+
+/**
+ * Everything the query language needs to know about who is asking.
+ *
+ * Assembled here, in the access module, because every clause in it is an access decision;
+ * the search code receives them and cannot compute its own. One extra query, for the head
+ * of the household flag — which is read from the database rather than the session so that
+ * promoting somebody takes effect on their next page load rather than their next sign-in.
+ * Callers put this in the Promise.all they already have, so it costs no extra round trip.
+ */
+export async function loadViewer(userId: string): Promise<Viewer> {
+  const isHead = await isHeadOfHousehold(userId);
+  return {
+    id: userId,
+    isHeadOfHousehold: isHead,
+    readablePeople: readablePeopleWhere(userId),
+    readableEvents: readableEventsWhere(userId),
+    thankableCards: thankableCardsWhere(userId, isHead),
+  };
 }
 
 /** Deleting is the owner's alone, whatever has been shared. */

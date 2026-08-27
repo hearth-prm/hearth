@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 601 checks
+npm run e2e         # builds, then drives a real browser through 635 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -36,10 +36,27 @@ days" setting — ever, by explicit design. Bulk convenience for the human (Empt
 fine; automatic expiry is not. Restoring must keep working, so trashing keeps every related
 row and only filters reads.
 
+**The query language is handed a `Viewer`, never a user id.** `loadViewer` in `access.ts`
+assembles who is asking plus the three clauses that decide what they may see; `predicates.ts`
+uses those and cannot compute its own. Two reasons, both load-bearing: a predicate that built
+its own idea of "readable" would be a way around the boundary, and `people-filters.tsx` is a
+client component that imports `people-filter.ts` — so a runtime import of `access.ts` there
+puts `auth.ts` and googleapis one tree-shake away from the browser bundle. Nothing in
+`src/lib/search/` imports at runtime outside that directory.
+
+**`has:` is derived, never listed.** The three tables in `predicates.ts` (text columns,
+contact-point kinds, address parts) are the single source for the field syntax, `has:`, the
+autocomplete, the help panel and the chip menu. Adding a field to a table makes it askable
+everywhere on the same commit; hand-writing a fifth list is how `gender` and `birthdayText`
+came to be stored and synced while invisible. Order is explicit (`PRESENCE_ORDER`) because the
+box shows eight of forty.
+
 **Thank-yous are only ever written by users of the install.** `thankableCardIds` returns
 your own card plus, if you are head of household, any card whose owner ticked
 *allow head of household*. A contact who is not a user has nobody to write for them — that
-is the answer, not a gap. A note is signed by whoever sends it.
+is the answer, not a gap. A note is signed by whoever sends it. `thankableCardsWhere` is the
+one definition of that rule: the id list an action checks and the `has:unthanked` clause are
+both it, because two spellings of a permission is how one of them gets fixed alone.
 
 **A gift follows its recipient, never its giver.** Seeing Mary must not reveal what she
 gave a household you cannot access. `GiftRecipient` carries the thanks, because a present
@@ -74,6 +91,11 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   `"thanked":false` satisfied a positive assertion. Use Playwright's `text=` engine.
 - **Next's build worker OOMs where `tsc` passes.** One unused
   `Awaited<ReturnType<typeof findMany>>[number]` did it. Declare return types explicitly.
+- **A computed key skips every check TypeScript has.** `{ [column]: null }` compiles whatever
+  `column` says, so `has:name` shipped comparing a NOT NULL column to null and failed as a
+  Prisma error inside the search box. The whole-object type still helps — it refused a Person
+  clause spread into a ContactPoint filter, which is why `presentPart` exists — but a table of
+  column names is only proved by RUNNING every entry. §29.2 does that for all 101.
 - **Tailwind variant guards are tested against the element the utility sits on**, not the
   root. `:not([data-theme="light"])` on `<body>` matched everything; every branch of the
   `dark:` variant is anchored at `:root`.

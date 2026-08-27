@@ -38,6 +38,7 @@ const SEARCH_EXAMPLES: readonly { query: string; means: string }[] = [
   { query: 'city:"Sun Prairie"', means: "any address part" },
   { query: "org:TheStreet", means: "organisation contains" },
   { query: "-has:email", means: "no email address" },
+  { query: "has:unthanked", means: "owed a thank-you" },
   { query: "has:photo", means: "has a picture" },
   { query: "is:private", means: "yours, shared with nobody" },
   { query: "google:error", means: "failed to sync" },
@@ -90,6 +91,11 @@ export function PeopleFilters({
   const labelNames = new Map(labels.map((l) => [l.id, l.name]));
   const pills = activePills(filter, labelNames);
   const active = isFilterActive(filter);
+  // From the vocabulary rather than a second list, so the panel cannot advertise an option
+  // the compiler does not have.
+  const hasValues = (vocab.values.has ?? []).map((v) =>
+    typeof v === "string" ? v : v.value,
+  );
 
   return (
     <div className="mb-4">
@@ -256,6 +262,12 @@ export function PeopleFilters({
           <p className="mt-2 text-neutral-500 dark:text-neutral-400">
             Also available: {vocab.fields.slice(0, 24).join(", ")}
             {vocab.fields.length > 24 ? ", …" : ""}
+          </p>
+          {/* Listed rather than left to autocomplete: there are forty of these and the box
+              shows eight at a time, so nobody would find the far end by typing letters. */}
+          <p className="mt-1 text-neutral-500 dark:text-neutral-400">
+            <code className="text-[0.7rem]">has:</code> takes {hasValues.join(", ")}
+            {hasValues.length > 0 ? " — and each of them negates with a minus." : ""}
           </p>
         </div>
       </details>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma, SharePermission } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
+  loadViewer,
   ownedPeopleWhere,
   requireUserForAction,
   writablePeopleWhere,
@@ -67,11 +68,11 @@ async function selectedIds(
     // resolved. Without it a custom-field term degrades to a text search here and to a field
     // lookup there, and the two select different contacts — which for a bulk delete is the
     // worst possible place for a disagreement.
-    const filtered = peopleWhere(
-      parseFilter(params),
-      userId,
-      await loadRegistry(userId, "PERSON"),
-    );
+    const [bulkRegistry, viewer] = await Promise.all([
+      loadRegistry(userId, "PERSON"),
+      loadViewer(userId),
+    ]);
+    const filtered = peopleWhere(parseFilter(params), viewer, bulkRegistry);
     const [all, allowed] = await Promise.all([
       prisma.person.count({ where: filtered }),
       prisma.person.findMany({

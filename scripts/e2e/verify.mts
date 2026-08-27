@@ -4125,14 +4125,18 @@ try {
   // unknown name and the query degraded to a text search. The check failed and the code was
   // right.
   const { loadRegistry: loadRegistryForQuery } = await import("@/lib/fields/registry");
+  // The same object the page passes, from the same builder — so a check here cannot pass
+  // against a viewer the application would never construct.
+  const { loadViewer: loadViewerForQuery } = await import("@/lib/access");
+  const qViewer = await loadViewerForQuery(A.id);
   const run = async (q: string) => {
-    const { where } = compileQuery(q, A.id, qDefs);
+    const { where } = compileQuery(q, qViewer, qDefs);
     return prisma.person.count({
       where: { AND: [(await import("@/lib/access")).readablePeopleWhere(A.id), where] },
     });
   };
   const qNames = async (q: string) => {
-    const { where } = compileQuery(q, A.id, qDefs);
+    const { where } = compileQuery(q, qViewer, qDefs);
     const rows = await prisma.person.findMany({
       where: { AND: [(await import("@/lib/access")).readablePeopleWhere(A.id), where] },
       select: { displayName: true },
@@ -4206,7 +4210,7 @@ try {
   // The parser accepted these and the compiler used to throw them away.
   let badOp = "no error";
   try {
-    compileQuery("org:>Acme", A.id, qDefs);
+    compileQuery("org:>Acme", qViewer, qDefs);
   } catch (err) {
     badOp = err instanceof QErr ? "rejected" : "wrong error";
   }
@@ -4217,14 +4221,14 @@ try {
      (await qNames('"Qa One"')).join() === "Qa One", await qNames('"Qa One"'));
 
   // An unknown field is text, not an error: 10:30 and re:union predate this language.
-  const unknown = compileQuery("re:union", A.id, qDefs);
+  const unknown = compileQuery("re:union", qViewer, qDefs);
   ok("26.11 an unknown field is searched for as text",
      unknown.warnings.length === 1 && unknown.warnings[0]!.includes("not a field"),
      unknown.warnings);
   // A KNOWN field with an impossible value is worth stopping for.
   let badValue = "no error";
   try {
-    compileQuery("google:banana", A.id, qDefs);
+    compileQuery("google:banana", qViewer, qDefs);
   } catch (err) {
     badValue = err instanceof QErr ? "rejected" : "wrong error";
   }
@@ -4247,7 +4251,7 @@ try {
   });
   const { readablePeopleWhere: readableForQuery } = await import("@/lib/access");
   const reachableByA = async (q: string) => {
-    const { where } = compileQuery(q, A.id, qDefs);
+    const { where } = compileQuery(q, qViewer, qDefs);
     return prisma.person.count({
       where: { AND: [readableForQuery(A.id), where, { id: qPrivate.id }] },
     });
@@ -4310,9 +4314,18 @@ try {
      sLabels("label:work").join() === "Work-Friends", sLabels("label:work"));
   ok("27.3c and a field with no fixed values offers none",
      sAt("org:").items.length === 0);
-  ok("27.4 has: and google: are offered from the same tables the compiler accepts",
-     sLabels("has:").includes("email") && sLabels("google:").includes("error"),
+  // The HEAD of the list, not mere membership. `has:` grew from eleven options to forty and
+  // the list shows eight, so "email is somewhere in there" went on passing while typing
+  // `has:` offered eight kinds of phonetic name and nothing anybody wanted.
+  ok("27.4 has: offers the everyday questions first, since only eight are shown",
+     ["email", "phone", "address", "photo"].every((k) => sLabels("has:").includes(k)) &&
+       sLabels("google:").includes("error"),
      [sLabels("has:"), sLabels("google:")]);
+  ok("27.4b and each says what it means, which a list of forty names could not",
+     sAt("has:").items.every((i) => (i.detail ?? "").length > 0 && i.detail !== "has"),
+     sAt("has:").items.slice(0, 3));
+  ok("27.4c the long tail is reached by typing rather than scrolling",
+     sLabels("has:unth").join() === "unthanked", sLabels("has:unth"));
 
   // The token being completed is not "the last word": a quoted value contains spaces, and
   // deciding where it began needs to know which quotes are open.
@@ -4352,19 +4365,29 @@ try {
   // the compiler refuses is worse than no box at all.
   const { compileQuery: compileForSuggest, QueryError: SErr } = await import("@/lib/search/compile");
   let unacceptable: string[] = [];
-  for (const field of sVocab.fields) {
-    const values = sVocab.values[field];
-    const probe = values && values.length > 0
-      ? `${field}:${/\s/.test(values[0]!) ? `"${values[0]}"` : values[0]}`
-      : `${field}:x`;
+  const probeOne = (probe: string) => {
     try {
-      const { warnings } = compileForSuggest(probe, A.id, sDefs);
+      const { warnings } = compileForSuggest(probe, qViewer, sDefs);
       if (warnings.length > 0) unacceptable.push(`${probe} (warned)`);
     } catch (err) {
       // A date field rejects "x", which is correct — the probe is wrong, not the field.
       if (!(err instanceof SErr) || !/is not a date/.test((err as Error).message)) {
         unacceptable.push(`${probe} (${(err as Error).message.slice(0, 40)})`);
       }
+    }
+  };
+  for (const field of sVocab.fields) {
+    const values = sVocab.values[field] ?? [];
+    if (values.length === 0) {
+      probeOne(`${field}:x`);
+      continue;
+    }
+    // EVERY value, not the first one. `has:` has forty options now, all derived from tables
+    // rather than written out, and "the first one compiles" is not evidence about the other
+    // thirty-nine — which is exactly the shape of the listFields/genericFields mistake.
+    for (const option of values) {
+      const value = typeof option === "string" ? option : option.value;
+      probeOne(`${field}:${/\s/.test(value) ? `"${value}"` : value}`);
     }
   }
   ok("27.9 every field the box offers is one the compiler understands",
@@ -4538,6 +4561,341 @@ try {
   fakeOllama.close();
 
   // ════════════════════════════════════════════════════════════════════════
+  section("§29 What a contact has")
+
+  // `has:` grew from eleven hand-written options to forty derived from the field tables, and
+  // "derived" is the whole reason this section exists: a table entry with a misspelled column
+  // name compiles perfectly — the key is computed, so TypeScript checks nothing — and fails as
+  // a Prisma error inside somebody's search box. Every option is therefore RUN, not inspected.
+  const { PRESENCE_DEFS, FIELD_KEYS: presenceFieldKeys, PRESENCE_KEYS: presenceOffered } =
+    await import("@/lib/search/predicates");
+  const qViewerB = await loadViewerForQuery(B.id);
+
+  const hasNames = async (key: string, viewer = qViewer): Promise<string[]> => {
+    const { where } = compileQuery(`has:${key}`, viewer, qDefs);
+    const rows = await prisma.person.findMany({
+      where: { AND: [viewer.readablePeople, where] },
+      select: { displayName: true },
+      orderBy: { displayName: "asc" },
+    });
+    return rows.map((r) => r.displayName);
+  };
+
+  const everyName = PRESENCE_DEFS.flatMap((d) => [d.key, ...(d.aliases ?? [])]);
+  ok("29.1 no two has: options answer to the same name",
+     new Set(everyName).size === everyName.length,
+     everyName.filter((n, i) => everyName.indexOf(n) !== i));
+
+  const brokenOptions: string[] = [];
+  for (const name of everyName) {
+    try {
+      const { where } = compileQuery(`has:${name}`, qViewer, qDefs);
+      await prisma.person.count({ where: { AND: [qViewer.readablePeople, where] } });
+    } catch (err) {
+      brokenOptions.push(`${name}: ${(err as Error).message.slice(0, 60)}`);
+    }
+  }
+  ok(`29.2 all ${everyName.length} has: options, aliases included, run against the database`,
+     brokenOptions.length === 0, brokenOptions);
+
+  // The mirror of the bug where gender and birthdayText were stored and synced while being
+  // invisible everywhere else: a field you can search for is a field you can ask about.
+  const unaskable = presenceFieldKeys.filter((k) => !everyName.includes(k));
+  ok("29.3 every field the language addresses is also a has: option", unaskable.length === 0,
+     unaskable);
+  ok("29.3b and the trash is not offered, since trashed contacts are not searchable",
+     !presenceOffered.includes("trash") && (await hasNames("trash")).length === 0);
+
+  const aliasAgrees = async (alias: string, key: string) =>
+    (await hasNames(alias)).join() === (await hasNames(key)).join();
+  ok("29.4 an alias asks the same question as the name it stands for",
+     (await aliasAgrees("organisation", "org")) && (await aliasAgrees("zip", "postcode")) &&
+       (await aliasAgrees("received", "giftreceived")),
+     [await hasNames("organisation"), await hasNames("org")]);
+
+  // --- what "has" means for a column ---------------------------------------
+
+  const pQuinn = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Quinn Presence", givenName: "Quinn", familyName: "Presence",
+      // The form normalises a cleared field to null; an IMPORT writes whatever the other
+      // system sent. `{ not: null }` alone counts this as having notes.
+      notes: "", organization: "",
+    },
+  });
+  ok("29.5 an empty string is not something a contact has",
+     !(await hasNames("notes")).includes("Quinn Presence") &&
+       !(await hasNames("org")).includes("Quinn Presence"),
+     await hasNames("notes"));
+
+  const pRex = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Rex Presence", givenName: "Rex", familyName: "Presence",
+      // A birthday Google holds without a year lands here and not in the date column, which
+      // is most of the birthdays in a real address book.
+      birthdayText: "--04-03",
+    },
+  });
+  ok("29.6 a birthday held as words counts as having a birthday",
+     (await hasNames("birthday")).includes("Rex Presence") &&
+       (await hasNames("birthdaytext")).includes("Rex Presence"),
+     await hasNames("birthdaytext"));
+
+  const pSasha = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Sasha Presence", givenName: "Sasha", familyName: "Presence",
+      // Google keeps one nickname on the name and any others as a list, so a column-only
+      // lookup silently misses half of them.
+      contactPoints: { create: [{ kind: "NICKNAME", value: "Sash", order: 0 }] },
+    },
+  });
+  ok("29.7 a nickname stored as a contact point counts too",
+     (await hasNames("nickname")).includes("Sasha Presence"), await hasNames("nickname"));
+  const bySpareNickname = await prisma.person.count({
+    where: {
+      AND: [qViewer.readablePeople, compileQuery("nickname:Sash", qViewer, qDefs).where],
+    },
+  });
+  ok("29.7b and nickname:Sash finds it, not only has:nickname", bySpareNickname === 1,
+     bySpareNickname);
+
+  const pTess = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Tess Presence", givenName: "Tess", familyName: "Presence",
+      contactPoints: {
+        create: [{ kind: "ADDRESS", value: "Somewhere", streetAddress: "1 Lane", order: 0 }],
+      },
+    },
+  });
+  ok("29.8 an address part is asked about separately from the address",
+     (await hasNames("address")).includes("Tess Presence") &&
+       (await hasNames("street")).includes("Tess Presence") &&
+       !(await hasNames("city")).includes("Tess Presence"),
+     await hasNames("city"));
+  ok("29.8b so the hygiene question before a Google push is one query",
+     (await hasNames("address")).includes("Tess Presence"));
+
+  // --- thank-yous that still need sending ----------------------------------
+  //
+  // The predicate is scoped to the cards this viewer may WRITE FOR, not the ones they may
+  // read, and that is the difference between a to-do list and a list of things nobody can
+  // ever do: a contact who is not a user of the install has nobody to write for them, so a
+  // gift to them is not a thank-you waiting to happen.
+  const aOwnCard = await prisma.person.findFirstOrThrow({ where: { linkedUserId: A.id } });
+  const presenceRelType = await prisma.relationshipType.findFirstOrThrow();
+  const pUma = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Uma Presence", givenName: "Uma", familyName: "Presence" },
+  });
+  const pVic = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Vic Presence", givenName: "Vic", familyName: "Presence" },
+  });
+  const pWes = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Wes Presence", givenName: "Wes", familyName: "Presence" },
+  });
+  const umaGift = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: pUma.id, description: "A kite",
+      recipients: { create: [{ personId: aOwnCard.id }] },
+    },
+  });
+  await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: pVic.id, description: "A jigsaw",
+      // To a plain contact, who has nobody to write for them.
+      recipients: { create: [{ personId: pWes.id }] },
+    },
+  });
+  const owed = await hasNames("unthanked");
+  ok("29.9 a gift to your own card with no note yet is a thank-you owed",
+     owed.includes("Uma Presence"), owed);
+  ok("29.9b a gift to a contact who is not a user is not owed by anybody",
+     !owed.includes("Vic Presence"), owed);
+  ok("29.9c but it is still a gift given, and findable as one",
+     (await hasNames("giftgiven")).includes("Vic Presence") &&
+       (await hasNames("giftreceived")).includes("Wes Presence"),
+     await hasNames("giftgiven"));
+
+  await prisma.giftRecipient.update({
+    where: { giftId_personId: { giftId: umaGift.id, personId: aOwnCard.id } },
+    data: { thankedAt: new Date(), thankYouNote: "Thank you for the kite" },
+  });
+  ok("29.10 writing the note is what clears it — there is nothing to tick",
+     !(await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
+  ok("29.10b and the gift is still there afterwards",
+     (await hasNames("gift")).includes("Uma Presence"));
+
+  // Both conditions have to hold on the SAME recipient row. Two separate `some` clauses would
+  // match a gift carrying one thanked card and one unthankable stranger, which is neither.
+  const mixed = await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: pUma.id, description: "A joint present",
+      recipients: {
+        create: [
+          { personId: aOwnCard.id, thankedAt: new Date(), thankYouNote: "ta" },
+          { personId: pWes.id },
+        ],
+      },
+    },
+  });
+  ok("29.11 a thanked card beside an unthankable stranger owes nothing",
+     !(await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
+  await prisma.giftRecipient.update({
+    where: { giftId_personId: { giftId: mixed.id, personId: aOwnCard.id } },
+    data: { thankedAt: null, thankYouNote: null },
+  });
+  ok("29.11b and owes it again the moment the card's own note is missing",
+     (await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
+
+  // --- a gift follows its recipient, asked from the giver's side ------------
+  //
+  // Being able to see Zane must not reveal what he gave a household you have no access to.
+  //
+  // Owned by B and read from A's side, which is the way round that works here: §5 gives B a
+  // blanket ALL_PEOPLE grant over A's contacts, so nothing of A's is hidden from B and the
+  // first version of this check "failed" while the code was right. The precondition below is
+  // asserted rather than assumed for exactly that reason.
+  const pZane = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Zane Presence", givenName: "Zane", familyName: "Presence" },
+  });
+  const pYara = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Yara Presence", givenName: "Yara", familyName: "Presence" },
+  });
+  await prisma.share.create({
+    data: { ownerId: B.id, withUserId: A.id, personId: pZane.id, scope: "PERSON", permission: "VIEW" },
+  });
+  await prisma.gift.create({
+    data: {
+      ownerId: B.id, giverId: pZane.id, description: "Something private",
+      recipients: { create: [{ personId: pYara.id }] },
+    },
+  });
+  const aSees = async (id: string) =>
+    prisma.person.count({ where: { AND: [qViewer.readablePeople, { id }] } });
+  ok("29.12 A can see the giver but not the recipient",
+     (await aSees(pZane.id)) === 1 && (await aSees(pYara.id)) === 0,
+     [await aSees(pZane.id), await aSees(pYara.id)]);
+  ok("29.12b so A is not told that he gave a present at all",
+     !(await hasNames("giftgiven", qViewer)).includes("Zane Presence"),
+     await hasNames("giftgiven", qViewer));
+  ok("29.12c while B, who can see the recipient, is — or the check above would pass on an empty clause",
+     (await hasNames("giftgiven", qViewerB)).includes("Zane Presence"),
+     await hasNames("giftgiven", qViewerB));
+  ok("29.12d and a card everybody can see is not a secret: a gift to Alice's card is visible to B",
+     (await hasNames("giftgiven", qViewerB)).includes("Uma Presence"),
+     await hasNames("giftgiven", qViewerB));
+
+  // --- relationships and events are scoped the same way --------------------
+
+  await prisma.relationship.create({
+    data: {
+      ownerId: A.id, fromPersonId: pQuinn.id, toPersonId: pRex.id, typeId: presenceRelType.id,
+    },
+  });
+  ok("29.13 a relationship to somebody you can see counts",
+     (await hasNames("relationship")).includes("Quinn Presence") &&
+       (await hasNames("relationship")).includes("Rex Presence"),
+     await hasNames("relationship"));
+  await prisma.relationship.create({
+    data: {
+      ownerId: B.id, fromPersonId: pZane.id, toPersonId: pYara.id, typeId: presenceRelType.id,
+    },
+  });
+  ok("29.13b a relationship whose other end you cannot see does not",
+     !(await hasNames("relationship", qViewer)).includes("Zane Presence"),
+     await hasNames("relationship", qViewer));
+  ok("29.13c and does for the viewer who can see both ends",
+     (await hasNames("relationship", qViewerB)).includes("Zane Presence"),
+     await hasNames("relationship", qViewerB));
+
+  const presenceEvent = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Presence Picnic",
+      startAt: new Date("2026-07-04T12:00:00Z"), endAt: new Date("2026-07-04T14:00:00Z"),
+      attendees: { create: [{ personId: pTess.id }] },
+    },
+  });
+  ok("29.14 being on the guest list of an event you can see counts",
+     (await hasNames("event")).includes("Tess Presence"), await hasNames("event"));
+
+  ok("29.15 an option that does not exist says so and points at the list",
+     (() => {
+       try {
+         compileQuery("has:banana", qViewer, qDefs);
+         return false;
+       } catch (err) {
+         const m = (err as Error).message;
+         return m.includes("email") && m.includes("panel under the search box");
+       }
+     })(), "has:banana");
+  // Both halves, because "nobody was excluded" and "everybody was excluded" both satisfy an
+  // assertion that only looks at one side. The first version of this pinned the id it was
+  // asserting about in the where-clause, so it could not have failed.
+  const withoutEmail = await (async () => {
+    const { where } = compileQuery("-has:email", qViewer, qDefs);
+    const rows = await prisma.person.findMany({
+      where: { AND: [qViewer.readablePeople, where] },
+      select: { displayName: true },
+    });
+    return rows.map((r) => r.displayName);
+  })();
+  ok("29.16 and every one of them negates",
+     withoutEmail.includes("Quinn Presence") && !withoutEmail.includes("Alice") &&
+       (await hasNames("email")).includes("Alice"),
+     withoutEmail.slice(0, 6));
+
+  // --- the chip menu and the query language are the same question -----------
+
+  const { HAS_OPTIONS: chipOptions, peopleWhere: peopleWhereForChips, parseFilter: parseFilterForChips } =
+    await import("@/lib/people-filter");
+  const unknownChip = chipOptions.filter((h) => {
+    const key = h.startsWith("no-") ? h.slice(3) : h;
+    try {
+      compileQuery(`has:${key}`, qViewer, qDefs);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  ok("29.17 every option in the Filter menu names something has: knows about",
+     unknownChip.length === 0, unknownChip);
+
+  const chipCount = await prisma.person.count({
+    where: peopleWhereForChips(
+      parseFilterForChips({ has: "unthanked" }),
+      qViewer,
+      qDefs,
+    ),
+  });
+  const queryCount = await prisma.person.count({
+    where: peopleWhereForChips(
+      parseFilterForChips({ q: "has:unthanked" }),
+      qViewer,
+      qDefs,
+    ),
+  });
+  ok("29.18 and answers it identically, chip or typed",
+     chipCount === queryCount && chipCount > 0, [chipCount, queryCount]);
+
+  await A.page.goto("/people?has=unthanked");
+  const owedPage = (await A.page.textContent("body")) ?? "";
+  ok("29.19 the filter is offered by name and says what it found",
+     owedPage.includes("Needs a thank-you") && owedPage.includes("Uma Presence"),
+     owedPage.slice(0, 0) || String(owedPage.includes("Uma Presence")));
+  ok("29.19b and the pill removes it again",
+     (await A.page.$$('a:text-is("Needs a thank-you")')).length >= 1);
+
+  // Leave nothing behind: §22 counts what is on the page, and a fixture that outlives its
+  // section invalidates somebody else's absence assertion.
+  await prisma.event.delete({ where: { id: presenceEvent.id } });
+  await prisma.person.deleteMany({
+    where: {
+      id: {
+        in: [pQuinn.id, pRex.id, pSasha.id, pTess.id, pUma.id, pVic.id, pWes.id, pZane.id,
+             pYara.id],
+      },
+    },
+  });
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

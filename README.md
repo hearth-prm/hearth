@@ -62,7 +62,7 @@ network. One piece of work is designed and queued rather than built —
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 601 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 635 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -702,6 +702,31 @@ Values match anywhere in a field, so `city:Sun` finds Sun Prairie as well as Sun
 `city:="Sun Prairie"` for the whole value. Dates take `>` and `<`; text fields refuse them
 rather than ignoring them.
 
+`has:` asks whether something is there at all, and it covers every field Hearth stores rather
+than a handful: `has:email`, `has:photo`, `has:birthday`, `has:middle`, `has:phonetic`,
+`has:city`, `has:skill`, `has:custom`. Put a minus in front for the opposite, which is where
+it earns its keep — `has:address -has:postcode` is every address that would reach Google
+without a postcode. The options are derived from the same tables the field names come from, so
+a field you can search for is always a field you can ask about.
+
+Three of them are questions about other records, and each is scoped to what you can already
+see: `has:relationship`, `has:event`, and `has:gift`. Seeing somebody does not entitle you to
+the list of what they gave a household you have no access to, so a gift is only visible
+through a recipient you can see.
+
+#### Thank-yous still to write
+
+`has:unthanked` is the list of people you owe a note to: they gave a present, and nobody who
+can speak for the recipient has written yet. It is scoped to the cards you may write for —
+your own, plus anyone who ticked *let the head of the household write my thank-yous* — because
+a contact who is not a user of this install has nobody to write for them, so a gift to them is
+not a note waiting to happen. Sending is still done from the gift, and writing the note is
+what marks it sent; there is nothing to remember to tick.
+
+The **Needs a thank-you** entry in the Filter menu is the same question, one click instead of
+typing. The menu stays a short list of the questions worth a click — the other thirty-odd live
+in the box, and the panel under it lists them.
+
 The box completes as you type — `ci` offers `city:`, `label:` offers your own label names —
 and a panel under it lists every key with an example, for when you do not yet know there is
 anything to complete.
@@ -1108,7 +1133,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 601 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 635 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

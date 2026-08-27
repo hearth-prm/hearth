@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/access";
+import { loadViewer, requireUser } from "@/lib/access";
 import { genericFields, listFields, loadRegistry } from "@/lib/fields/registry";
 import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
@@ -51,16 +51,19 @@ export default async function PeoplePage({
   const params = await searchParams;
   const filter = parseFilter(params);
 
-  const [defs, settings, shareableUsers] = await Promise.all([
+  const [defs, settings, shareableUsers, viewer] = await Promise.all([
     loadRegistry(user.id, "PERSON"),
     getUserSettings(user.id),
     listOtherUsers(user.id),
+    // Alongside the others rather than before them: the extra query for "am I the head of
+    // the household" costs nothing when it is one of four in flight at once.
+    loadViewer(user.id),
   ]);
 
   // After the registry, because a custom field's name is only queryable once its definition
   // is known — `howWeMet:x` is a field on this install and a text search on another.
-  const where = peopleWhere(filter, user.id, defs);
-  const query = parsePeopleQuery(filter.q, user.id, defs);
+  const where = peopleWhere(filter, viewer, defs);
+  const query = parsePeopleQuery(filter.q, viewer, defs);
   // displayName already covers the name fields, so don't repeat them as columns.
   const columns = listFields(defs).filter(
     (d) => d.key !== "givenName" && d.key !== "familyName",
