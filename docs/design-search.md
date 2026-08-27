@@ -1,6 +1,6 @@
 # Design: search and filtering
 
-Status: **phase 1 built.** Phases 2–4 agreed, not started. Supersedes the four fixed filter dimensions in
+Status: **phases 1 and 2 built.** Phases 3–4 agreed, not started. Supersedes the four fixed filter dimensions in
 [src/lib/people-filter.ts](../src/lib/people-filter.ts), which stay working throughout.
 
 Decisions taken: phase 1 covers single-entity predicates only; the precise path before the

@@ -25,6 +25,7 @@ import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
 import { effectivePhotoMap } from "@/lib/photos-db";
 import { getUserSettings } from "@/lib/settings";
+import { searchVocabulary } from "@/lib/search/compile";
 import { listOtherUsers } from "@/lib/users";
 import { PeopleFilters } from "@/components/people-filters";
 import { PeopleBulkBar } from "@/components/people-bulk-bar";
@@ -141,7 +142,12 @@ export default async function PeoplePage({
         </p>
       ) : null}
 
-      <PeopleFilters filter={filter} labels={labels} resultCount={total} />
+      <PeopleFilters
+        filter={filter}
+        labels={labels}
+        resultCount={total}
+        vocab={searchVocabulary(defs, labelRows.map((l) => l.name))}
+      />
 
       {/* A query that cannot be read narrows to nothing rather than widening to everything,
           so without this the page would look like a filter that matched no one. */}

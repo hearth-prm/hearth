@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 563 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 582 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -59,7 +59,7 @@ it through a local model — and [sticky shares](docs/design-sticky-shares.md), 
 carries standing sharing intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 563 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 582 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -693,6 +693,10 @@ and label names, so nothing you had bookmarked changed meaning. `-` negates, `or
 parentheses group, and a query it cannot read narrows to nothing and says why rather than
 quietly matching everyone.
 
+The box completes as you type — `ci` offers `city:`, `label:` offers your own label names —
+and a panel under it lists every key with an example, for when you do not yet know there is
+anything to complete.
+
 The contact list also filters by label (any or all of them), by who can see a contact
 (mine, private, shared by me, shared with me), by Google sync state, and by whether
 there is an email or phone. Every filter is a link, so a filtered list is a URL you
@@ -1052,7 +1056,7 @@ npm run dev
 | `npm run db:seed` | Seed built-in relationship types (idempotent) |
 | `npm run db:studio` | Prisma Studio |
 | `npm run docker:up` | Build and start via compose, stamping version + commit into the image |
-| `npm run e2e` | Build, then drive a real browser through 563 checks against an embedded Postgres |
+| `npm run e2e` | Build, then drive a real browser through 582 checks against an embedded Postgres |
 | `npm run e2e:google` | The Google-facing half, against throwaway accounts. **Destructive** — it refuses to run against an account that looks like a real address book |
 | `npm run token` | Mint the refresh tokens `e2e:google` needs, into `.env.e2e` (gitignored) |
 

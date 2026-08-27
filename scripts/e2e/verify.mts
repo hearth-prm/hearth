@@ -4246,6 +4246,126 @@ try {
   await prisma.fieldDefinition.delete({ where: { id: qCustom.id } });
 
   // ════════════════════════════════════════════════════════════════════════
+  section("§27 Completing a query as you type");
+
+  const { suggestQuery, applySuggestion } = await import("@/lib/search/suggest");
+  const { searchVocabulary } = await import("@/lib/search/compile");
+  const sDefs = await loadRegistryForQuery(A.id, "PERSON");
+  const sVocab = searchVocabulary(sDefs, ["Family", "Work-Friends", "Bills Basement"]);
+
+  // --- the pure part -------------------------------------------------------
+  const sAt = (q: string) => suggestQuery(q, q.length, sVocab);
+  const sLabels = (q: string) => sAt(q).items.map((i) => i.label);
+
+  ok("27.1 an empty box suggests nothing, rather than covering the page",
+     sAt("").items.length === 0);
+  ok("27.2 a partial name offers the fields that start with it",
+     sLabels("ci").includes("city:") && !sLabels("ci").includes("label:"), sLabels("ci"));
+  ok("27.2b including a custom field, since names come from the registry",
+     searchVocabulary(
+       [...sDefs, { key: "howTheyVote", label: "How they vote", core: false } as never],
+       [],
+     ).fields.includes("howTheyVote"));
+  ok("27.3 after a colon it offers that field's values",
+     sLabels("label:").join() === "Family,Work-Friends,Bills Basement", sLabels("label:"));
+  ok("27.3b narrowing as the value is typed",
+     sLabels("label:work").join() === "Work-Friends", sLabels("label:work"));
+  ok("27.3c and a field with no fixed values offers none",
+     sAt("org:").items.length === 0);
+  ok("27.4 has: and google: are offered from the same tables the compiler accepts",
+     sLabels("has:").includes("email") && sLabels("google:").includes("error"),
+     [sLabels("has:"), sLabels("google:")]);
+
+  // The token being completed is not "the last word": a quoted value contains spaces, and
+  // deciding where it began needs to know which quotes are open.
+  ok("27.5 a value with a space in it is still one token",
+     sLabels('label:"Bills Bas').join() === "Bills Basement",
+     sLabels('label:"Bills Bas'));
+  // "label:Family " is thirteen characters, so the token being completed starts at 13. The
+  // number is asserted rather than "greater than zero" because an off-by-one here silently
+  // eats the space and turns two terms into one.
+  ok("27.5b a term earlier in the query is left alone",
+     sAt("label:Family ci").from === 13
+       && sAt("label:Family ci").to === 15,
+     sAt("label:Family ci"));
+  ok("27.6 a leading minus is kept, not completed over",
+     sAt("-ci").items[0]?.insert === "-city:", sAt("-ci").items[0]);
+
+  // Applying one has to put the cursor where the next keystroke belongs.
+  const fieldPick = sAt("ci");
+  const sApplied = applySuggestion("ci", fieldPick, fieldPick.items[0]!);
+  ok("27.7 accepting a field leaves the cursor against the colon, ready for a value",
+     sApplied.value === "city:" && sApplied.cursor === 5, sApplied);
+  const valuePick = sAt("label:work");
+  const sApplied2 = applySuggestion("label:work", valuePick, valuePick.items[0]!);
+  ok("27.7b accepting a value adds a space, because the next thing is another term",
+     sApplied2.value === "label:Work-Friends " && sApplied2.cursor === 19, sApplied2);
+  ok("27.7c and a value with a space comes back quoted, or it would be two terms",
+     applySuggestion('label:"Bills Bas', sAt('label:"Bills Bas'), sAt('label:"Bills Bas').items[0]!)
+       .value === 'label:"Bills Basement" ',
+     applySuggestion('label:"Bills Bas', sAt('label:"Bills Bas'), sAt('label:"Bills Bas').items[0]!).value);
+  ok("27.8 text after the cursor survives",
+     applySuggestion("ci org:Acme", suggestQuery("ci org:Acme", 2, sVocab),
+       suggestQuery("ci org:Acme", 2, sVocab).items[0]!).value === "city: org:Acme",
+     applySuggestion("ci org:Acme", suggestQuery("ci org:Acme", 2, sVocab),
+       suggestQuery("ci org:Acme", 2, sVocab).items[0]!).value);
+
+  // Everything offered must be something the compiler accepts. A box that teaches a language
+  // the compiler refuses is worse than no box at all.
+  const { compileQuery: compileForSuggest, QueryError: SErr } = await import("@/lib/search/compile");
+  let unacceptable: string[] = [];
+  for (const field of sVocab.fields) {
+    const values = sVocab.values[field];
+    const probe = values && values.length > 0
+      ? `${field}:${/\s/.test(values[0]!) ? `"${values[0]}"` : values[0]}`
+      : `${field}:x`;
+    try {
+      const { warnings } = compileForSuggest(probe, A.id, sDefs);
+      if (warnings.length > 0) unacceptable.push(`${probe} (warned)`);
+    } catch (err) {
+      // A date field rejects "x", which is correct — the probe is wrong, not the field.
+      if (!(err instanceof SErr) || !/is not a date/.test((err as Error).message)) {
+        unacceptable.push(`${probe} (${(err as Error).message.slice(0, 40)})`);
+      }
+    }
+  }
+  ok("27.9 every field the box offers is one the compiler understands",
+     unacceptable.length === 0, unacceptable);
+
+  // --- and through the browser ---------------------------------------------
+  await A.page.goto("/people");
+  await A.page.fill('input[name="q"]', "");
+  await A.page.type('input[name="q"]', "ci");
+  await A.page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 10_000 });
+  const sOffered = await A.page.$$eval('[role="listbox"] [role="option"]', (os) =>
+    os.map((o) => o.textContent?.trim() ?? ""));
+  ok("27.10 the box offers completions in the page",
+     sOffered.some((t) => t.startsWith("city:")), sOffered);
+
+  await A.page.keyboard.press("Enter");
+  ok("27.10b Enter accepts the highlighted one rather than submitting",
+     (await A.page.inputValue('input[name="q"]')) === "city:"
+       && new URL(A.page.url()).searchParams.get("q") === null,
+     { value: await A.page.inputValue('input[name="q"]'), url: A.page.url() });
+
+  // Escape then Enter has to be the way to search for exactly what was typed.
+  await A.page.fill('input[name="q"]', "");
+  await A.page.type('input[name="q"]', "lab");
+  await A.page.waitForSelector('[role="listbox"]', { timeout: 10_000 });
+  await A.page.keyboard.press("Escape");
+  await A.page.keyboard.press("Enter");
+  await A.page.waitForURL(/[?&]q=lab/, { timeout: 10_000 }).catch(() => {});
+  ok("27.11 Escape then Enter searches for what was typed",
+     new URL(A.page.url()).searchParams.get("q") === "lab", A.page.url());
+
+  await A.page.goto("/people");
+  await A.page.click("summary:has-text(\"What can I search for?\")");
+  const help = (await A.page.textContent("details:has(summary:has-text('What can I search'))")) ?? "";
+  ok("27.12 the keys are written down for somebody who does not know to try",
+     help.includes("label:Family") && help.includes("-has:email") && help.includes("updated:>30d"),
+     help.slice(0, 120));
+
+  // ════════════════════════════════════════════════════════════════════════
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

@@ -28,6 +28,20 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **The search box completes what you are typing.** `ci` offers `city:` and `created:`;
+  `label:` offers your actual label names; `has:` and `google:` offer exactly the values the
+  compiler accepts. Arrow keys to move, Enter or Tab to accept, Escape to dismiss — and
+  Escape then Enter always searches for precisely what you typed.
+  - A **"What can I search for?"** panel under the box lists the keys with an example each,
+    because autocomplete only helps somebody who already suspects there is something to
+    complete. It is a native `<details>`, so it needs no JavaScript and costs nothing closed.
+  - The suggestions come from the same tables the compiler reads, and §27.9 walks every field
+    the box offers through the compiler to prove it accepts them. A box that teaches a
+    language the compiler refuses would be worse than no box.
+  - Quoted values are one token, so `label:"Bills Bas` completes to
+    `label:"Bills Basement"` — and a value with a space comes back quoted, or it would parse
+    as two terms.
+
 - **The search box is a query language.** Everything that had no filter now has one:
 
   ```

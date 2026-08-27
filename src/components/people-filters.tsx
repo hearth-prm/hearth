@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
+import { SearchBox } from "@/components/search-box";
+import type { Vocabulary } from "@/lib/search/suggest";
 import {
   activePills,
   filterHref,
@@ -30,14 +32,33 @@ import { LabelChip, type LabelSummary } from "@/components/label-chip";
  * page feels broken, and every navigation here loads a fresh page. The effect below
  * only adds what <details> lacks: closing on an outside click or Escape.
  */
+const SEARCH_EXAMPLES: readonly { query: string; means: string }[] = [
+  { query: "label:Family", means: "in that label" },
+  { query: 'city:"Sun Prairie"', means: "any address part" },
+  { query: "org:TheStreet", means: "organisation contains" },
+  { query: "-has:email", means: "no email address" },
+  { query: "has:photo", means: "has a picture" },
+  { query: "is:private", means: "yours, shared with nobody" },
+  { query: "google:error", means: "failed to sync" },
+  { query: "updated:>30d", means: "changed in the last 30 days" },
+  { query: "created:2026-08", means: "added that month" },
+  { query: "dept:Technology", means: "a column by name" },
+  { query: "label:Family or label:Medical", means: "either one" },
+  { query: "phone:262", means: "a contact detail" },
+];
+
 export function PeopleFilters({
   filter,
   labels,
   resultCount,
+  vocab,
 }: {
   filter: PeopleFilter;
   labels: readonly (LabelSummary & { count: number })[];
   resultCount: number;
+  /** Field and value names for completing a query; built from the same tables the compiler
+      accepts, so the box can never teach a language the compiler refuses. */
+  vocab: Vocabulary;
 }) {
   const menu = useRef<HTMLDetailsElement>(null);
 
@@ -81,13 +102,12 @@ export function PeopleFilters({
           ))}
 
           <div className="flex min-h-[2.375rem] flex-wrap items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-2 py-1 shadow-sm transition focus-within:border-accent-500 focus-within:ring-2 focus-within:ring-accent-500/30 dark:border-neutral-700 dark:bg-neutral-900">
-            <input
-              type="search"
+            <SearchBox
               name="q"
               defaultValue={filter.q}
-              placeholder="Search name, organisation, notes, label or contact details…"
-              aria-label="Search people"
-              className="min-w-32 flex-1 bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
+              placeholder="Search, or try label:Family -has:email"
+              vocab={vocab}
+              className="w-full bg-transparent px-1 py-1 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-500"
             />
             {pills.map((p) => (
               <Link
@@ -196,6 +216,38 @@ export function PeopleFilters({
           </div>
         </details>
       </div>
+
+      {/*
+        The keys, spelled out. Autocomplete only helps somebody who already suspects there is
+        something to complete, and this is a native <details> so it needs no JavaScript and
+        costs nothing when closed.
+      */}
+      <details className="mt-1.5 [&>summary::-webkit-details-marker]:hidden">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-neutral-500 underline decoration-dotted hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200">
+          What can I search for?
+        </summary>
+        <div className="mt-2 rounded-md border border-neutral-200 bg-white px-3 py-2.5 text-xs dark:border-neutral-800 dark:bg-neutral-900">
+          <p className="mb-2 text-neutral-600 dark:text-neutral-400">
+            Words on their own search names, organisations, notes, contact details and label
+            names. <code>-</code> before a term excludes it, <code>or</code> and brackets group,
+            and quotes hold a phrase together.
+          </p>
+          <ul className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            {SEARCH_EXAMPLES.map((ex) => (
+              <li key={ex.query} className="flex flex-wrap items-baseline gap-x-2">
+                <code className="rounded bg-neutral-100 px-1 py-0.5 text-[0.7rem] text-neutral-800 dark:bg-neutral-800 dark:text-neutral-200">
+                  {ex.query}
+                </code>
+                <span className="text-neutral-500 dark:text-neutral-400">{ex.means}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-neutral-500 dark:text-neutral-400">
+            Also available: {vocab.fields.slice(0, 24).join(", ")}
+            {vocab.fields.length > 24 ? ", …" : ""}
+          </p>
+        </div>
+      </details>
 
       {active ? (
         <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">

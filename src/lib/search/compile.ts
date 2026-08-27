@@ -10,6 +10,7 @@ import {
   relationClause,
 } from "./predicates";
 import { QueryError, parseQuery, type Comparison, type Node, type Term } from "./parse";
+import type { Vocabulary } from "./suggest";
 
 /**
  * Syntax tree to Prisma where-clause.
@@ -260,6 +261,46 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
     ...Object.keys(COLUMNS),
     ...registry.filter((d) => !d.core).map((d) => d.key),
   ].sort();
+}
+
+/**
+ * Everything the search box needs to complete what somebody is typing.
+ *
+ * Built here rather than in the component because the answers have to be the SAME ones the
+ * compiler accepts. A field offered by autocomplete that the compiler treats as text, or a
+ * value it refuses, is worse than no autocomplete: it teaches the wrong language.
+ */
+export function searchVocabulary(
+  registry: readonly FieldDef[],
+  labelNames: readonly string[],
+): Vocabulary {
+  const describe: Record<string, string> = {
+    label: "a label by name",
+    has: "something a contact does or does not have",
+    google: "how it stands with Google",
+    is: "how it relates to you",
+    ...Object.fromEntries(Object.keys(DATES).map((k) => [k, "a date, or 30d for “30 days ago”"])),
+    ...Object.fromEntries(Object.keys(ADDRESS_PARTS).map((k) => [k, "part of an address"])),
+    ...Object.fromEntries(Object.keys(POINT_KINDS).map((k) => [k, "a contact detail"])),
+    ...Object.fromEntries(Object.keys(COLUMNS).map((k) => [k, `the ${COLUMNS[k]} field`])),
+    ...Object.fromEntries(
+      registry.filter((d) => !d.core).map((d) => [d.key, `your “${d.label}” field`]),
+    ),
+  };
+
+  return {
+    fields: knownFields(registry),
+    values: {
+      label: [...labelNames],
+      has: Object.keys(PRESENCE).filter((k) => k !== "organization"),
+      google: [...GOOGLE_STATES],
+      sync: [...GOOGLE_STATES],
+      is: [...RELATIONS],
+      rel: [...RELATIONS],
+      relation: [...RELATIONS],
+    },
+    describe,
+  };
 }
 
 export { QueryError } from "./parse";
