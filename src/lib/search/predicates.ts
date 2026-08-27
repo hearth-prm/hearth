@@ -2,6 +2,7 @@ import type { ContactKind, Prisma } from "@prisma/client";
 // Type-only, so this module never imports people-filter at runtime and the dependency runs
 // one way: people-filter -> compile -> predicates.
 import type { GoogleState, Relation } from "@/lib/people-filter";
+import type { PersonNameParts } from "@/lib/people";
 
 /**
  * The tables and clause builders shared by the filter chips and the query language.
@@ -57,15 +58,20 @@ interface Addressable<T> {
   label: string;
   target: T;
   /**
-   * True for a column the schema declares NOT NULL.
+   * How to answer `has:` for this field, when the column itself cannot.
    *
-   * `displayName` is the only one, and it is the reason this flag exists: asking whether it
-   * is null is not a comparison Postgres will make, so `has:name` failed with a Prisma error
-   * inside the search box while compiling perfectly — the column name is a computed key, so
-   * TypeScript checks nothing about it. §29.2 runs all hundred-and-one options for this
-   * reason, and this is what it found.
+   * Only `displayName` needs it, and it needs it badly: the column is denormalised and falls
+   * back through nickname, organisation and finally the literal "Unnamed contact", so it is
+   * NEVER empty and "is it filled in" always answered yes. `-has:name` therefore returned
+   * nothing at all while the contacts it should have found sat there reading "Unnamed
+   * contact" — which is how it was reported.
+   *
+   * The lesson generalises past this one column: for a field whose value is COMPUTED, "is it
+   * set" is not a question about the field, it is a question about whatever it was computed
+   * from. Deriving presence from a column list is right for every column a person types into
+   * and wrong for every column the application fills in.
    */
-  required?: true;
+  presence?: () => Prisma.PersonWhereInput;
   /**
    * A contact-point kind holding the same sort of value as the column.
    *
@@ -75,9 +81,30 @@ interface Addressable<T> {
   also?: ContactKind;
 }
 
+/**
+ * The columns computeDisplayName consults, which is exactly what "has a name" means: it
+ * returns "Unnamed contact" if and only if all four of these are blank.
+ *
+ * A Record rather than an array, so that adding a part to PersonNameParts breaks HERE rather
+ * than quietly leaving `has:name` behind. `satisfies keyof` would check one direction — and
+ * the direction it checks is the one that does not matter.
+ */
+const NAME_PARTS: Record<keyof PersonNameParts, true> = {
+  givenName: true,
+  familyName: true,
+  nickname: true,
+  organization: true,
+};
+
 /** Person columns addressable by name. */
 export const TEXT_FIELDS: readonly Addressable<string>[] = [
-  { key: "name", aliases: ["displayname"], label: "the whole name", target: "displayName", required: true },
+  {
+    key: "name",
+    aliases: ["displayname"],
+    label: "a name, nickname or organisation to go by",
+    target: "displayName",
+    presence: () => ({ OR: Object.keys(NAME_PARTS).map((column) => presentText(column)) }),
+  },
   { key: "first", aliases: ["firstname", "given"], label: "first name", target: "givenName" },
   { key: "middle", aliases: ["middlename"], label: "middle name", target: "middleName" },
   {
@@ -267,10 +294,8 @@ export function googleClause(
  * nullable column has to decide what to do about NULL and this way nothing has to be
  * remembered about which way it went.
  */
-function presentText(column: string, required = false): Prisma.PersonWhereInput {
-  return required
-    ? { NOT: { [column]: "" } }
-    : { NOT: { OR: [{ [column]: null }, { [column]: "" }] } };
+function presentText(column: string): Prisma.PersonWhereInput {
+  return { NOT: { OR: [{ [column]: null }, { [column]: "" }] } };
 }
 
 /**
@@ -456,15 +481,12 @@ export const PRESENCE_DEFS: readonly PresenceDef[] = [
     key: f.key,
     aliases: f.aliases,
     label: f.label,
-    clause: (): Prisma.PersonWhereInput =>
-      f.also
-        ? {
-            OR: [
-              presentText(f.target, f.required),
-              { contactPoints: { some: { kind: f.also } } },
-            ],
-          }
-        : presentText(f.target, f.required),
+    clause:
+      f.presence ??
+      ((): Prisma.PersonWhereInput =>
+        f.also
+          ? { OR: [presentText(f.target), { contactPoints: { some: { kind: f.also } } }] }
+          : presentText(f.target)),
   })),
   ...POINT_FIELDS.map((f) => ({
     key: f.key,

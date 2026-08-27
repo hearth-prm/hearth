@@ -62,7 +62,7 @@ network. One piece of work is designed and queued rather than built —
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 635 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 641 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -703,7 +703,8 @@ Values match anywhere in a field, so `city:Sun` finds Sun Prairie as well as Sun
 rather than ignoring them.
 
 `has:` asks whether something is there at all, and it covers every field Hearth stores rather
-than a handful: `has:email`, `has:photo`, `has:birthday`, `has:middle`, `has:phonetic`,
+than a handful — `-has:name` is every contact with nothing to go by, the ones the list shows as
+*Unnamed contact*: `has:email`, `has:photo`, `has:birthday`, `has:middle`, `has:phonetic`,
 `has:city`, `has:skill`, `has:custom`. Put a minus in front for the opposite, which is where
 it earns its keep — `has:address -has:postcode` is every address that would reach Google
 without a postcode. The options are derived from the same tables the field names come from, so

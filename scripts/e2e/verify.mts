@@ -4884,6 +4884,69 @@ try {
   ok("29.19b and the pill removes it again",
      (await A.page.$$('a:text-is("Needs a thank-you")')).length >= 1);
 
+  // --- "has a name" is not "the name column is filled in" -------------------
+  //
+  // displayName is denormalised and falls back through nickname, organisation and finally the
+  // literal "Unnamed contact", so it is never empty. `has:name` asked of the column therefore
+  // always said yes and `-has:name` returned nothing, while the contacts it should have found
+  // sat in the list reading "Unnamed contact". Reported, not caught here — §29.2 proves every
+  // option RUNS, which this one did, perfectly, answering the wrong question.
+  const pBlank = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Unnamed contact" },
+  });
+  const pOrgOnly = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Presence Industries", organization: "Presence Industries" },
+  });
+  const pMiddleOnly = await prisma.person.create({
+    // A middle name is not part of the fallback chain, so this one reads as unnamed too.
+    data: { ownerId: A.id, displayName: "Unnamed contact", middleName: "Quentin" },
+  });
+  const named = await hasNames("name");
+  ok("29.20 a contact with nothing to go by does not have a name",
+     !named.includes("Unnamed contact"), named.slice(0, 6));
+  ok("29.20b so -has:name is how you find them",
+     (await (async () => {
+       const { where } = compileQuery("-has:name", qViewer, qDefs);
+       return prisma.person.findMany({
+         where: { AND: [qViewer.readablePeople, where] },
+         select: { id: true },
+       });
+     })()).some((r) => r.id === pBlank.id));
+  ok("29.20c an organisation is something to go by, and it is what the list shows",
+     named.includes("Presence Industries"), named.slice(0, 6));
+  ok("29.20d a middle name alone is not, since it is not in the fallback chain",
+     (await (async () => {
+       const { where } = compileQuery("-has:name", qViewer, qDefs);
+       return prisma.person.count({
+         where: { AND: [qViewer.readablePeople, where, { id: pMiddleOnly.id }] },
+       });
+     })()) === 1);
+  ok("29.20e but has:middle still finds it, because that column is asked about directly",
+     (await hasNames("middle")).includes("Unnamed contact"), await hasNames("middle"));
+
+  // The invariant behind all of the above, asserted over every contact rather than the three
+  // fixtures: has:name is true exactly when the list does not read "Unnamed contact". If the
+  // fallback chain ever grows a rung, this fails without anybody having to think of it.
+  const allReadable = await prisma.person.findMany({
+    where: qViewer.readablePeople,
+    select: { id: true, displayName: true },
+  });
+  const nameSet = new Set(
+    (
+      await prisma.person.findMany({
+        where: {
+          AND: [qViewer.readablePeople, compileQuery("has:name", qViewer, qDefs).where],
+        },
+        select: { id: true },
+      })
+    ).map((r) => r.id),
+  );
+  const disagreeing = allReadable.filter(
+    (r) => nameSet.has(r.id) !== (r.displayName !== "Unnamed contact"),
+  );
+  ok(`29.21 across all ${allReadable.length} contacts, has:name means "not shown as unnamed"`,
+     disagreeing.length === 0, disagreeing.map((r) => r.displayName));
+
   // Leave nothing behind: §22 counts what is on the page, and a fixture that outlives its
   // section invalidates somebody else's absence assertion.
   await prisma.event.delete({ where: { id: presenceEvent.id } });
@@ -4891,7 +4954,7 @@ try {
     where: {
       id: {
         in: [pQuinn.id, pRex.id, pSasha.id, pTess.id, pUma.id, pVic.id, pWes.id, pZane.id,
-             pYara.id],
+             pYara.id, pBlank.id, pOrgOnly.id, pMiddleOnly.id],
       },
     },
   });

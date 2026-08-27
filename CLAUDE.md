@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 635 checks
+npm run e2e         # builds, then drives a real browser through 641 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 ```
 
@@ -91,6 +91,12 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   `"thanked":false` satisfied a positive assertion. Use Playwright's `text=` engine.
 - **Next's build worker OOMs where `tsc` passes.** One unused
   `Awaited<ReturnType<typeof findMany>>[number]` did it. Declare return types explicitly.
+- **"Is it set" is not a question about a column the application computes.** `displayName`
+  falls back to nickname, organisation and finally "Unnamed contact", so it is never empty and
+  `has:name` always said yes — `-has:name` found nobody while the list showed the contacts it
+  should have found. Deriving presence from a column list is right for every field a person
+  types into and wrong for every one the app fills in; `Addressable.presence` is the override,
+  and §29.21 asserts the equivalence over every contact rather than a fixture.
 - **A computed key skips every check TypeScript has.** `{ [column]: null }` compiles whatever
   `column` says, so `has:name` shipped comparing a NOT NULL column to null and failed as a
   Prisma error inside the search box. The whole-object type still helps — it refused a Person

@@ -76,6 +76,21 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Fixed
 
+- **`-has:name` found nobody, while the contacts it should have found sat in the list reading
+  "Unnamed contact".** `displayName` is denormalised: it falls back through nickname, then
+  organisation, then the literal `"Unnamed contact"`, so the column is *never* empty and "is it
+  filled in" always answered yes. `has:name` now asks the four columns `computeDisplayName`
+  consults, which makes it true exactly when the list does not read "Unnamed contact" —
+  asserted over every contact in §29.21 rather than over a fixture, so a new rung in the
+  fallback chain fails the suite without anybody having to think of it.
+  - The general lesson, recorded in CLAUDE.md: for a column the *application* computes, "is it
+    set" is not a question about that column. Deriving presence from a column list is right for
+    every field a person types into and wrong for every one the app fills in.
+  - The parts are listed as a `Record<keyof PersonNameParts, true>`, so adding a name part
+    breaks the presence definition rather than quietly leaving it behind — `satisfies keyof`
+    checks only the direction that does not matter.
+  - An organisation still counts: it is something to go by and it is what the list shows. A
+    middle name alone does not, because it is not in the fallback chain either.
 - `has:name` failed with a Prisma error inside the search box. `displayName` is the one
   contact column the schema declares NOT NULL, and asking whether it is null is not a
   comparison Postgres will make. It compiled perfectly: the column name is a computed key, so
