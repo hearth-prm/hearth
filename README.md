@@ -53,6 +53,11 @@ over to, other users on the same install.
 | ✅ | Multi-select on the people list, with bulk edit and bulk delete | Done |
 | ✅ | Pictures imported as pictures, not as URLs | Done |
 
+Two pieces of work are designed and queued rather than built:
+[search and filtering](docs/design-search.md) — a query language, then natural language into
+it through a local model — and [sticky shares](docs/design-sticky-shares.md), where a label
+carries standing sharing intentions.
+
 Verification is largely automated: `npm run e2e` drives a real browser against the
 built app through 532 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
