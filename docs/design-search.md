@@ -3,6 +3,10 @@
 Status: **agreed, not started.** Supersedes the four fixed filter dimensions in
 [src/lib/people-filter.ts](../src/lib/people-filter.ts), which stay working throughout.
 
+Decisions taken: phase 1 covers single-entity predicates only; the precise path before the
+fuzzy one; Ollama as its own container rather than bundled; `qwen2.5:7b-instruct` for
+translation and `nomic-embed-text` for embeddings.
+
 ## The problem
 
 Today the contact list filters on four dimensions — labels (any/all), relation to the viewer,
@@ -95,9 +99,9 @@ one example each. Same box, same URL, no new state.
 
 ## Phase 3 — natural language into the language
 
-An LLM translates a sentence into a query. **Local by default, through Ollama**, which the
-Unraid host can run: nothing about the household leaves the house, which is a better story
-than the Google integration this app already relies on.
+An LLM translates a sentence into a query, through Ollama on the same host — see
+[Deployment](#deployment-where-the-model-runs). Nothing about the household leaves the
+network, which is a better story than the Google integration this app already relies on.
 
 Follows the existing optional-service pattern —
 [places/index.ts](../src/lib/places/index.ts) gates a whole feature on an env var and names
@@ -149,6 +153,61 @@ pgvector earns its keep somewhere in the tens of thousands of rows.
 - **An embedding is only comparable to others from the same model**, so the model name is
   stored beside the vector and a change means re-embedding rather than a silent mix.
 - **Ollama down** degrades to the ordinary filter.
+
+## Deployment: where the model runs
+
+**Decided: Ollama runs as its own container, installed separately. Hearth is given a URL and
+knows nothing else about it.**
+
+```
+OLLAMA_URL=http://<host>:11434       # unset means the feature is not offered
+OLLAMA_CHAT_MODEL=qwen2.5:7b-instruct
+OLLAMA_EMBED_MODEL=nomic-embed-text
+```
+
+Not bundled into Hearth's image, for reasons that are specific rather than stylistic:
+
+- **The weights would live in `docker.img`.** Unraid keeps Docker in a fixed-size vDisk, and a
+  quantised 7B model is 4–5GB — in the same disk that has already run out once during a
+  rebuild. Ollama's own container keeps models in appdata, on the array, where the size is
+  nothing.
+- **One process per container.** The entrypoint is a single `exec` of next-server. Two
+  processes means a supervisor, and healthchecks, restarts and interleaved logs all get worse.
+- **Separate lifecycles.** Ollama updates on its own cadence and models are pulled and swapped
+  independently; coupling them means a Hearth patch release restarts the model.
+- **Memory isolation.** A model resident inside the app container makes the app's limits
+  meaningless, and an out-of-memory kill would take the web app down with it.
+- **GPU passthrough, if ever**, belongs on the Ollama container rather than on a Next.js app.
+- **Optionality.** Bundling makes the dependency mandatory for anyone who never wants this.
+
+Ollama is also then available to everything else on the host, which on a server already
+running a dozen containers is worth more than tidiness.
+
+### Model size is a latency decision, not a memory one
+
+The host has hundreds of gigabytes free, so **7B is not a compromise — it is the right size for
+a search box.** The task is constrained translation with the grammar supplied in the prompt and
+the output validated by parsing it, which a 7B instruct model does comfortably. What matters
+instead is time to first result: a query is perhaps thirty output tokens, which is well under a
+second at 7B, and ten to twenty times slower at 70B. A search box that takes fifteen seconds to
+understand a sentence is not a search box.
+
+Two consequences of the memory being free:
+
+- **Keep both models resident.** Ollama unloads after five minutes by default; a long
+  `OLLAMA_KEEP_ALIVE` keeps the chat and embedding models hot, so the first search of the day
+  is as fast as the tenth. This costs nothing at this scale and removes the worst-feeling
+  latency in the feature.
+- **Room to change the chat model later** without re-embedding anything, because the two are
+  independent. Changing the *embedding* model is not free — see phase 4.
+
+### The model is consulted deliberately, not per keystroke
+
+Typing in the search box parses locally and filters as it always has. A sentence is translated
+only when asked — a button, or Enter on something that fails to parse as a query — because
+calling a model on every keystroke would be slow, noisy and pointless when most input is
+already a valid query. A translation that times out (a couple of seconds) leaves the box as it
+was and says so.
 
 ## The option with no AI in it
 

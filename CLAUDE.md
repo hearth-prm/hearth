@@ -141,7 +141,9 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - [docs/design-search.md](docs/design-search.md) — a query DSL first, because every other
   front-end compiles into it; then autocomplete, then natural language through a local Ollama
   writing INTO the search box, then embeddings as one `semantic:` predicate. Agreed scope for
-  phase 1 is single-entity predicates only.
+  phase 1 is single-entity predicates only. Ollama is a SEPARATE container reached through
+  `OLLAMA_URL` — never bundled, because the weights would land in Unraid's fixed-size
+  docker.img. 7B is chosen for latency, not memory: a search box cannot wait fifteen seconds.
 - [docs/design-sticky-shares.md](docs/design-sticky-shares.md) — a label carrying standing
   share rules, reconciled rather than event-driven, with `Share.viaLabelId` as the provenance
   that makes withdrawal safe.
