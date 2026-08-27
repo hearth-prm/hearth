@@ -63,6 +63,11 @@ of a green test suite alone where a real address book can be asked instead.
     mistake worth stopping for.
   - A query that cannot be read narrows to nothing and says why, rather than widening to
     everything and looking like a filter that matched no one.
+  - **Values match anywhere in a field**, so `city:Sun` finds Sun Prairie *and* Sun Gorge.
+    There is no wildcard syntax because there is nothing for it to enable — and
+    `city:="Sun Prairie"` asks for the whole value when that is what you meant.
+  - `>` and `<` only work on a date. On a text field they are refused rather than quietly
+    ignored, which is what they were before.
   - The export and "select all matching this filter" resolve the same query the page did,
     using the same registry — a disagreement there would be worst in front of a bulk delete.
 

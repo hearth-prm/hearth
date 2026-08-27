@@ -74,8 +74,19 @@ const DATES: Record<string, string> = {
   changed: "updatedAt",
 };
 
-function ci(value: string) {
-  return { contains: value, mode: "insensitive" as const };
+/**
+ * Text matching: substring by default, whole value on `=`.
+ *
+ * `city:Sun` finding Sun Prairie AND Sun Gorge is usually what somebody wants, which is why
+ * substring is the default and there is no wildcard syntax — there would be nothing for it to
+ * enable. `city:="Sun Prairie"` is the way to say only that one, and it exists because the
+ * parser already accepted `=` and the compiler used to throw it away: a query that quietly
+ * means something other than what it says is worse than one that is refused.
+ */
+function text(value: string, op: Comparison) {
+  return op === "="
+    ? { equals: value, mode: "insensitive" as const }
+    : { contains: value, mode: "insensitive" as const };
 }
 
 /**
@@ -153,8 +164,17 @@ function compileTerm(
   const field = term.field.toLowerCase();
   const value = term.value;
 
+  // A comparison only means something on a date. Accepting `org:>Acme` and quietly treating
+  // it as a substring search is how a query comes to mean something other than it says.
+  if ((term.op === "<" || term.op === ">" || term.op === "<=" || term.op === ">=") &&
+      !(field in DATES)) {
+    throw new QueryError(
+      `“${term.op}” only works on a date. For an exact match use ${field}:=${value}.`,
+    );
+  }
+
   if (field === "label") {
-    return { labels: { some: { label: { name: ci(value) } } } };
+    return { labels: { some: { label: { name: text(value, term.op) } } } };
   }
   if (field === "has") {
     const key = value.toLowerCase();
@@ -179,14 +199,18 @@ function compileTerm(
   }
   if (field in ADDRESS_PARTS) {
     return {
-      contactPoints: { some: { kind: "ADDRESS", [ADDRESS_PARTS[field]!]: ci(value) } },
+      contactPoints: {
+        some: { kind: "ADDRESS", [ADDRESS_PARTS[field]!]: text(value, term.op) },
+      },
     };
   }
   if (field in POINT_KINDS) {
-    return { contactPoints: { some: { kind: POINT_KINDS[field]!, value: ci(value) } } };
+    return {
+      contactPoints: { some: { kind: POINT_KINDS[field]!, value: text(value, term.op) } },
+    };
   }
   if (field in COLUMNS) {
-    return { [COLUMNS[field]!]: ci(value) };
+    return { [COLUMNS[field]!]: text(value, term.op) };
   }
 
   // A custom field, by its own key. Resolved against the ASKER's registry, because a shared

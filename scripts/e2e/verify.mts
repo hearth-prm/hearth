@@ -4175,6 +4175,34 @@ try {
      await qNames("Qa (org:Beta or label:Qtest)"));
   ok("26.9c and NOT excludes",
      (await qNames("Qa -org:Acme")).join() === "Qa Three", await qNames("Qa -org:Acme"));
+  // Substring both ends by default, which is why there is no wildcard syntax: `city:Sun`
+  // finding Sun Prairie AND Sun Gorge is the common intent.
+  const qGorge = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Qa Four", givenName: "Qa", familyName: "Four",
+      contactPoints: {
+        create: [{ kind: "ADDRESS", value: "9 Hill", city: "Sun Gorge", order: 0 }],
+      },
+    },
+  });
+  ok("26.10a a value matches anywhere in the field, so Sun finds both towns",
+     (await qNames("Qa city:Sun")).join() === "Qa Four,Qa One,Qa Three",
+     await qNames("Qa city:Sun"));
+  ok("26.10b and = asks for the whole value instead",
+     (await qNames('Qa city:="Sun Prairie"')).join() === "Qa One,Qa Three",
+     await qNames('Qa city:="Sun Prairie"'));
+  ok("26.10c which is still case-insensitive",
+     (await qNames('Qa city:="sun prairie"')).length === 2);
+  // The parser accepted these and the compiler used to throw them away.
+  let badOp = "no error";
+  try {
+    compileQuery("org:>Acme", A.id, qDefs);
+  } catch (err) {
+    badOp = err instanceof QErr ? "rejected" : "wrong error";
+  }
+  ok("26.10d a comparison on a text field is refused rather than ignored",
+     badOp === "rejected");
+
   ok("26.10 a bare phrase still searches the old seven columns",
      (await qNames('"Qa One"')).join() === "Qa One", await qNames('"Qa One"'));
 
@@ -4240,7 +4268,7 @@ try {
      (await run("label:Qtest")) === 0 && (await run("Qa One")) === 0);
 
   await prisma.person.deleteMany({
-    where: { id: { in: [...qPeople.map((p) => p.id), qPrivate.id] } },
+    where: { id: { in: [...qPeople.map((p) => p.id), qPrivate.id, qGorge.id] } },
   });
   await prisma.label.delete({ where: { id: qLabel.id } });
   await prisma.fieldDefinition.delete({ where: { id: qCustom.id } });

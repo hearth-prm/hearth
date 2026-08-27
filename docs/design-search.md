@@ -62,6 +62,10 @@ google:error                         what the current filter offers
 "sun prairie"                        bare text: today's seven-column search
 ```
 
+Text matches anywhere in a field, which is why no wildcard syntax exists: `city:Sun` finding
+both Sun Prairie and Sun Gorge is the common intent, and `city:="Sun Prairie"` is how to ask
+for the whole value. A comparison on a text field is refused rather than ignored.
+
 **Scope of phase 1 is single-entity only**: person columns, contact points and their parts,
 custom fields, labels, presence, Google state, relation, dates. Events, relationships and
 gifts wait for phase 5 — they need their own access clauses and roughly double the compiler.
