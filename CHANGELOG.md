@@ -26,6 +26,8 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-27
+
 ### Added
 
 - **The search box completes what you are typing.** `ci` offers `city:` and `created:`;
@@ -1199,7 +1201,8 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v1.0.0...main
+[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v1.1.0...main
+[1.1.0]: https://gitlab.com/hammerling/hearth/-/tags/v1.1.0
 [1.0.0]: https://gitlab.com/hammerling/hearth/-/tags/v1.0.0
 [0.6.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.6.0
 [0.5.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.5.0
