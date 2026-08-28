@@ -14,6 +14,7 @@ import {
 } from "@/lib/people-filter";
 import {
   chipsFromQuery,
+  isGroupChip,
   queryFromChips,
   removeChip,
   setConnector,
@@ -56,6 +57,15 @@ const SEARCH_EXAMPLES: readonly { query: string; means: string }[] = [
 /** One chip. Shared so a query chip, a legacy pill and a bracketed query all look alike. */
 const CHIP =
   "inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-50 py-0.5 pl-2 pr-1 text-xs font-medium text-accent-800 transition hover:bg-accent-100 dark:bg-accent-950/60 dark:text-accent-300 dark:hover:bg-accent-900/60";
+
+/**
+ * A group chip, which stands for a bracketed part of the query.
+ *
+ * Marked out because it behaves differently: its × removes everything inside it, and what is
+ * inside cannot be edited from the row. A ring rather than another colour, so it still reads
+ * as one of the chips.
+ */
+const GROUP_CHIP = `${CHIP} ring-1 ring-inset ring-accent-300 dark:ring-accent-700`;
 
 export interface SavedFilterSummary {
   id: string;
@@ -212,8 +222,12 @@ export function PeopleFilters({
                 ) : null}
                 <Link
                   href={filterHref(filter, { q: queryFromChips(removeChip(row!, i)) })}
-                  className={CHIP}
-                  title={`Remove: ${chip}`}
+                  className={isGroupChip(chip) ? GROUP_CHIP : CHIP}
+                  title={
+                    isGroupChip(chip)
+                      ? `Remove this whole group: ${chip} — retype it to change what is inside`
+                      : `Remove: ${chip}`
+                  }
                 >
                   {chip}
                   <span aria-hidden className="text-sm leading-none">×</span>

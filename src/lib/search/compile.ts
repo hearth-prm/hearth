@@ -92,8 +92,11 @@ function liftSemantic(
   if (node.kind === "term") {
     if (node.field === null || !SEMANTIC_FIELDS.includes(node.field.toLowerCase())) return node;
     if (!top) {
+      // The message names the fix, because the fix is not obvious: `a or b semantic:c` puts
+      // the ranking inside the `or` — AND binds tighter — and bracketing the `or` is what
+      // somebody meant. Telling them only that it is refused leaves them to guess.
       throw new QueryError(
-        `“${node.field}:” ranks results, so it cannot be negated or put inside an “or”. Put it beside the other terms instead.`,
+        `“${node.field}:” ranks results, so it cannot be negated or put inside an “or”. If you meant to rank what the “or” matched, bracket it: (a or b) ${node.field}:${node.value}`,
       );
     }
     // A trailing ~N sets how many to keep. Outside any quotes, so semantic:"a nurse"~50

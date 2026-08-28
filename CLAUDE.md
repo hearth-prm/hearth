@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 719 checks
+npm run e2e         # builds, then drives a real browser through 734 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -34,11 +34,16 @@ push. Adding a field Hearth reads without adding it here is data loss, and it is
 
 **The chips ARE the query string.** `search/chips.ts` decomposes `q` into a row and prints it
 back; there is no chip state. Every edit is `filterHref(filter, { q: queryFromChips(...) })`, so
-a filtered list stays a URL. Two consequences that have already bitten: a chip's label must be
-exactly the query it stands for (hence `like:` is a real predicate, not a display convention),
-and a query a flat row cannot hold — brackets — is shown whole rather than taken apart. AND binds
-tighter than OR, so adding a chip after an OR joins the term before it; that is stated in the
-help panel and asserted in §31.9f rather than papered over with inserted brackets.
+a filtered list stays a URL. Three consequences, each of which has already bitten:
+
+- a chip's label must be exactly the query it stands for, hence `like:` is a real predicate
+  rather than a display convention;
+- a bracketed part of the query is ONE chip (`printAny` brackets only where the meaning needs
+  it), so redundant brackets normalise away and load-bearing ones survive;
+- AND binds tighter than OR, so appending to a row that contains an OR must bracket it —
+  §31.9f. The first version of that check assumed brackets appeared, the second documented the
+  surprising precedence instead, and the third produces the brackets now that a group can be a
+  chip. Only the third is both correct and unsurprising.
 
 **`semantic:` ranks; it never filters.** It is lifted out of the AST before compiling
 (`liftSemantic`) and resolved after the SQL half has run, which is what makes it rank INSIDE

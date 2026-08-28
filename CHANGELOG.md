@@ -28,6 +28,31 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **Brackets group, and a group is a chip.** `(-has:email or -has:phone) semantic:cars` is two
+  chips — the group and the ranking — so order of operations is visible and removable rather
+  than being a query the row refused to take apart. Brackets appear in a chip only when they are
+  load-bearing: `(a b) or c` means the same without them and normalises to three ordinary chips.
+  A group's × removes everything inside it, and the tooltip says so, because what is inside is
+  not editable from the row.
+
+### Fixed
+
+- **Typing `or -has:email` with a chip already in place** searched for the phrase instead of
+  adding an OR chip and a term. The whole phrase was handed to the parser, `or` has nothing
+  before it, and the fallback for unparseable text turned it into one `like:"or -has:email"`
+  chip. A leading `or` or `and` is now read as the connector. A connector on its own is a no-op
+  when there is a row to join to and an ordinary word search when there is not — asymmetric on
+  purpose: with no row there is nothing for it to connect.
+- **Adding a term to a row containing an OR now brackets the OR** instead of quietly binding to
+  the term before it. `a OR b` plus `has:email` meant `a OR (b AND has:email)` — the precedence
+  is correct and was documented as such, but it is not what adding a chip to a row of two means.
+  Now that a group can be a chip, the intended grouping is both produced and shown.
+- **`-has:email or -has:phone semantic:cars` was refused with no way forward.** It is still
+  refused — the ranking sits inside the `or`, where a cosine distance means nothing — but the
+  message now names the fix rather than only the problem: bracket the `or`.
+
+### Added
+
 - **The search box is a row of chips.** Enter turns what you typed into one chip per term and
   empties the box, so `-has:email -has:phone` becomes two chips rather than one opaque phrase —
   and the next thing you type is added to the right instead of replacing what is there.

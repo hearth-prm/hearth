@@ -483,7 +483,41 @@ try {
   ok("4.14j changing AND to OR widens the result rather than narrowing it",
      eitherRows >= 3, [eitherRows, A.page.url()]);
 
+  // The reported bug, through the browser: typing a connector as the first word.
+  await A.page.goto("/people?q=has%3Aphone");
+  await A.page.fill('input[aria-label="Search people"]', "or -has:email");
+  await A.page.press('input[aria-label="Search people"]', "Escape");
+  await A.page.press('input[aria-label="Search people"]', "Enter");
+  await A.page.waitForURL((u) => (u.searchParams.get("q") ?? "").includes("or"), { timeout: 15_000 });
+  const orChips = (await A.page.textContent('form[role="search"]')) ?? "";
+  ok("4.14j2 typing “or …” makes an OR chip rather than searching for the word “or”",
+     orChips.includes("-has:email") && !orChips.includes("like:") &&
+       (await A.page.$$('button[title="Change how these two are joined"]')).length === 1,
+     orChips);
+
+  // A bracketed group is one chip, which is what makes order of operations visible.
+  await A.page.goto("/people?q=(-has%3Aemail%20or%20-has%3Aphone)%20label%3AFamily");
+  const groupChips = (await A.page.textContent('form[role="search"]')) ?? "";
+  ok("4.14j3 a bracketed group shows as one chip beside the rest",
+     groupChips.includes("(-has:email or -has:phone)") && groupChips.includes("label:Family"),
+     groupChips);
+  ok("4.14j4 and its × says it takes the whole group",
+     ((await A.page.getAttribute(
+       'form[role="search"] a[title^="Remove this whole group"]',
+       "title",
+     )) ?? "").includes("-has:email or -has:phone"));
+  await A.page.click('form[role="search"] a[title^="Remove this whole group"]');
+  await A.page.waitForURL((u) => !(u.searchParams.get("q") ?? "").includes("("), { timeout: 15_000 });
+  ok("4.14j5 removing the group leaves the chip beside it",
+     (A.page.url().includes("q=label%3AFamily") || A.page.url().includes("q=label:Family")),
+     A.page.url());
+
   // Saving is the URL, which is what makes it survive whatever the language grows next.
+  //
+  // Navigated to explicitly rather than saving whatever the checks above happened to leave in
+  // the URL. They did, once: inserting the group checks changed the filter in force and these
+  // three failed on a filter they had never asked for.
+  await A.page.goto("/people?q=-has%3Aemail%20or%20-has%3Aphone");
   await openMenu();
   await A.page.fill('input[placeholder="Save this filter as…"]', "Missing details");
   await A.page.click('button:text-is("Save")');
@@ -5377,6 +5411,7 @@ try {
     queryFromChips,
     appendTyped,
     removeChip: dropChip,
+    isGroupChip: isGroup,
     setConnector: joinWith,
     combineQuery: combine,
   } = await import("@/lib/search/chips");
@@ -5416,14 +5451,24 @@ try {
   ok("31.4 an empty query is an empty row, not a failure",
      chipsFromQuery("")?.chips.length === 0 && chipsFromQuery("   ")?.chips.length === 0);
 
-  // Brackets have a shape a flat row cannot hold. Saying so beats taking them apart wrongly:
-  // dropping the brackets would change what somebody's bookmark means.
-  ok("31.5 a bracketed query is not a row",
-     chipsFromQuery("(label:A or label:B) has:email") === null,
+  // A bracketed part of the query is ONE chip, brackets and all. That is what makes order of
+  // operations expressible in a row: the group is a thing you can see and remove.
+  ok("31.5 a bracketed group is one chip beside the others",
+     chipsOf("(label:A or label:B) has:email") === "(label:A or label:B) | AND has:email",
      chipsOf("(label:A or label:B) has:email"));
-  ok("31.5b nor is a negated group", chipsFromQuery("-(label:A or label:B)") === null);
-  ok("31.5c nor is a query that does not parse at all",
+  ok("31.5b a negated group likewise",
+     chipsOf("-(label:A or label:B) has:email") === "-(label:A or label:B) | AND has:email",
+     chipsOf("-(label:A or label:B) has:email"));
+  // Brackets appear in a chip exactly when they are load-bearing. `(a b) or c` means the same
+  // thing without them, so it comes back as three ordinary chips rather than a group nobody
+  // needs.
+  ok("31.5c redundant brackets normalise away",
+     chipsOf("(label:A label:B) or has:email") === "label:A | AND label:B | OR has:email",
+     chipsOf("(label:A label:B) or has:email"));
+  ok("31.5d and only a query that will not parse is not a row",
      chipsFromQuery('city:"unclosed') === null);
+  ok("31.5e a group chip is recognisable as one, since its × takes everything inside it",
+     isGroup("(label:A or label:B)") && isGroup("-(label:A)") && !isGroup("has:email"));
 
   // Every query the language accepts must either round-trip exactly or be refused as a row.
   // Anything else is a chip that lies about the URL it stands for.
@@ -5432,6 +5477,8 @@ try {
     'city:="Sun Prairie"', "like:bob", 'like:"two words"', "semantic:healthcare",
     'semantic:"nurse hospital"~5', "-label:Work has:phone", "label:A or label:B",
     "a:1 b:2 or c:3 d:4", "org:TheStreet dept:Technology -has:email",
+    "(label:A or label:B) has:email", "-(label:A or label:B) has:phone",
+    "(-has:email or -has:phone) semantic:cars", "has:email (label:A or label:B)",
   ];
   const notStable = roundTrips.filter((q) => {
     const row = chipsFromQuery(q);
@@ -5478,24 +5525,76 @@ try {
   ok("31.9d text that will not parse is added as a plain chip rather than refused",
      chipsOf(combine("", 'unclosed"quote')).startsWith("like:"),
      chipsOf(combine("", 'unclosed"quote')));
-  ok("31.9e appending to a query the row cannot hold leaves it exactly as it was",
-     combine("(label:A or label:B) has:phone", "has:email") ===
-       "(label:A or label:B) has:phone has:email",
-     combine("(label:A or label:B) has:phone", "has:email"));
-  // The precedence, stated out loud rather than left to be discovered.
+  ok("31.9e appending to a row that already has a group leaves the group intact",
+     chipsOf(combine("(label:A or label:B) has:phone", "has:email")) ===
+       "(label:A or label:B) | AND has:phone | AND has:email",
+     chipsOf(combine("(label:A or label:B) has:phone", "has:email")));
+
+  // Adding to a row that contains an OR.
   //
-  // A row is a query, and in the query language AND binds tighter than OR — as it does in SQL
-  // and in every search box people already use. So a row reading `a OR b AND c` means
-  // `a OR (b AND c)`, and adding a chip to a row that contains an OR joins it to the LAST
-  // term rather than to the whole row. The first version of this check assumed the opposite
-  // and expected brackets to appear; asserting the compiled clause instead makes the real
-  // rule impossible to misread, and the help panel now says it in words.
-  ok("31.9f a chip added after an OR binds to the term before it, not to the whole row",
+  // AND binds tighter than OR, so appending `c` to `a or b` as text gives `a or (b and c)` —
+  // which is not what somebody adding a term to a row of two means. Now that a group is a
+  // chip, the honest answer is available: bracket the side that would be misread, so the
+  // meaning is the intended one AND the grouping is visible as a chip. An earlier version
+  // documented the surprising precedence instead, which was the best answer available before
+  // groups existed and is not any more.
+  ok("31.9f adding a term to a row containing an OR groups the OR rather than misreading it",
      sameWhere(combine("label:A or label:B", "has:email"),
-               "label:A or (label:B has:email)") &&
+               "(label:A or label:B) has:email") &&
        !sameWhere(combine("label:A or label:B", "has:email"),
-                  "(label:A or label:B) has:email"),
+                  "label:A or (label:B has:email)"),
      combine("label:A or label:B", "has:email"));
+  ok("31.9g and the row shows the group it made",
+     chipsOf(combine("label:A or label:B", "has:email")) ===
+       "(label:A or label:B) | AND has:email",
+     chipsOf(combine("label:A or label:B", "has:email")));
+  ok("31.9h an OR added onto a row needs no brackets, since nothing binds looser",
+     chipsOf(combine("label:A label:B", "or has:email")) ===
+       "label:A | AND label:B | OR has:email",
+     chipsOf(combine("label:A label:B", "or has:email")));
+
+  // Typing a connector as the first word says how to join. Without this the whole phrase
+  // failed to parse — "or" has nothing before it — and arrived as one like:"or -has:email"
+  // chip, which is how it was reported.
+  ok("31.9i typing “or -has:email” adds an OR chip, not a like: chip",
+     chipsOf(combine("has:phone", "or -has:email")) === "has:phone | OR -has:email",
+     chipsOf(combine("has:phone", "or -has:email")));
+  ok("31.9j and “and …” likewise, which is also the default",
+     chipsOf(combine("has:phone", "and -has:email")) === "has:phone | AND -has:email",
+     chipsOf(combine("has:phone", "and -has:email")));
+  ok("31.9k the connector is taken as a word, not as a prefix",
+     chipsOf(combine("has:phone", "organisation:Acme")) ===
+       "has:phone | AND organisation:Acme",
+     chipsOf(combine("has:phone", "organisation:Acme")));
+  ok("31.9l a connector on its own adds nothing",
+     combine("has:phone", "or") === "has:phone" && combine("has:phone", "  and  ") === "has:phone",
+     [combine("has:phone", "or"), combine("has:phone", "and")]);
+  ok("31.9m and a connector typed into an empty box is just a search for the word",
+     chipsOf(combine("", "or")) === "like:or", chipsOf(combine("", "or")));
+
+  // The reported case, end to end: a bracketed or beside a ranking is accepted, where the
+  // unbracketed version is refused — and the refusal now names the fix.
+  ok("31.9n a group makes semantic: usable with an or",
+     compileQuery("(-has:email or -has:phone) semantic:cars", qViewer, qDefs).semantic?.text ===
+       "cars",
+     compileQuery("(-has:email or -has:phone) semantic:cars", qViewer, qDefs).semantic);
+  ok("31.9o and the unbracketed version says to bracket it",
+     (() => {
+       try {
+         compileQuery("-has:email or -has:phone semantic:cars", qViewer, qDefs);
+         return false;
+       } catch (err) {
+         return /bracket it: \(a or b\) semantic:cars/.test((err as Error).message);
+       }
+     })(),
+     (() => {
+       try {
+         compileQuery("-has:email or -has:phone semantic:cars", qViewer, qDefs);
+         return "accepted";
+       } catch (err) {
+         return (err as Error).message;
+       }
+     })());
 
   // The chips have to mean the same thing to the COMPILER as the query they came from, or the
   // row would be a display that quietly filters differently.

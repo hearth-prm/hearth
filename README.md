@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 719 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 734 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -63,7 +63,7 @@ built — [sticky shares](docs/design-sticky-shares.md), where a label carries s
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 719 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 734 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -734,7 +734,9 @@ about:woodworking                       about: and means: are the same predicate
 It **ranks**; it does not filter, and it is one predicate inside the language rather than the
 whole search. That is a consequence of what an embedding is: there is no mechanism in a cosine
 distance for *not* similar, so `-semantic:x` and `label:A or semantic:x` are refused rather than
-given a meaning nobody asked for. Combine it with the ordinary predicates instead — those do
+given a meaning nobody asked for. Because AND binds tighter than OR,
+`-has:email or -has:phone semantic:cars` puts the ranking inside the `or` and is refused too —
+bracket it, `(-has:email or -has:phone) semantic:cars`, which is what the message tells you. Combine it with the ordinary predicates instead — those do
 negation and grouping properly, and the ranking then happens inside what they left.
 
 What gets indexed is the text that describes a contact: organisation, job title, department,
@@ -791,10 +793,19 @@ Each chip's × removes just that term. The chips *are* the query string — edit
 `q` — so a filtered list stays a URL you can bookmark, share with yourself and hit Back out of
 one step at a time.
 
-**AND binds tighter than OR**, as it does in SQL and in every other search box: a row reading
-`a OR b AND c` means `a OR (b AND c)`, and a chip added after an OR joins the term before it
-rather than the whole row. Type brackets yourself if you want the other grouping — a bracketed
-query is kept whole, as a single chip, rather than taken apart wrongly.
+Typing a connector first says how to join: with a chip already in place, `or -has:email` adds
+an OR and then the term, rather than searching for the phrase.
+
+**Brackets group, and a group is a chip.** `(-has:email or -has:phone) semantic:cars` is two
+chips — the group, and the ranking — so order of operations is something you can see and remove.
+Brackets show up in a chip only when they are load-bearing; `(a b) or c` means the same thing
+without them and comes back as three ordinary chips. What is inside a group is not editable from
+the row: its × removes the whole group, and changing the inside means retyping it.
+
+**AND binds tighter than OR**, as in SQL. That matters when you add to a row that already has an
+OR: `a OR b` plus `has:email` would otherwise mean `a OR (b AND has:email)`, so Hearth brackets
+the OR for you and shows the group it made — `(a or b) AND has:email`, which is what adding a
+term to a row of two means.
 
 #### Saved filters
 
