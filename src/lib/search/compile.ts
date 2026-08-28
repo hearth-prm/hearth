@@ -234,6 +234,14 @@ function compileTerm(
     );
   }
 
+  // The bare-word search, spelled out.
+  //
+  // Exists so a chip can say what the URL says: a word with no field prints as `like:bob`,
+  // and a chip whose label differs from the query it stands for is the bug the chip row is
+  // built to avoid. Typing it by hand does the same thing a bare word does.
+  if (field === "like" || field === "text" || field === "anywhere") {
+    return anywhereClause(value);
+  }
   if (field === "label") {
     return { labels: { some: { label: { name: text(value, term.op) } } } };
   }
@@ -363,6 +371,7 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
     "has",
     "google",
     "is",
+    "like",
     ...SEMANTIC_FIELDS,
     ...Object.keys(DATES),
     // The offered spelling of each, not every alias: `surname` still works, but a list
@@ -388,6 +397,7 @@ export function searchVocabulary(
     has: "something a contact does or does not have",
     google: "how it stands with Google",
     is: "how it relates to you",
+    like: "anywhere a bare word would look",
     ...Object.fromEntries(
       SEMANTIC_FIELDS.map((k) => [k, "what a contact is about, ranked by meaning"]),
     ),

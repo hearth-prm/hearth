@@ -6,11 +6,15 @@ import { formatFieldValue } from "@/lib/fields/format";
 import { readFieldValue } from "@/lib/fields/values";
 import { primaryEmail } from "@/lib/people";
 import {
+  describeFilter,
+  filterSearch,
   isFilterActive,
   NON_FILTER_PARAMS,
   parseFilter,
+  rawParamsFromSearch,
   type RawParams,
 } from "@/lib/people-filter";
+import { deleteSavedFilter, saveFilter } from "@/lib/actions/saved-filters";
 import { resolvePeopleQuery } from "@/lib/search/resolve";
 import {
   btnPrimary,
@@ -50,13 +54,18 @@ export default async function PeoplePage({
   const params = await searchParams;
   const filter = parseFilter(params);
 
-  const [defs, settings, shareableUsers, viewer] = await Promise.all([
+  const [defs, settings, shareableUsers, viewer, saved] = await Promise.all([
     loadRegistry(user.id, "PERSON"),
     getUserSettings(user.id),
     listOtherUsers(user.id),
     // Alongside the others rather than before them: the extra query for "am I the head of
     // the household" costs nothing when it is one of four in flight at once.
     loadViewer(user.id),
+    prisma.savedFilter.findMany({
+      where: { ownerId: user.id },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, search: true },
+    }),
   ]);
 
   // After the registry, because a custom field's name is only queryable once its definition
@@ -117,6 +126,15 @@ export default async function PeoplePage({
   }
 
   const labels = labelRows.map(({ _count, ...l }) => ({ ...l, count: _count.people }));
+  const labelNames = new Map(labelRows.map((l) => [l.id, l.name] as const));
+  // Described here rather than in the component: turning a stored search into words needs
+  // parseFilter and the label names, and the menu should not be parsing URLs.
+  const savedFilters = saved.map((sf) => ({
+    id: sf.id,
+    name: sf.name,
+    search: sf.search,
+    description: describeFilter(parseFilter(rawParamsFromSearch(sf.search)), labelNames),
+  }));
   // One query for the page rather than one per row: the effective photo depends on the
   // viewer, so it cannot be included in the person query itself.
   const photos = await effectivePhotoMap(people, user.id);
@@ -168,6 +186,10 @@ export default async function PeoplePage({
         // Passed only when a model is configured, so an install without one shows no button
         // rather than a button that always fails. Same shape as the Places provider.
         interpret={naturalLanguageConfigured() ? interpretSearch : undefined}
+        savedFilters={savedFilters}
+        currentSearch={filterSearch(filter)}
+        saveFilter={saveFilter}
+        deleteSavedFilter={deleteSavedFilter}
       />
 
       {/* A query that cannot be read narrows to nothing rather than widening to everything,

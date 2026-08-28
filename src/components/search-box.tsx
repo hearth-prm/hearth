@@ -8,6 +8,7 @@ import {
   type Vocabulary,
 } from "@/lib/search/suggest";
 import type { Translation } from "@/lib/search/nl";
+import { combineQuery } from "@/lib/search/chips";
 
 /**
  * The search input, with completion for the query language.
@@ -17,19 +18,24 @@ import type { Translation } from "@/lib/search/nl";
  * one input on one page rather than two hundred rows, so the cost of controlling it is
  * nothing.
  *
- * Still a plain GET form around it. Accepting a suggestion edits the box; submitting is the
- * same navigation it always was, so a query stays a URL you can bookmark and hit Back out of.
+ * Still a plain GET form around it, and the form does not submit this input at all: it submits
+ * a HIDDEN one carrying `existing` plus whatever has been typed. That is what makes Enter
+ * ADD to the chips rather than replace them, and it does so without JavaScript — the hidden
+ * value is recomputed on every keystroke, so the browser's own submit appends exactly the way
+ * the visible interaction does. The box then comes back empty because a GET submit is a real
+ * navigation and this component remounts.
  */
 export function SearchBox({
   name,
-  defaultValue,
+  existing,
   placeholder,
   vocab,
   className,
   interpret,
 }: {
   name: string;
-  defaultValue: string;
+  /** The query the chips already stand for. What is typed is added to it, never instead of it. */
+  existing: string;
   placeholder: string;
   vocab: Vocabulary;
   className?: string;
@@ -40,7 +46,8 @@ export function SearchBox({
   interpret?: (prev: Translation, form: FormData) => Promise<Translation>;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(defaultValue);
+  // Always starts empty: what the box holds is the term being ADDED, not the query in force.
+  const [value, setValue] = useState("");
   const [result, setResult] = useState<SuggestResult>({ from: 0, to: 0, items: [] });
   const [active, setActive] = useState(0);
   const [open, setOpen] = useState(false);
@@ -86,12 +93,13 @@ export function SearchBox({
 
   return (
     <div className="relative min-w-32 flex-1">
+      {/* What the form submits. Never the visible input, which has no name on purpose. */}
+      <input type="hidden" name={name} value={combineQuery(existing, value)} />
       <input
         ref={input}
         // Not type="search": the browser's own clear button and history dropdown both fight
         // the suggestion list for the same corner and the same Escape key.
         type="text"
-        name={name}
         value={value}
         placeholder={placeholder}
         aria-label="Search people"

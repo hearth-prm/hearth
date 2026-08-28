@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 586 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 719 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -63,7 +63,7 @@ built — [sticky shares](docs/design-sticky-shares.md), where a label carries s
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 686 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 719 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -779,6 +779,33 @@ in the box, and the panel under it lists them.
 The box completes as you type — `ci` offers `city:`, `label:` offers your own label names —
 and a panel under it lists every key with an example, for when you do not yet know there is
 anything to complete.
+
+#### Chips, not a text box
+
+Pressing Enter turns what you typed into **chips**, one per term, and empties the box ready for
+the next one. `-has:email -has:phone` becomes two chips with an **AND** between them; the AND is
+a small dropdown you can change to **OR**. A bare word becomes a `like:bob` chip, because that
+is a real predicate and a chip should say exactly what the URL says.
+
+Each chip's × removes just that term. The chips *are* the query string — editing one rewrites
+`q` — so a filtered list stays a URL you can bookmark, share with yourself and hit Back out of
+one step at a time.
+
+**AND binds tighter than OR**, as it does in SQL and in every other search box: a row reading
+`a OR b AND c` means `a OR (b AND c)`, and a chip added after an OR joins the term before it
+rather than the whole row. Type brackets yourself if you want the other grouping — a bracketed
+query is kept whole, as a single chip, rather than taken apart wrongly.
+
+#### Saved filters
+
+The button to the right of the box holds your **saved filters**. Build a filter with the chips,
+give it a name, and it is one click away afterwards; the hover text shows what it actually
+filters, so a name you no longer remember is not a mystery. Selecting one replaces the current
+chips.
+
+What is stored is the URL, not a parsed copy of it — so whatever the search language grows next,
+a saved filter restores it without a migration. They are private to you: a filter can mention a
+label id that means nothing in anybody else's account.
 
 #### Asking in words
 

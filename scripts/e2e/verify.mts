@@ -390,69 +390,130 @@ try {
 
   // Search must carry the active filters through, which is what the hidden inputs do.
   await A.page.goto(`/people?label=${family.id}`);
-  await A.page.fill('input[name="q"]', "Onlyfam");
-  await A.page.press('input[name="q"]', "Enter");
-  await A.page.waitForURL(/q=Onlyfam/, { timeout: 15_000 });
+  await A.page.fill('input[aria-label="Search people"]', "Onlyfam");
+  await A.page.press('input[aria-label="Search people"]', "Enter");
+  // like:Onlyfam, not Onlyfam: a bare word commits as the predicate that a bare word already
+  // meant, so the chip standing for it can say exactly what the URL says.
+  await A.page.waitForURL(/q=like%3AOnlyfam/, { timeout: 15_000 });
   ok("4.12 searching keeps the label filter", A.page.url().includes(`label=${family.id}`), A.page.url());
   ok("4.12b and narrows within it",
      (await A.page.$$eval("tbody tr", (e) => e.length)) === 1);
 
   ok("4.13 filters compose", (await rows(`?rel=mine&label=${family.id}&has=phone`)).length === 1);
 
-  // The filter controls live behind a menu now, so each one needs it opened first.
-  // A native <details>, so this needs no hydration wait. Idempotent because the menu
-  // survives a filter click: Next's soft navigation keeps the same <details> node, and
-  // React does not control its `open` property, so it stays open while you pick
-  // several filters. Clicking blindly would toggle it shut.
+  // The menu holds SAVED filters now, not filter controls: everything it used to offer is a
+  // predicate in the language, and the chips are how a filter is built. A native <details>,
+  // so opening it needs no hydration wait.
+  //
+  // Asked of the <details> element's own `open` property rather than of any text inside it: the
+  // menu's contents change with what is saved, so every text probe was either ambiguous
+  // ("Saved filters" and "Save this filter as" both contain "filter") or absent (a placeholder
+  // is an attribute, not text). Clicking blindly would toggle an already-open menu shut.
   const openMenu = async () => {
-    if (await A.page.isVisible("text=Who")) return;
-    await A.page.click('summary:has-text("Filter")');
-    await A.page.waitForSelector("text=Who", { timeout: 10_000 });
+    const isOpen = await A.page.$eval(
+      'summary:has-text("Saved")',
+      (el) => (el.parentElement as HTMLDetailsElement).open,
+    );
+    if (!isOpen) await A.page.click('summary:has-text("Saved")');
+    await A.page.waitForSelector("[data-saved-menu]", { state: "visible", timeout: 10_000 });
   };
 
   await A.page.goto("/people");
-  // Hidden, not absent: <details> keeps its content in the DOM when closed, which is
-  // what lets it work before hydration and be found by the browser's find-in-page.
-  ok("4.14 the filter controls are hidden until asked for",
-     !(await A.page.isVisible('a:has-text("Mine, not shared")')));
+  ok("4.14 the menu is hidden until asked for",
+     !(await A.page.isVisible('input[placeholder="Save this filter as…"]')));
   await openMenu();
   const menuText = (await A.page.textContent("body")) ?? "";
-  ok("4.14a the menu offers every group",
-     ["Who", "Google", "Details", "Labels"].every((g) => menuText.includes(g)),
-     ["Who", "Google", "Details", "Labels"].filter((g) => !menuText.includes(g)));
+  ok("4.14a with nothing saved it says so, rather than showing an empty box",
+     menuText.includes("No saved filters yet"), menuText.slice(0, 0) || menuText.includes("No saved filters yet"));
+  ok("4.14a2 and an unfiltered list has nothing to save",
+     menuText.includes("Filter the list first"));
 
-  await A.page.click('a:has-text("Mine, not shared")');
-  await A.page.waitForURL(/rel=private/, { timeout: 15_000 });
-  ok("4.14a2 the menu stays open so several filters can be picked in a row",
-     await A.page.isVisible("text=Who"));
-  await openMenu();
-  await A.page.click('a:has-text("Has an email")');
-  await A.page.waitForURL(/has=email/, { timeout: 15_000 });
-  ok("4.14b two filters both present",
-     A.page.url().includes("rel=private") && A.page.url().includes("has=email"), A.page.url());
-  await A.page.goBack();
-  ok("4.14c Back removes only the last one",
-     A.page.url().includes("rel=private") && !A.page.url().includes("has=email"), A.page.url());
-
-  // Chips: the selected filters show inside the search control and are removable.
-  await A.page.goto(`/people?q=Sam&rel=mine&label=${family.id}`);
+  // Chips: every term of the query is its own chip, and so is each URL-parameter filter.
+  await A.page.goto(`/people?q=-has%3Aemail%20-has%3Aphone&rel=mine&label=${family.id}`);
   const chipText = (await A.page.textContent('form[role="search"]')) ?? "";
-  ok("4.14d active filters appear as chips in the search box",
-     chipText.includes("Sam") && chipText.includes("Mine") && chipText.includes("Family"), chipText);
-  ok("4.14e the Filter control shows how many are active",
-     (await A.page.textContent('summary:has-text("Filter")'))?.includes("3") === true,
-     await A.page.textContent('summary:has-text("Filter")'));
+  ok("4.14d each term of the query is its own chip",
+     chipText.includes("-has:email") && chipText.includes("-has:phone") &&
+       chipText.includes("Mine") && chipText.includes("Family"),
+     chipText);
+  ok("4.14e joined by an AND that can be changed",
+     (await A.page.$$('button[title="Change how these two are joined"]')).length === 1,
+     await A.page.textContent('form[role="search"]'));
 
-  await A.page.click(`form[role="search"] a[title="Remove filter: Family"]`);
+  await A.page.click('form[role="search"] a[title="Remove: -has:phone"]');
+  await A.page.waitForURL((u) => !(u.searchParams.get("q") ?? "").includes("phone"), { timeout: 15_000 });
+  ok("4.14f removing one term leaves the others alone",
+     (A.page.url().includes("q=-has%3Aemail") || A.page.url().includes("q=-has:email")) &&
+       A.page.url().includes("rel=mine") && A.page.url().includes("label="),
+     A.page.url());
+
+  await A.page.click('form[role="search"] a[title="Remove filter: Family"]');
   await A.page.waitForURL((u) => !u.searchParams.has("label"), { timeout: 15_000 });
-  ok("4.14f a chip's × removes just that filter",
-     A.page.url().includes("q=Sam") && A.page.url().includes("rel=mine") &&
-     !A.page.url().includes("label="), A.page.url());
+  ok("4.14g and removing a label chip does not take the query with it",
+     A.page.url().includes("q=") && A.page.url().includes("rel=mine") &&
+       !A.page.url().includes("label="),
+     A.page.url());
 
-  await A.page.click(`form[role="search"] a[title*="Remove filter"]`);
-  await A.page.waitForURL(/people/, { timeout: 15_000 });
-  ok("4.14g chips can be removed down to none",
-     (await A.page.$$('form[role="search"] a[title*="Remove filter"]')).length <= 2);
+  // Typing adds to the row rather than replacing it, which is the whole interaction.
+  await A.page.goto("/people?q=-has%3Aemail");
+  await A.page.fill('input[aria-label="Search people"]', "-has:phone");
+  // The first Enter accepts the highlighted suggestion — `phone` is one of the has: values, so
+  // the list is open. That is the box's existing contract and it did not change: Enter commits
+  // only when there is nothing to complete. Asserted rather than stepped around, because
+  // pressing Escape first would test a path nobody takes.
+  await A.page.press('input[aria-label="Search people"]', "Enter");
+  ok("4.14g2 the first Enter completes the term rather than committing it",
+     (await A.page.inputValue('input[aria-label="Search people"]')).trim() === "-has:phone" &&
+       !A.page.url().includes("phone"),
+     await A.page.inputValue('input[aria-label="Search people"]'));
+  await A.page.press('input[aria-label="Search people"]', "Enter");
+  await A.page.waitForURL((u) => (u.searchParams.get("q") ?? "").includes("phone"), { timeout: 15_000 });
+  ok("4.14h Enter adds a chip rather than replacing the row",
+     (A.page.url().includes("-has%3Aemail") || A.page.url().includes("-has:email")) &&
+       (A.page.url().includes("-has%3Aphone") || A.page.url().includes("-has:phone")),
+     A.page.url());
+  ok("4.14i and the box is empty afterwards, ready for the next one",
+     (await A.page.inputValue('input[aria-label="Search people"]')) === "",
+     await A.page.inputValue('input[aria-label="Search people"]'));
+
+  // Flipping a connector rewrites the query, so the two chips now mean "either".
+  await A.page.click('button[title="Change how these two are joined"]');
+  await A.page.click('a:text-is("or")');
+  await A.page.waitForURL((u) => (u.searchParams.get("q") ?? "").includes("or"), { timeout: 15_000 });
+  const eitherRows = await A.page.$$eval("tbody tr", (e) => e.length);
+  ok("4.14j changing AND to OR widens the result rather than narrowing it",
+     eitherRows >= 3, [eitherRows, A.page.url()]);
+
+  // Saving is the URL, which is what makes it survive whatever the language grows next.
+  await openMenu();
+  await A.page.fill('input[placeholder="Save this filter as…"]', "Missing details");
+  await A.page.click('button:text-is("Save")');
+  // Waited for inside the menu and by NAME. The first version waited for
+  // `a[title*="has:email"]`, which matched a chip's own "Remove: -has:email" title
+  // immediately — so the assertion ran while the save was still in flight.
+  await A.page.waitForSelector('[data-saved-menu] a:text-is("Missing details")', {
+    timeout: 15_000,
+  });
+  ok("4.14k a saved filter is listed by name",
+     (await A.page.$$('[data-saved-menu] a:text-is("Missing details")')).length === 1,
+     await A.page.textContent("[data-saved-menu]"));
+  ok("4.14l with the filter itself as its hover text",
+     ((await A.page.getAttribute('a:text-is("Missing details")', "title")) ?? "")
+       .includes("-has:email"),
+     await A.page.getAttribute('a:text-is("Missing details")', "title"));
+
+  await A.page.goto("/people");
+  await openMenu();
+  await A.page.click('[data-saved-menu] a:text-is("Missing details")');
+  await A.page.waitForURL((u) => u.searchParams.has("q"), { timeout: 15_000 });
+  ok("4.14m and selecting it replaces the chipset",
+     ((await A.page.textContent('form[role="search"]')) ?? "").includes("-has:email"),
+     await A.page.textContent('form[role="search"]'));
+
+  await openMenu();
+  await A.page.click('[data-saved-menu] form button:text-is("×")');
+  await A.page.waitForSelector("text=No saved filters yet", { timeout: 15_000 });
+  ok("4.14n a saved filter can be removed",
+     (await prisma.savedFilter.count({ where: { ownerId: A.id } })) === 0);
 
   ok("4.15 a filter URL is portable", (await rows(`?label=${family.id}`)).length === 2);
 
@@ -4395,8 +4456,8 @@ try {
 
   // --- and through the browser ---------------------------------------------
   await A.page.goto("/people");
-  await A.page.fill('input[name="q"]', "");
-  await A.page.type('input[name="q"]', "ci");
+  await A.page.fill('input[aria-label="Search people"]', "");
+  await A.page.type('input[aria-label="Search people"]', "ci");
   await A.page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 10_000 });
   const sOffered = await A.page.$$eval('[role="listbox"] [role="option"]', (os) =>
     os.map((o) => o.textContent?.trim() ?? ""));
@@ -4405,19 +4466,21 @@ try {
 
   await A.page.keyboard.press("Enter");
   ok("27.10b Enter accepts the highlighted one rather than submitting",
-     (await A.page.inputValue('input[name="q"]')) === "city:"
+     (await A.page.inputValue('input[aria-label="Search people"]')) === "city:"
        && new URL(A.page.url()).searchParams.get("q") === null,
-     { value: await A.page.inputValue('input[name="q"]'), url: A.page.url() });
+     { value: await A.page.inputValue('input[aria-label="Search people"]'), url: A.page.url() });
 
   // Escape then Enter has to be the way to search for exactly what was typed.
-  await A.page.fill('input[name="q"]', "");
-  await A.page.type('input[name="q"]', "lab");
+  await A.page.fill('input[aria-label="Search people"]', "");
+  await A.page.type('input[aria-label="Search people"]', "lab");
   await A.page.waitForSelector('[role="listbox"]', { timeout: 10_000 });
   await A.page.keyboard.press("Escape");
   await A.page.keyboard.press("Enter");
   await A.page.waitForURL(/[?&]q=lab/, { timeout: 10_000 }).catch(() => {});
   ok("27.11 Escape then Enter searches for what was typed",
-     new URL(A.page.url()).searchParams.get("q") === "lab", A.page.url());
+     // like:lab rather than lab: committing a bare word writes the predicate a bare word
+     // already meant, so the chip standing for it says exactly what the URL says.
+     new URL(A.page.url()).searchParams.get("q") === "like:lab", A.page.url());
 
   await A.page.goto("/people");
   await A.page.click("summary:has-text(\"What can I search for?\")");
@@ -4521,23 +4584,23 @@ try {
     body: JSON.stringify({ response: JSON.stringify({ query: "label:Family -has:email" }) }),
   };
   await A.page.goto("/people");
-  await A.page.fill('input[name="q"]', "family with no email");
+  await A.page.fill('input[aria-label="Search people"]', "family with no email");
   await A.page.click('button:text-is("ask")');
   await A.page.waitForFunction(
-    () => (document.querySelector('input[name="q"]') as HTMLInputElement | null)?.value
+    () => (document.querySelector('input[aria-label="Search people"]') as HTMLInputElement | null)?.value
       === "label:Family -has:email",
     undefined, { timeout: 20_000 },
   ).catch(() => {});
   ok("28.9 the button writes the query INTO the box rather than searching",
-     (await A.page.inputValue('input[name="q"]')) === "label:Family -has:email"
+     (await A.page.inputValue('input[aria-label="Search people"]')) === "label:Family -has:email"
        && new URL(A.page.url()).searchParams.get("q") === null,
-     { value: await A.page.inputValue('input[name="q"]'), url: A.page.url() });
+     { value: await A.page.inputValue('input[aria-label="Search people"]'), url: A.page.url() });
   ok("28.9b and says what it read, so a misunderstanding is visible",
      ((await A.page.textContent("body")) ?? "").includes("family with no email"));
 
   // Then Enter searches, which is the ordinary path — the model has not run anything.
   await A.page.keyboard.press("Escape");
-  await A.page.focus('input[name="q"]');
+  await A.page.focus('input[aria-label="Search people"]');
   await A.page.keyboard.press("Enter");
   await A.page.waitForURL(/[?&]q=/, { timeout: 10_000 }).catch(() => {});
   ok("28.10 pressing Enter afterwards searches for the query it wrote",
@@ -4547,7 +4610,7 @@ try {
   // A failure has to leave the ordinary search working rather than breaking the page.
   ollamaReply = { status: 500, body: "boom" };
   await A.page.goto("/people");
-  await A.page.fill('input[name="q"]', "anything at all");
+  await A.page.fill('input[aria-label="Search people"]', "anything at all");
   await A.page.click('button:text-is("ask")');
   await A.page.waitForFunction(
     () => (document.body.textContent ?? "").includes("answered with 500"),
@@ -4555,8 +4618,8 @@ try {
   ).catch(() => {});
   ok("28.11 a model that fails says so and leaves the box alone",
      ((await A.page.textContent("body")) ?? "").includes("answered with 500")
-       && (await A.page.inputValue('input[name="q"]')) === "anything at all",
-     await A.page.inputValue('input[name="q"]'));
+       && (await A.page.inputValue('input[aria-label="Search people"]')) === "anything at all",
+     await A.page.inputValue('input[aria-label="Search people"]'));
 
   fakeOllama.close();
 
@@ -5302,6 +5365,148 @@ try {
   await prisma.person.deleteMany({
     where: { id: { in: [semNurse.id, semDev.id, semBlank.id, semPrivate.id] } },
   });
+
+  section("§31 The chip row")
+
+  // The chips ARE the query string: there is no separate state, so every edit is a re-print of
+  // the whole row back into `q`. That is what keeps a filtered list a URL you can bookmark and
+  // hit Back out of — and it is why the round trip has to be exact rather than approximately
+  // right, which is what this section is for.
+  const {
+    chipsFromQuery,
+    queryFromChips,
+    appendTyped,
+    removeChip: dropChip,
+    setConnector: joinWith,
+    combineQuery: combine,
+  } = await import("@/lib/search/chips");
+
+  const sameWhere = (a: string, b: string) =>
+    JSON.stringify(compileQuery(a, qViewer, qDefs).where) ===
+    JSON.stringify(compileQuery(b, qViewer, qDefs).where);
+
+  const chipsOf = (q: string): string => {
+    const row = chipsFromQuery(q);
+    if (!row) return "NOT A ROW";
+    return row.chips
+      .map((c, i) => (i === 0 ? c : `${row.connectors[i - 1]!.toUpperCase()} ${c}`))
+      .join(" | ");
+  };
+
+  ok("31.1 one term is one chip", chipsOf("has:email") === "has:email", chipsOf("has:email"));
+  ok("31.1b two terms are two chips joined by AND",
+     chipsOf("-has:email -has:phone") === "-has:email | AND -has:phone",
+     chipsOf("-has:email -has:phone"));
+  ok("31.1c an or in the query is an OR between the chips",
+     chipsOf("label:Family or label:Work") === "label:Family | OR label:Work",
+     chipsOf("label:Family or label:Work"));
+  ok("31.1d and the two mix in the ordinary way",
+     chipsOf("a:1 b:2 or c:3") === "a:1 | AND b:2 | OR c:3", chipsOf("a:1 b:2 or c:3"));
+  // A bare word prints as the predicate it always meant. `like:` is a real field for exactly
+  // this reason: a chip that says one thing while the URL says another is the bug the row is
+  // built to avoid.
+  ok("31.2 a bare word becomes a like: chip", chipsOf("bob") === "like:bob", chipsOf("bob"));
+  ok("31.2b a phrase keeps its quotes, or it would come back as two terms",
+     chipsOf('"sun prairie"') === 'like:"sun prairie"', chipsOf('"sun prairie"'));
+  ok("31.2c and a value with a space in it likewise",
+     chipsOf('city:"Sun Prairie"') === 'city:"Sun Prairie"', chipsOf('city:"Sun Prairie"'));
+  ok("31.3 comparisons survive the round trip",
+     chipsOf("updated:>30d") === "updated:>30d" && chipsOf('city:="Sun Prairie"') === 'city:="Sun Prairie"',
+     [chipsOf("updated:>30d"), chipsOf('city:="Sun Prairie"')]);
+  ok("31.4 an empty query is an empty row, not a failure",
+     chipsFromQuery("")?.chips.length === 0 && chipsFromQuery("   ")?.chips.length === 0);
+
+  // Brackets have a shape a flat row cannot hold. Saying so beats taking them apart wrongly:
+  // dropping the brackets would change what somebody's bookmark means.
+  ok("31.5 a bracketed query is not a row",
+     chipsFromQuery("(label:A or label:B) has:email") === null,
+     chipsOf("(label:A or label:B) has:email"));
+  ok("31.5b nor is a negated group", chipsFromQuery("-(label:A or label:B)") === null);
+  ok("31.5c nor is a query that does not parse at all",
+     chipsFromQuery('city:"unclosed') === null);
+
+  // Every query the language accepts must either round-trip exactly or be refused as a row.
+  // Anything else is a chip that lies about the URL it stands for.
+  const roundTrips = [
+    "has:email", "-has:email", "label:Family", 'city:"Sun Prairie"', "updated:>30d",
+    'city:="Sun Prairie"', "like:bob", 'like:"two words"', "semantic:healthcare",
+    'semantic:"nurse hospital"~5', "-label:Work has:phone", "label:A or label:B",
+    "a:1 b:2 or c:3 d:4", "org:TheStreet dept:Technology -has:email",
+  ];
+  const notStable = roundTrips.filter((q) => {
+    const row = chipsFromQuery(q);
+    if (!row) return true;
+    const printed = queryFromChips(row);
+    // Re-chipping the printed form must give the same chips, which is the property that
+    // matters: the printed string may normalise spacing, but it must not change meaning.
+    return chipsOf(printed) !== chipsOf(q);
+  });
+  ok(`31.6 all ${roundTrips.length} query forms survive being printed and re-read`,
+     notStable.length === 0, notStable);
+
+  // --- editing ---------------------------------------------------------------
+
+  const row2 = chipsFromQuery("-has:email -has:phone")!;
+  ok("31.7 removing the second chip takes its AND with it",
+     queryFromChips(dropChip(row2, 1)) === "-has:email", queryFromChips(dropChip(row2, 1)));
+  ok("31.7b removing the FIRST chip takes the connector that would be left dangling",
+     queryFromChips(dropChip(row2, 0)) === "-has:phone", queryFromChips(dropChip(row2, 0)));
+  const row3 = chipsFromQuery("a:1 b:2 or c:3")!;
+  ok("31.7c removing a middle chip keeps the rest joined as they were",
+     chipsOf(queryFromChips(dropChip(row3, 1))) === "a:1 | OR c:3",
+     chipsOf(queryFromChips(dropChip(row3, 1))));
+  ok("31.7d removing something that is not there changes nothing",
+     queryFromChips(dropChip(row2, 9)) === queryFromChips(row2));
+
+  ok("31.8 a connector can be flipped to or",
+     queryFromChips(joinWith(row2, 0, "or")) === "-has:email or -has:phone",
+     queryFromChips(joinWith(row2, 0, "or")));
+  ok("31.8b and back again",
+     queryFromChips(joinWith(joinWith(row2, 0, "or"), 0, "and")) === "-has:email -has:phone");
+
+  // Typing several terms and pressing Enter once gives several chips. That is the point of the
+  // interaction: what comes back is the thing you can then take apart.
+  ok("31.9 typed text is parsed, so one Enter can add two chips",
+     chipsOf(combine("", "-has:email -has:phone")) === "-has:email | AND -has:phone",
+     chipsOf(combine("", "-has:email -has:phone")));
+  ok("31.9b and adds to the right of what is already there",
+     chipsOf(combine("label:Family", "bob")) === "label:Family | AND like:bob",
+     chipsOf(combine("label:Family", "bob")));
+  ok("31.9c nothing typed changes nothing",
+     combine("label:Family", "   ") === "label:Family");
+  // Refusing unparseable text would leave somebody with a box they cannot empty.
+  ok("31.9d text that will not parse is added as a plain chip rather than refused",
+     chipsOf(combine("", 'unclosed"quote')).startsWith("like:"),
+     chipsOf(combine("", 'unclosed"quote')));
+  ok("31.9e appending to a query the row cannot hold leaves it exactly as it was",
+     combine("(label:A or label:B) has:phone", "has:email") ===
+       "(label:A or label:B) has:phone has:email",
+     combine("(label:A or label:B) has:phone", "has:email"));
+  // The precedence, stated out loud rather than left to be discovered.
+  //
+  // A row is a query, and in the query language AND binds tighter than OR — as it does in SQL
+  // and in every search box people already use. So a row reading `a OR b AND c` means
+  // `a OR (b AND c)`, and adding a chip to a row that contains an OR joins it to the LAST
+  // term rather than to the whole row. The first version of this check assumed the opposite
+  // and expected brackets to appear; asserting the compiled clause instead makes the real
+  // rule impossible to misread, and the help panel now says it in words.
+  ok("31.9f a chip added after an OR binds to the term before it, not to the whole row",
+     sameWhere(combine("label:A or label:B", "has:email"),
+               "label:A or (label:B has:email)") &&
+       !sameWhere(combine("label:A or label:B", "has:email"),
+                  "(label:A or label:B) has:email"),
+     combine("label:A or label:B", "has:email"));
+
+  // The chips have to mean the same thing to the COMPILER as the query they came from, or the
+  // row would be a display that quietly filters differently.
+  const meaningChanged = roundTrips.filter((q) => {
+    const row = chipsFromQuery(q);
+    return row !== null && !sameWhere(q, queryFromChips(row));
+  });
+  ok("31.10 and compile to exactly the same where-clause as before they were chipped",
+     meaningChanged.length === 0, meaningChanged);
+  ok("31.10b like:bob and a bare bob are the same search",
+     sameWhere("bob", "like:bob"));
 
   section("§22 On a phone");
 

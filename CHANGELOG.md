@@ -28,6 +28,48 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **The search box is a row of chips.** Enter turns what you typed into one chip per term and
+  empties the box, so `-has:email -has:phone` becomes two chips rather than one opaque phrase —
+  and the next thing you type is added to the right instead of replacing what is there.
+  - Between chips sits an **AND** you can change to **OR** from a small dropdown.
+  - A bare word commits as `like:bob`, and `like:` is now a real predicate rather than a
+    display convention. A chip whose label differs from the query it stands for is exactly the
+    bug this row is built to avoid, so the round trip has to be exact.
+  - Each × removes just that term. The chips *are* the query string — every edit re-prints the
+    whole row into `q` — which is what keeps a filtered list a bookmarkable URL. A chip row held
+    in component state would look identical and be none of those things.
+  - **AND binds tighter than OR**, as in SQL, so a row reading `a OR b AND c` means
+    `a OR (b AND c)` and a chip added after an OR joins the term before it. That was found by a
+    test asserting the opposite: the honest fix was to state the rule in the help panel and
+    assert the compiled clause, rather than silently inserting brackets somebody did not ask
+    for. A genuinely bracketed query is kept whole as one chip rather than taken apart wrongly.
+- **Saved filters.** Name the filter you are looking at and it is one click away afterwards, with
+  the filter itself as the hover text so a name you no longer remember is not a mystery.
+  Selecting one replaces the current chips.
+  - What is stored is the **URL search string**, not a parsed copy: a filter is "the list I was
+    looking at", so whatever the language grows next is already covered without a migration and
+    without a second parser to keep in step with the first. A column per filter dimension would
+    have needed altering for each of the last four phases.
+  - Saving twice under one name replaces rather than accumulating — the menu is a list of names,
+    and two rows called "Christmas cards" would be indistinguishable. Private per user, since a
+    filter can name a label id that means nothing in anybody else's account.
+
+### Changed
+
+- **The Filter menu is now the saved-filter menu.** Everything it used to offer — Who, Google,
+  Details, Labels — is a predicate in the query language and belongs in the chips. The URL
+  parameters those controls set still work, so an old bookmark or a saved filter carrying them
+  still opens and their chips are still removable; nothing new produces them.
+- The chip row and the Filter menu's Details section already shared one definition; the query
+  `q` was the last thing rendered as a single pill and is now the row itself.
+
+### Fixed
+
+- Removing a label chip would have cleared the search along with it. `activePills` builds each
+  pill's remove-link from the filter it is handed, and suppressing the old query pill by passing
+  a blanked `q` meant every other pill's link dropped the query too. Caught before it shipped,
+  and the fix was to delete the pill rather than blank the filter.
+
 - **`semantic:` — searching by meaning.** `semantic:healthcare` finds the contact whose job says
   *Registered Nurse at UW Health*, which nothing else in the box can do. Each contact's
   descriptive text becomes a vector through a local embedding model, the query becomes one too,

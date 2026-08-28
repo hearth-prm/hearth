@@ -54,6 +54,7 @@ model User {
   fieldMappings     FieldMapping[]
   tombstones        SyncTombstone[]
   sharesGiven       Share[]            @relation("SharesGiven")
+  savedFilters      SavedFilter[]
   sharesReceived    Share[]            @relation("SharesReceived")
   personSyncs       PersonSync[]
   labels            Label[]
@@ -1138,4 +1139,26 @@ model PersonEmbedding {
   person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
 
   @@index([model])
+}
+
+/// A named filter somebody can come back to.
+///
+/// The stored value is the URL search string, not a parsed set of columns — a filter is "the
+/// list I was looking at", and the list is defined by its URL. See the migration for why that
+/// beats a column per dimension.
+model SavedFilter {
+  id      String @id @default(cuid())
+  ownerId String
+
+  name   String
+  /// e.g. `q=has%3Aemail+-has%3Aphone&rel=mine`
+  search String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@index([ownerId])
 }

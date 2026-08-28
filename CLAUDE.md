@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 686 checks
+npm run e2e         # builds, then drives a real browser through 719 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -31,6 +31,14 @@ there and not sent is **deleted from Google**. Unlisted fields are untouched; li
 *groups* are replaced wholesale. This is why "a real column for every Google field" was a
 bug fix: Hearth had been deleting middle names, address structure and departments on every
 push. Adding a field Hearth reads without adding it here is data loss, and it is silent.
+
+**The chips ARE the query string.** `search/chips.ts` decomposes `q` into a row and prints it
+back; there is no chip state. Every edit is `filterHref(filter, { q: queryFromChips(...) })`, so
+a filtered list stays a URL. Two consequences that have already bitten: a chip's label must be
+exactly the query it stands for (hence `like:` is a real predicate, not a display convention),
+and a query a flat row cannot hold — brackets — is shown whole rather than taken apart. AND binds
+tighter than OR, so adding a chip after an OR joins the term before it; that is stated in the
+help panel and asserted in §31.9f rather than papered over with inserted brackets.
 
 **`semantic:` ranks; it never filters.** It is lifted out of the AST before compiling
 (`liftSemantic`) and resolved after the SQL half has run, which is what makes it rank INSIDE

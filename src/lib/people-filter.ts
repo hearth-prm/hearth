@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { FieldDef } from "@/lib/fields/types";
+import { chipsFromQuery } from "@/lib/search/chips";
 import { compileQuery, QueryError, type SemanticRequest } from "@/lib/search/compile";
 import {
   googleClause,
@@ -210,6 +211,20 @@ export function filterHref(
   f: PeopleFilter,
   change: Partial<Record<"q" | "rel" | "google" | "has" | "label" | "labelMode", string | string[] | null>>,
 ): string {
+  const qs = filterSearch(f, change);
+  return qs ? `/people?${qs}` : "/people";
+}
+
+/**
+ * The same thing as a bare search string.
+ *
+ * Split out because a saved filter stores exactly this: "the list I was looking at" is its URL,
+ * and restoring one is then a navigation rather than a second way of setting the same state.
+ */
+export function filterSearch(
+  f: PeopleFilter,
+  change: Partial<Record<"q" | "rel" | "google" | "has" | "label" | "labelMode", string | string[] | null>> = {},
+): string {
   const params = new URLSearchParams();
 
   const current: Record<string, string | string[]> = {
@@ -229,8 +244,20 @@ export function filterHref(
     }
   }
 
-  const qs = params.toString();
-  return qs ? `/people?${qs}` : "/people";
+  return params.toString();
+}
+
+/** A stored search string back to the shape parseFilter reads. */
+export function rawParamsFromSearch(search: string): RawParams {
+  const params = new URLSearchParams(search.replace(/^\?/, ""));
+  const out: RawParams = {};
+  for (const key of new Set(params.keys())) {
+    const all = params.getAll(key);
+    // `label` repeats and the rest do not, so the shape follows the data rather than a list of
+    // which keys are plural — one less thing to keep in step with parseFilter.
+    out[key] = all.length > 1 ? all : all[0]!;
+  }
+  return out;
 }
 
 export interface FilterPill {
@@ -248,15 +275,20 @@ export interface FilterPill {
  * has one definition, shared by the chips and by the count line. Label names have to
  * be supplied because only the caller has them — the filter itself holds ids.
  */
+/**
+ * The filter dimensions that are still URL PARAMETERS rather than query terms.
+ *
+ * `q` is deliberately absent: the search box renders it as a row of chips, one per term. It
+ * used to be one pill here, and suppressing it by passing a blanked filter was a bug worth
+ * remembering — every pill's remove link is built from the filter it is handed, so a blanked
+ * `q` meant removing a label also cleared the search.
+ */
 export function activePills(
   f: PeopleFilter,
   labelNames: ReadonlyMap<string, string>,
 ): FilterPill[] {
   const pills: FilterPill[] = [];
 
-  if (f.q) {
-    pills.push({ id: "q", label: `“${f.q}”`, href: filterHref(f, { q: null }) });
-  }
   if (f.relation) {
     pills.push({
       id: "rel",
@@ -284,6 +316,31 @@ export function activePills(
     });
   }
   return pills;
+}
+
+/**
+ * A filter in words, for the hover text on a saved one.
+ *
+ * Built from the same chip decomposition the box renders, so the tooltip says what the chips
+ * would say if you loaded it — rather than a second description that drifts from the first.
+ */
+export function describeFilter(
+  f: PeopleFilter,
+  labelNames: ReadonlyMap<string, string>,
+): string {
+  const parts: string[] = [];
+  if (f.q) {
+    const row = chipsFromQuery(f.q);
+    parts.push(
+      row && row.chips.length > 0
+        ? row.chips
+            .map((chip, i) => (i === 0 ? chip : `${row.connectors[i - 1]!.toUpperCase()} ${chip}`))
+            .join(" ")
+        : f.q,
+    );
+  }
+  for (const pill of activePills(f, labelNames)) parts.push(pill.label);
+  return parts.length > 0 ? parts.join(" · ") : "everything";
 }
 
 /** Toggle one label in or out of the current selection. */
