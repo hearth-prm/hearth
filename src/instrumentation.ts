@@ -12,4 +12,9 @@ export async function register(): Promise<void> {
   // Imported dynamically so the edge bundle never pulls in Prisma or googleapis.
   const { startSyncScheduler } = await import("@/lib/sync/scheduler");
   startSyncScheduler();
+
+  // Its own loop, not a pass inside the sync tick: an install with no Google account at all
+  // can still want semantic search, so SYNC_ENABLED=false must not turn the index off.
+  const { startSearchIndexer } = await import("@/lib/search/index-scheduler");
+  startSearchIndexer();
 }

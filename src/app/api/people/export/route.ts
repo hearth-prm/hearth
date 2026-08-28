@@ -3,7 +3,8 @@ import { prisma } from "@/lib/db";
 import { currentUser, loadViewer } from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { readCustomBag } from "@/lib/fields/values";
-import { parseFilter, peopleWhere, type RawParams } from "@/lib/people-filter";
+import { parseFilter, type RawParams } from "@/lib/people-filter";
+import { resolvePeopleQuery } from "@/lib/search/resolve";
 import { toCsv, UTF8_BOM } from "@/lib/csv";
 import {
   CONTACT_KIND_COLUMN,
@@ -48,9 +49,10 @@ export async function GET(request: NextRequest) {
     loadRegistry(user.id, "PERSON"),
     loadViewer(user.id),
   ]);
-  // The same registry and the same viewer the list uses, so "export these" exports what the
-  // query selected rather than a differently-parsed version of it.
-  const where = peopleWhere(filter, viewer, defs);
+  // The same registry, viewer AND resolver the list uses, so "export these" exports what the
+  // query selected rather than a differently-parsed version of it — including a `semantic:`
+  // ranking, which peopleWhere alone would silently drop.
+  const { where } = await resolvePeopleQuery(filter, viewer, defs);
   const customFields = defs.filter((d) => !d.core);
 
   const people = await prisma.person.findMany({

@@ -12,8 +12,9 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 641 checks
+npm run e2e         # builds, then drives a real browser through 686 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
+npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
 
 ## Invariants that are load-bearing
@@ -30,6 +31,14 @@ there and not sent is **deleted from Google**. Unlisted fields are untouched; li
 *groups* are replaced wholesale. This is why "a real column for every Google field" was a
 bug fix: Hearth had been deleting middle names, address structure and departments on every
 push. Adding a field Hearth reads without adding it here is data loss, and it is silent.
+
+**`semantic:` ranks; it never filters.** It is lifted out of the AST before compiling
+(`liftSemantic`) and resolved after the SQL half has run, which is what makes it rank INSIDE
+what the access clauses allowed. It is refused under a `not` or an `or` on purpose: a cosine
+distance has no mechanism for "not similar", so both would be a meaning nobody asked for. Every
+caller that decides WHICH CONTACTS something applies to goes through `resolvePeopleQuery` — the
+list, the CSV export and "select all matching" — or a bulk action would act on a wider set than
+the page displayed.
 
 **The trash never empties itself.** No retention window, no pruning job, no "after 30
 days" setting — ever, by explicit design. Bulk convenience for the human (Empty trash) is
@@ -97,6 +106,11 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   should have found. Deriving presence from a column list is right for every field a person
   types into and wrong for every one the app fills in; `Addressable.presence` is the override,
   and §29.21 asserts the equivalence over every contact rather than a fixture.
+- **A vector is built once and scored for every viewer, so its text is an access decision.**
+  `index-text.ts` indexes gifts RECEIVED (readable by whoever may read the recipient) and never
+  gifts GIVEN or events attended, whose access does not follow the contact. A leak here does not
+  show content — it shows a ranking, which is enough. §30.2 asserts the SELECT, because the way
+  this goes wrong is somebody adding a relation to the query rather than to the formatter.
 - **A computed key skips every check TypeScript has.** `{ [column]: null }` compiles whatever
   `column` says, so `has:name` shipped comparing a NOT NULL column to null and failed as a
   Prisma error inside the search box. The whole-object type still helps — it refused a Person

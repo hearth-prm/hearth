@@ -4959,6 +4959,350 @@ try {
     },
   });
 
+  section("§30 Searching by meaning")
+
+  // A deterministic stand-in for an embedding model: a count of known words, which is a real
+  // vector space with a real cosine — small enough to reason about and fixed enough to assert
+  // an ORDER against. The point of these checks is the plumbing and the scoping, not the
+  // model: "nurse ranks above developer for a healthcare query" is a fact about the pipeline.
+  const EMBED_VOCAB = [
+    "nurse", "health", "hospital", "patient",
+    "java", "developer", "software", "database",
+    "garden", "roses",
+  ];
+  const fakeVector = (text: string): number[] => {
+    const lower = text.toLowerCase();
+    return EMBED_VOCAB.map((word) => lower.split(word).length - 1);
+  };
+  let embedCalls = 0;
+  let embedInputs: string[] = [];
+  let embedBroken = false;
+  const { createServer: createEmbedServer } = await import("node:http");
+  const fakeEmbedder = createEmbedServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += String(c); });
+    req.on("end", () => {
+      if (embedBroken) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end('{"error":"down"}');
+        return;
+      }
+      let input: string[] = [];
+      try {
+        const body = JSON.parse(raw) as { input?: string[] };
+        input = Array.isArray(body.input) ? body.input : [];
+      } catch {
+        input = [];
+      }
+      embedCalls += 1;
+      embedInputs = input;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ embeddings: input.map(fakeVector) }));
+    });
+  });
+  await new Promise<void>((done) => fakeEmbedder.listen(OLLAMA_PORT, "127.0.0.1", done));
+
+  const { indexableText, sourceHash, INDEXABLE_SELECT } =
+    await import("@/lib/search/index-text");
+  const { cosine, embedTexts, embeddingModel } = await import("@/lib/search/embed");
+  const { indexPending, indexStatus } = await import("@/lib/search/indexer");
+  const { resolvePeopleQuery } = await import("@/lib/search/resolve");
+
+  // --- what gets embedded, and what deliberately does not -------------------
+
+  const sampleIndexable = {
+    organization: "UW Health", jobTitle: "Registered Nurse", orgDepartment: "Oncology",
+    orgJobDescription: null, orgLocation: null, orgType: null,
+    notes: "Met at the hospital fundraiser",
+    labels: [{ label: { name: "Medical" } }, { label: { name: "Family" } }],
+    contactPoints: [
+      { kind: "INTEREST" as const, label: null, value: "roses" },
+      { kind: "EMAIL" as const, label: null, value: "nurse@example.test" },
+    ],
+    giftsReceived: [{ gift: { description: "A garden trowel" } }],
+  };
+  const sampleText = indexableText(sampleIndexable);
+  ok("30.1 the text carries what a contact is about",
+     sampleText.includes("UW Health") && sampleText.includes("Registered Nurse") &&
+       sampleText.includes("Oncology") && sampleText.includes("fundraiser") &&
+       sampleText.includes("Medical") && sampleText.includes("roses") &&
+       sampleText.includes("A garden trowel"),
+     sampleText);
+  // Exact-match fields are left out on purpose: embedding an email address makes it a fuzzy
+  // match, which is strictly worse than the predicate that already finds it exactly.
+  ok("30.1b and not the fields that are already searched exactly",
+     !sampleText.includes("nurse@example.test"), sampleText);
+
+  // The access argument, checked against the SELECT rather than the text — because the way
+  // this would go wrong is somebody adding a relation to the query, not to the formatter.
+  // A vector is built ONCE and scored for every viewer, so anything in it must be readable by
+  // everybody who can read the contact. Gifts GIVEN follow their recipient, and events have
+  // their own access clause; both would leak through a ranking.
+  const selectKeys = Object.keys(INDEXABLE_SELECT);
+  ok("30.2 nothing whose access does not follow the contact is indexed",
+     !selectKeys.includes("giftsGiven") && !selectKeys.includes("eventAttendances") &&
+       !selectKeys.includes("shares") && selectKeys.includes("giftsReceived"),
+     selectKeys);
+
+  const shuffled = { ...sampleIndexable, labels: [...sampleIndexable.labels].reverse() };
+  ok("30.3 the text is stable, so a pass does not re-embed the address book",
+     indexableText(shuffled) === sampleText, indexableText(shuffled));
+  ok("30.4 the model is part of the hash, so changing it re-embeds rather than mixing spaces",
+     sourceHash(sampleText, "a") !== sourceHash(sampleText, "b"));
+  ok("30.5 a contact with nothing to say produces nothing to embed",
+     indexableText({
+       organization: null, jobTitle: null, orgDepartment: null, orgJobDescription: null,
+       orgLocation: null, orgType: null, notes: null, labels: [], contactPoints: [],
+       giftsReceived: [],
+     }) === "");
+
+  ok("30.6 cosine: identical is 1, orthogonal is 0",
+     Math.abs(cosine([1, 2, 3], [1, 2, 3]) - 1) < 1e-9 && cosine([1, 0], [0, 1]) === 0);
+  // Two lengths means two models. A score of nothing keeps it out of the results, where
+  // throwing would take a search box down.
+  ok("30.6b and a mix of two models scores nothing rather than throwing",
+     cosine([1, 2, 3], [1, 2]) === 0);
+
+  const askedFor = await embedTexts(["a nurse"], "query");
+  ok("30.7 the query side is prefixed for asymmetric search",
+     askedFor.ok && embedInputs[0] === "search_query: a nurse", embedInputs);
+
+  // --- semantic: in the language --------------------------------------------
+
+  const semanticOf = (q: string) => compileQuery(q, qViewer, qDefs).semantic;
+  ok("30.8 semantic: is lifted out of the query rather than compiled into it",
+     semanticOf("semantic:healthcare")?.text === "healthcare" &&
+       semanticOf("semantic:healthcare")?.limit === 25,
+     semanticOf("semantic:healthcare"));
+  ok("30.8b and the rest of the query still compiles",
+     Object.keys(compileQuery("semantic:healthcare label:Family", qViewer, qDefs).where).length > 0);
+  ok("30.8c ~n says how many to keep",
+     semanticOf("semantic:healthcare~50")?.limit === 50 &&
+       semanticOf('semantic:"registered nurse"~5')?.text === "registered nurse" &&
+       semanticOf('semantic:"registered nurse"~5')?.limit === 5,
+     semanticOf('semantic:"registered nurse"~5'));
+  ok("30.8d about: and means: say the same thing",
+     semanticOf("about:healthcare")?.text === "healthcare" &&
+       semanticOf("means:healthcare")?.text === "healthcare");
+
+  const semanticRefused = (q: string): string => {
+    try {
+      compileQuery(q, qViewer, qDefs);
+      return "accepted";
+    } catch (err) {
+      return err instanceof QErr ? (err as Error).message : "wrong error";
+    }
+  };
+  // A cosine distance has no mechanism for "not similar to healthcare": every contact is some
+  // distance from every query, so a negated ranking is everybody or nobody depending on an
+  // arbitrary cut. Refusing beats picking a meaning nobody asked for.
+  ok("30.9 a ranking cannot be negated, and says why",
+     /ranks results/.test(semanticRefused("-semantic:healthcare")),
+     semanticRefused("-semantic:healthcare"));
+  ok("30.9b nor put inside an or",
+     /ranks results/.test(semanticRefused("label:Family or semantic:healthcare")),
+     semanticRefused("label:Family or semantic:healthcare"));
+  ok("30.9c two rankings have no combined order",
+     /Only one/.test(semanticRefused("semantic:a semantic:b")),
+     semanticRefused("semantic:a semantic:b"));
+  ok("30.9d and a count that is not a count is refused rather than clamped",
+     /number of results/.test(semanticRefused("semantic:a~0")) &&
+       /number of results/.test(semanticRefused("semantic:a~9000")),
+     [semanticRefused("semantic:a~0"), semanticRefused("semantic:a~9000")]);
+
+  // --- the index, against the database --------------------------------------
+
+  const semNurse = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Nadia Semantic", givenName: "Nadia", familyName: "Semantic",
+      organization: "UW Health", jobTitle: "Registered Nurse",
+      notes: "Works with patients at the hospital",
+    },
+  });
+  const semDev = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Dev Semantic", givenName: "Dev", familyName: "Semantic",
+      organization: "TheStreet", jobTitle: "Java developer",
+      notes: "Writes software and argues about the database",
+    },
+  });
+  const semBlank = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Blank Semantic", givenName: "Blank", familyName: "Semantic" },
+  });
+
+  const indexBefore = await indexStatus();
+  ok("30.10 a new contact is waiting to be indexed", indexBefore.stale >= 2, indexBefore);
+  ok("30.10b and one with nothing to describe it is not waiting for anything",
+     (await prisma.personEmbedding.count({ where: { personId: semBlank.id } })) === 0);
+
+  const firstPass = await indexPending();
+  ok("30.11 a pass embeds what was waiting",
+     firstPass.embedded >= 2 && !firstPass.message, firstPass);
+  const indexAfter = await indexStatus();
+  ok("30.11b and then there is nothing waiting", indexAfter.stale === 0, indexAfter);
+  ok("30.11c a contact with nothing to say is still not indexed",
+     (await prisma.personEmbedding.count({ where: { personId: semBlank.id } })) === 0);
+  ok("30.11d the documents were prefixed as documents",
+     embedInputs.every((t) => t.startsWith("search_document: ")), embedInputs.slice(0, 2));
+
+  const callsBefore = embedCalls;
+  const secondPass = await indexPending();
+  ok("30.12 a second pass embeds nothing and does not call the model",
+     secondPass.embedded === 0 && embedCalls === callsBefore, [secondPass, embedCalls]);
+
+  // A label is not on the contact's own row, so a timestamp queue would miss this entirely.
+  const semLabel = await prisma.label.create({ data: { ownerId: A.id, name: "Semantic Label" } });
+  await prisma.personLabel.create({ data: { personId: semDev.id, labelId: semLabel.id } });
+  ok("30.13 adding a label makes the contact stale, though its own row never changed",
+     (await indexStatus()).stale === 1, await indexStatus());
+  await indexPending();
+  ok("30.13b and a pass settles it", (await indexStatus()).stale === 0);
+
+  // --- ranking --------------------------------------------------------------
+
+  const rankedNames = async (q: string, viewer = qViewer): Promise<string[]> => {
+    const resolved = await resolvePeopleQuery(
+      parseFilterForChips({ q }),
+      viewer,
+      qDefs,
+    );
+    if (!resolved.ranked) return [];
+    const rows = await prisma.person.findMany({
+      where: resolved.where,
+      select: { id: true, displayName: true },
+    });
+    const rank = new Map(resolved.ranked.map((id, i) => [id, i]));
+    return rows
+      .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+      .map((r) => r.displayName);
+  };
+
+  const healthcare = await rankedNames("semantic:\"nurse hospital patient\"");
+  ok("30.14 the closest match comes first, which is the whole point",
+     healthcare[0] === "Nadia Semantic", healthcare.slice(0, 4));
+  ok("30.14b and a contact with nothing to describe it is not ranked at all",
+     !healthcare.includes("Blank Semantic"), healthcare);
+  const softwareFirst = await rankedNames("semantic:\"java software database\"");
+  ok("30.14c a different question gives a different order",
+     softwareFirst[0] === "Dev Semantic", softwareFirst.slice(0, 4));
+
+  ok("30.15 ~n keeps that many",
+     (await rankedNames("semantic:\"nurse hospital\"~1")).length === 1,
+     await rankedNames("semantic:\"nurse hospital\"~1"));
+
+  // The ranking happens INSIDE what the rest of the query allowed, not the other way round.
+  ok("30.16 a ranking narrows what the filter left, rather than replacing it",
+     (await rankedNames('semantic:"nurse hospital patient" label:"Semantic Label"'))
+       .join() === "Dev Semantic",
+     await rankedNames('semantic:"nurse hospital patient" label:"Semantic Label"'));
+
+  // The check that matters most: a ranking must not be a way past the access clauses.
+  //
+  // Owned by B and read from A's side. Nadia would not do, however good a match she is: §5
+  // gives B a blanket ALL_PEOPLE grant over A's contacts, so B can legitimately see every one
+  // of them — the same trap that made two §29 checks fail, and it is worth stating that this
+  // is now the third time it has caught a test of mine rather than a bug.
+  const semPrivate = await prisma.person.create({
+    data: {
+      ownerId: B.id, displayName: "Bee Semantic", givenName: "Bee", familyName: "Semantic",
+      organization: "Mercy Hospital", jobTitle: "Nurse practitioner",
+      notes: "patient care, hospital rounds",
+    },
+  });
+  await indexPending();
+  const asA = await rankedNames('semantic:"nurse hospital patient"', qViewer);
+  const asB = await rankedNames('semantic:"nurse hospital patient"', qViewerB);
+  ok("30.17 a contact somebody cannot see is not ranked for them, however good the match",
+     !asA.includes("Bee Semantic"), asA.slice(0, 4));
+  ok("30.17b while the viewer who can see her gets her first — so the check above cannot pass on an empty ranking",
+     asB[0] === "Bee Semantic", asB.slice(0, 4));
+
+  // --- staleness and failure ------------------------------------------------
+
+  await prisma.person.update({
+    where: { id: semNurse.id },
+    data: { notes: null, organization: null, jobTitle: null },
+  });
+  const emptied = await indexPending();
+  ok("30.18 emptying a contact clears its vector rather than leaving the old meaning",
+     emptied.removed === 1 &&
+       (await prisma.personEmbedding.count({ where: { personId: semNurse.id } })) === 0,
+     emptied);
+  ok("30.18b so it stops turning up in a ranking",
+     !(await rankedNames("semantic:\"nurse hospital patient\"")).includes("Nadia Semantic"));
+
+  // Something to do, or a pass with nothing waiting reports success and proves nothing — which
+  // is exactly what the first version of 30.19b asserted against.
+  await prisma.person.update({
+    where: { id: semDev.id },
+    data: { notes: "now writing software about databases and gardens" },
+  });
+  ok("30.19a there is work waiting, so the next check is about the model and not the queue",
+     (await indexStatus()).stale === 1, await indexStatus());
+
+  embedBroken = true;
+  const downResolved = await resolvePeopleQuery(
+    parseFilterForChips({ q: 'semantic:"java software"' }),
+    qViewer,
+    qDefs,
+  );
+  const downCount = await prisma.person.count({ where: downResolved.where });
+  // Fail CLOSED. Ignoring the ranking would widen the selection to everything matching the
+  // rest of the query, and "select all matching" would then mean something other than what
+  // the page showed — which for a bulk delete is the worst possible disagreement.
+  ok("30.19 a model that is down narrows to nothing and says so, rather than to everything",
+     downCount === 0 && (downResolved.error ?? "").includes("Could not rank"),
+     [downCount, downResolved.error]);
+  const downPass = await indexPending();
+  ok("30.19b and a pass stops rather than looping on a dead model",
+     downPass.embedded === 0 && Boolean(downPass.message), downPass);
+  embedBroken = false;
+  const recovered = await indexPending();
+  ok("30.19c and picks up where it left off once the model answers again",
+     recovered.embedded === 1 && (await indexStatus()).stale === 0, recovered);
+
+  const savedEmbedModel = process.env.OLLAMA_EMBED_MODEL;
+  process.env.OLLAMA_EMBED_MODEL = "some-other-model";
+  ok("30.20 changing the embedding model invalidates every vector",
+     (await indexStatus()).stale >= 2 && (await indexStatus()).model === "some-other-model",
+     await indexStatus());
+  if (savedEmbedModel === undefined) delete process.env.OLLAMA_EMBED_MODEL;
+  else process.env.OLLAMA_EMBED_MODEL = savedEmbedModel;
+  ok("30.20b and putting it back does not, since the old vectors are still there",
+     (await indexStatus()).stale === 0, await indexStatus());
+
+  // --- in the browser -------------------------------------------------------
+
+  await prisma.person.update({
+    where: { id: semNurse.id },
+    data: { organization: "UW Health", jobTitle: "Registered Nurse", notes: "hospital patient care" },
+  });
+  await indexPending();
+  await A.page.goto('/people?q=semantic%3A%22nurse+hospital+patient%22');
+  const semanticPage = (await A.page.textContent("body")) ?? "";
+  ok("30.21 the page says it ranked, and what with",
+     semanticPage.includes("by meaning") && semanticPage.includes(embeddingModel()),
+     semanticPage.slice(0, 0) || String(semanticPage.includes("by meaning")));
+  const firstRowName = await A.page.textContent("tbody tr:first-child td:nth-child(2)");
+  ok("30.21b and the closest match is the first row, not the alphabetical one",
+     (firstRowName ?? "").includes("Nadia"), firstRowName);
+  await A.page.goto("/people?q=-semantic%3Ahealthcare");
+  ok("30.22 a ranking somewhere it cannot mean anything says so beside the box",
+     ((await A.page.textContent("body")) ?? "").includes("ranks results"));
+
+  await A.page.goto("/settings");
+  const settingsBody = (await A.page.textContent("body")) ?? "";
+  ok("30.23 Settings reports the index, because a stale index has no other symptom",
+     settingsBody.includes("Search by meaning") && settingsBody.includes("up to date"),
+     settingsBody.includes("Search by meaning"));
+
+  fakeEmbedder.close();
+  await prisma.personLabel.deleteMany({ where: { labelId: semLabel.id } });
+  await prisma.label.delete({ where: { id: semLabel.id } });
+  await prisma.person.deleteMany({
+    where: { id: { in: [semNurse.id, semDev.id, semBlank.id, semPrivate.id] } },
+  });
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

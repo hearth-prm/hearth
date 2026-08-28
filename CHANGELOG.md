@@ -28,6 +28,50 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **`semantic:` — searching by meaning.** `semantic:healthcare` finds the contact whose job says
+  *Registered Nurse at UW Health*, which nothing else in the box can do. Each contact's
+  descriptive text becomes a vector through a local embedding model, the query becomes one too,
+  and the answer is the nearest — closest first.
+  - It **ranks rather than filters**, and is one predicate inside the language rather than the
+    whole search. `-semantic:x` and `label:A or semantic:x` are refused with a reason, because
+    a cosine distance has no mechanism for "not similar": every contact is some distance from
+    every query, so a negated ranking is everybody or nobody depending on an arbitrary cut.
+  - A **count, not a threshold** — top 25, `semantic:"keen gardener"~50` to change it. That was
+    a measurement rather than a preference: `scripts/probe-semantic.mts` ranks four invented
+    contacts against the real model, and "who works with children" separates the teacher from
+    the Java developer by 0.008 while "healthcare" separates the nurse from him by 0.066. No
+    single threshold does both. A count needs no tuning and means the same thing whatever the
+    model.
+  - The ranking happens **inside** what the rest of the query and the access clauses allowed,
+    not before them. §30.17 proves a contact somebody cannot see is never ranked for them,
+    however good the match, while the viewer who can see her gets her first — so the check
+    cannot pass on an empty ranking.
+  - Indexed text is chosen for access rather than for richness: organisation, job, department,
+    role, labels, occupations, skills, interests, keywords, **gifts received** and notes. Not
+    the gifts a contact **gave** and not the events they attended — a vector is built once and
+    scored for everybody who can read the contact, so anything in it must be readable by all of
+    them, and those two are not. Not names, emails, phones or addresses either: those are
+    searched exactly, and embedding them makes an exact answer fuzzy.
+  - Staleness is decided by **hashing the text**, not by a timestamp. Adding a label or
+    recording a gift changes what a contact means without touching `Person.updatedAt`, so a
+    timestamp queue would go stale in exactly the cases this feature exists for. The model name
+    is part of the hash, so changing `OLLAMA_EMBED_MODEL` re-embeds instead of silently mixing
+    two vector spaces.
+  - **Settings reports the index** — how many are indexed, how many waiting, and an *Index now*
+    button — because a stale index is the one failure here with no error message: a contact
+    whose vector is out of date does not look wrong, it just stops turning up. A search running
+    against contacts not yet indexed says so under the box.
+  - If the model is unreachable the search **narrows to nothing and says why**. Ignoring the
+    ranking would widen the selection to everything matching the rest of the query, and "select
+    all matching" would then mean something other than what the page showed.
+  - `Float[]` and brute-force cosine in Node, not pgvector: `postgres:16-alpine` has no vector
+    extension, and a few hundred dot products over 768 floats is under a millisecond. Its own
+    background loop, not a pass inside the sync tick, so `SYNC_ENABLED=false` does not turn the
+    search index off.
+  - New: `OLLAMA_EMBED_MODEL` (default `nomic-embed-text`) and
+    `SEARCH_INDEX_INTERVAL_SECONDS`. With `OLLAMA_URL` unset there is no index and no
+    predicate, exactly as before.
+
 - **`has:` covers everything Hearth stores**, not eleven hand-picked things. Forty-odd
   options — `has:middle`, `has:phonetic`, `has:city`, `has:skill`, `has:custom`,
   `has:relationship`, `has:event`, `has:gift` — derived from the same tables the field names

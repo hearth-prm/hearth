@@ -70,6 +70,9 @@ services:
       # query. Empty means the feature is not offered.
       OLLAMA_URL: "${OLLAMA_URL:-}"
       OLLAMA_CHAT_MODEL: "${OLLAMA_CHAT_MODEL:-}"
+      # And for `semantic:` — searching by meaning. Same host, different model.
+      OLLAMA_EMBED_MODEL: "${OLLAMA_EMBED_MODEL:-}"
+      SEARCH_INDEX_INTERVAL_SECONDS: "${SEARCH_INDEX_INTERVAL_SECONDS:-}"
       SYNC_ENABLED: "${SYNC_ENABLED:-true}"
       SYNC_INTERVAL_SECONDS: "${SYNC_INTERVAL_SECONDS:-300}"
       NODE_ENV: production

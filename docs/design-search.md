@@ -1,6 +1,6 @@
 # Design: search and filtering
 
-Status: **phases 1, 2 and 3 built.** Phase 4 agreed, not started. Supersedes the four fixed filter dimensions in
+Status: **phases 1–4 built.** Phase 5 agreed, not started. Supersedes the four fixed filter dimensions in
 [src/lib/people-filter.ts](../src/lib/people-filter.ts), which stay working throughout.
 
 Decisions taken: phase 1 covers single-entity predicates only; the precise path before the
@@ -163,6 +163,36 @@ The database image is `postgres:16-alpine`, which has no vector extension; addin
 swapping the image and a `CREATE EXTENSION`. Skip it. A `Float[]` column and brute-force
 cosine scoring in Node over a few hundred rows is under a millisecond and an afternoon's work.
 pgvector earns its keep somewhere in the tens of thousands of rows.
+
+### Measured, once it was built
+
+`scripts/probe-semantic.mts` asks the real model, because a green suite against a stand-in
+model is evidence about the plumbing and not about nomic-embed-text. Four invented contacts,
+four questions:
+
+```
+healthcare               Nadia 0.569  Dev 0.503  Gordon 0.418  Mira 0.418
+who works with children  Mira 0.591  Dev 0.583  Nadia 0.579  Gordon 0.544
+gardening                Gordon 0.687  Dev 0.583  Nadia 0.516  Mira 0.492
+writes code              Dev 0.546  Gordon 0.467  Mira 0.467  Nadia 0.448
+```
+
+Right every time, and the margins are the interesting part: "who works with children" separates
+the teacher from the Java developer by 0.008. So the ranking is real but shallow, which
+**settles the count-versus-threshold question with a measurement**. A similarity threshold would
+have to fall between 0.583 and 0.591 for that query and between 0.503 and 0.569 for the first
+one, and no single number does both. A count — top 25, `~50` to change it — needs no tuning and
+means the same thing whatever the model.
+
+The demonstration of the limit is worth keeping too:
+
+```
+no email                 Nadia 0.393  Dev 0.378  Gordon 0.371  Mira 0.355
+```
+
+Every score in the same narrow band, and the order is noise. That is what a query an embedding
+cannot express looks like from the inside — not an error, just a confident ranking of nothing.
+Hence `-semantic:` and `or semantic:` are refused rather than given a meaning.
 
 ### Things that go wrong
 

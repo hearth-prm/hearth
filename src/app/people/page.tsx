@@ -9,10 +9,9 @@ import {
   isFilterActive,
   NON_FILTER_PARAMS,
   parseFilter,
-  parsePeopleQuery,
-  peopleWhere,
   type RawParams,
 } from "@/lib/people-filter";
+import { resolvePeopleQuery } from "@/lib/search/resolve";
 import {
   btnPrimary,
   btnSecondary,
@@ -62,8 +61,12 @@ export default async function PeoplePage({
 
   // After the registry, because a custom field's name is only queryable once its definition
   // is known — `howWeMet:x` is a field on this install and a text search on another.
-  const where = peopleWhere(filter, viewer, defs);
-  const query = parsePeopleQuery(filter.q, viewer, defs);
+  //
+  // Through the resolver rather than peopleWhere, because `semantic:` is not a where-clause:
+  // it needs the model and a sort, and the export and the bulk actions resolve it the same
+  // way so all three agree on which contacts a query selected.
+  const query = await resolvePeopleQuery(filter, viewer, defs);
+  const where = query.where;
   // displayName already covers the name fields, so don't repeat them as columns.
   const columns = listFields(defs).filter(
     (d) => d.key !== "givenName" && d.key !== "familyName",
@@ -72,7 +75,9 @@ export default async function PeoplePage({
   const [people, total, labelRows] = await Promise.all([
     prisma.person.findMany({
       where,
-      orderBy: { displayName: "asc" },
+      // A ranking is re-sorted below; asking Postgres for alphabetical order first would
+      // throw away the only thing the ranking produced.
+      orderBy: query.ranked ? undefined : { displayName: "asc" },
       take: PAGE_SIZE,
       include: {
         owner: { select: { email: true } },
@@ -102,6 +107,14 @@ export default async function PeoplePage({
       },
     }),
   ]);
+
+  // Best match first, which is the whole point of asking by meaning. Sorted here rather than
+  // in SQL because the order came out of a cosine score in Node, and sorting the array in
+  // place keeps every use below reading the same variable.
+  if (query.ranked) {
+    const rank = new Map(query.ranked.map((id, i) => [id, i]));
+    people.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+  }
 
   const labels = labelRows.map(({ _count, ...l }) => ({ ...l, count: _count.people }));
   // One query for the page rather than one per row: the effective photo depends on the
@@ -175,6 +188,16 @@ export default async function PeoplePage({
           {warning}
         </p>
       ))}
+      {/* What the ranking did and what it could not do. A contact that is not indexed cannot
+          be ranked, and its absence would otherwise look like an answer. */}
+      {query.note ? (
+        <p
+          role="status"
+          className="mb-4 rounded-md bg-neutral-100 px-3 py-2 text-sm text-neutral-600 dark:bg-neutral-800/60 dark:text-neutral-300"
+        >
+          {query.note}
+        </p>
+      ) : null}
 
       <Card>
         {people.length === 0 ? (

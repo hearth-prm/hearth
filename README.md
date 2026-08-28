@@ -54,15 +54,16 @@ over to, other users on the same install.
 | ✅ | Pictures imported as pictures, not as URLs | Done |
 | ✅ | A query language for the people list, with autocomplete | Done |
 | ✅ | A sentence turned into a query by a model on your own network | Done |
+| ✅ | `semantic:` — finding contacts by meaning rather than spelling | Done |
 
-[Search and filtering](docs/design-search.md) is built through its third phase: a query
-language, autocomplete for it, and a sentence turned into a query by a model on your own
-network. One piece of work is designed and queued rather than built —
-[sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
+[Search and filtering](docs/design-search.md) is built through its fourth phase: a query
+language, autocomplete for it, a sentence turned into a query by a model on your own network,
+and `semantic:` for searching by meaning. One piece of work is designed and queued rather than
+built — [sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 641 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 686 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -115,6 +116,8 @@ docker compose down -v         # stop and destroy the database
 | `APP_PORT` | no | Host port, default `3000`. |
 | `OLLAMA_URL` | no | A model on your own network for [asking in words](#asking-in-words). Unset means the feature is not offered. |
 | `OLLAMA_CHAT_MODEL` | no | Default `qwen2.5:7b-instruct`. |
+| `OLLAMA_EMBED_MODEL` | no | For [`semantic:`](#searching-by-meaning). Default `nomic-embed-text`. |
+| `SEARCH_INDEX_INTERVAL_SECONDS` | no | How often contacts are re-indexed. Default `300`, minimum `30`. |
 
 ### Google Cloud setup
 
@@ -714,6 +717,51 @@ Three of them are questions about other records, and each is scoped to what you 
 see: `has:relationship`, `has:event`, and `has:gift`. Seeing somebody does not entitle you to
 the list of what they gave a household you have no access to, so a gift is only visible
 through a recipient you can see.
+
+#### Searching by meaning
+
+`semantic:healthcare` finds the contact whose job says *Registered Nurse at UW Health*. Nothing
+else in the search box can do that: it is not a spelling match but a **meaning** match, the same
+idea as Immich's smart photo search. Each contact's descriptive text becomes a vector, your
+query becomes a vector, and the answer is the nearest ones — closest first.
+
+```
+semantic:healthcare label:Family        the healthcare people among my family
+semantic:"keen gardener"~50             the fifty closest, rather than the default 25
+about:woodworking                       about: and means: are the same predicate
+```
+
+It **ranks**; it does not filter, and it is one predicate inside the language rather than the
+whole search. That is a consequence of what an embedding is: there is no mechanism in a cosine
+distance for *not* similar, so `-semantic:x` and `label:A or semantic:x` are refused rather than
+given a meaning nobody asked for. Combine it with the ordinary predicates instead — those do
+negation and grouping properly, and the ranking then happens inside what they left.
+
+What gets indexed is the text that describes a contact: organisation, job title, department,
+role, labels, occupations, skills, interests, keywords, gifts received, and notes. Not names —
+those are searched exactly and would be noise. Not emails, phones or addresses, for the same
+reason. And deliberately **not** the gifts a contact *gave* or the events they attended: a
+vector is built once and scored for everybody who can see the contact, so anything in it has to
+be readable by all of them, and those two are not.
+
+Contacts are indexed in the background — the first pass runs half a minute after start-up, then
+every few minutes. Settings shows how many are indexed, how many are waiting, and has an
+**Index now** button, because a stale index is the one failure this feature has that produces no
+error message: a contact whose vector is out of date does not look wrong, it just stops turning
+up. A search that runs against contacts not yet indexed says so under the box. If the model is
+unreachable the search returns nothing and says why, rather than quietly falling back to
+everything that matched the rest of the query.
+
+Set it up alongside the chat model:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Changing `OLLAMA_EMBED_MODEL` re-embeds every contact, automatically and in the background: a
+vector is only comparable to others from the same model, so the model name is stored beside
+each one and a change invalidates rather than silently mixes two spaces. Changing the *chat*
+model costs nothing — the two are independent.
 
 #### Thank-yous still to write
 

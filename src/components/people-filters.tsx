@@ -47,6 +47,7 @@ const SEARCH_EXAMPLES: readonly { query: string; means: string }[] = [
   { query: "dept:Technology", means: "a column by name" },
   { query: "label:Family or label:Medical", means: "either one" },
   { query: "phone:262", means: "a contact detail" },
+  { query: "semantic:healthcare", means: "about that, by meaning" },
 ];
 
 export function PeopleFilters({

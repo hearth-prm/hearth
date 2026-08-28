@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { FieldDef } from "@/lib/fields/types";
-import { compileQuery, QueryError } from "@/lib/search/compile";
+import { compileQuery, QueryError, type SemanticRequest } from "@/lib/search/compile";
 import {
   googleClause,
   presenceClause,
@@ -305,10 +305,15 @@ export function parsePeopleQuery(
   q: string,
   viewer: Viewer,
   registry: readonly FieldDef[],
-): { error: string | null; warnings: string[] } {
+): { error: string | null; warnings: string[]; semantic?: SemanticRequest } {
   if (!q) return { error: null, warnings: [] };
   try {
-    return { error: null, warnings: compileQuery(q, viewer, registry).warnings };
+    const compiled = compileQuery(q, viewer, registry);
+    return {
+      error: null,
+      warnings: compiled.warnings,
+      ...(compiled.semantic ? { semantic: compiled.semantic } : {}),
+    };
   } catch (err) {
     if (err instanceof QueryError) return { error: err.message, warnings: [] };
     throw err;

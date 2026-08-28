@@ -41,6 +41,89 @@ export interface Compiled {
   where: Prisma.PersonWhereInput;
   /** Things worth telling the user that are not errors. */
   warnings: string[];
+  /**
+   * The one predicate that is not a where-clause.
+   *
+   * `semantic:` ranks; it does not filter, so there is nothing to AND it into. The caller
+   * resolves it after the SQL half has run — see search/resolve.ts — which is also what makes
+   * it rank WITHIN what the rest of the query and the access clauses allowed.
+   */
+  semantic?: SemanticRequest;
+}
+
+export interface SemanticRequest {
+  text: string;
+  /** How many to keep, best first. */
+  limit: number;
+}
+
+/** Field names that mean "rank by similarity to this". */
+const SEMANTIC_FIELDS = ["semantic", "about", "means"];
+
+/**
+ * How many results a ranking keeps.
+ *
+ * A ranking has no natural cut-off — every contact has some cosine distance to every query —
+ * so this is a count rather than a threshold. A threshold would have to be tuned per model
+ * and would silently return everything or nothing when the model changed; a count is
+ * something a person can reason about, and `semantic:nurse~50` says it out loud.
+ */
+const DEFAULT_SEMANTIC_LIMIT = 25;
+const MAX_SEMANTIC_LIMIT = 200;
+
+/**
+ * Lift `semantic:` out of the tree, refusing the places it cannot mean anything.
+ *
+ * Only at the top level, and only ANDed. That is not a simplification — it is the honest
+ * consequence of what an embedding is. There is no mechanism in a cosine distance for "not
+ * similar to healthcare": every contact is some distance from every query, so a negated
+ * ranking is either everybody or nobody depending on an arbitrary cut. `a or semantic:b` is
+ * the same problem wearing a different hat. Refusing both is better than picking a meaning
+ * nobody asked for, which is the mistake `>` on a text field used to make.
+ *
+ * Returns the tree with the semantic terms removed; null means nothing was left, i.e. the
+ * query was a ranking and no filter at all.
+ */
+function liftSemantic(
+  node: Node,
+  top: boolean,
+  found: SemanticRequest[],
+): Node | null {
+  if (node.kind === "term") {
+    if (node.field === null || !SEMANTIC_FIELDS.includes(node.field.toLowerCase())) return node;
+    if (!top) {
+      throw new QueryError(
+        `“${node.field}:” ranks results, so it cannot be negated or put inside an “or”. Put it beside the other terms instead.`,
+      );
+    }
+    // A trailing ~N sets how many to keep. Outside any quotes, so semantic:"a nurse"~50
+    // works: the tokeniser has already dropped the quotes by the time this sees the value.
+    const withCount = /^(.*?)~(\d+)$/.exec(node.value);
+    const text = (withCount ? withCount[1]! : node.value).trim();
+    if (!text) {
+      throw new QueryError(`“${node.field}:” needs something to be similar to.`);
+    }
+    const asked = withCount ? Number.parseInt(withCount[2]!, 10) : DEFAULT_SEMANTIC_LIMIT;
+    if (withCount && (asked < 1 || asked > MAX_SEMANTIC_LIMIT)) {
+      throw new QueryError(
+        `“~${withCount[2]}” is not a number of results to keep. Try 1 to ${MAX_SEMANTIC_LIMIT}.`,
+      );
+    }
+    found.push({ text, limit: asked });
+    return null;
+  }
+  if (node.kind === "not") {
+    const inner = liftSemantic(node.node, false, found);
+    return inner ? { kind: "not", node: inner } : null;
+  }
+  if (node.kind === "or") {
+    return { kind: "or", nodes: node.nodes.map((n) => liftSemantic(n, false, found)!) };
+  }
+  const kept = node.nodes
+    .map((n) => liftSemantic(n, top, found))
+    .filter((n): n is Node => n !== null);
+  if (kept.length === 0) return null;
+  return kept.length === 1 ? kept[0]! : { kind: "and", nodes: kept };
 }
 
 /** Columns compared as dates rather than as text. */
@@ -246,8 +329,19 @@ export function compileQuery(
   viewer: Viewer,
   registry: readonly FieldDef[],
 ): Compiled {
-  const tree = parseQuery(input);
-  if (!tree) return { where: {}, warnings: [] };
+  const parsed = parseQuery(input);
+  if (!parsed) return { where: {}, warnings: [] };
+
+  const semantic: SemanticRequest[] = [];
+  const tree = liftSemantic(parsed, true, semantic);
+  if (semantic.length > 1) {
+    throw new QueryError(
+      "Only one “semantic:” per search — two rankings have no combined order.",
+    );
+  }
+  if (!tree) {
+    return { where: {}, warnings: [], ...(semantic[0] ? { semantic: semantic[0] } : {}) };
+  }
 
   const custom = new Map<string, FieldDef>();
   for (const def of registry) {
@@ -255,7 +349,11 @@ export function compileQuery(
   }
 
   const warnings: string[] = [];
-  return { where: compileNode(tree, viewer, custom, warnings), warnings };
+  return {
+    where: compileNode(tree, viewer, custom, warnings),
+    warnings,
+    ...(semantic[0] ? { semantic: semantic[0] } : {}),
+  };
 }
 
 /** Every field name the language accepts, for autocomplete and for the help panel. */
@@ -265,6 +363,7 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
     "has",
     "google",
     "is",
+    ...SEMANTIC_FIELDS,
     ...Object.keys(DATES),
     // The offered spelling of each, not every alias: `surname` still works, but a list
     // holding both `last` and `surname` teaches that they are different fields.
@@ -289,6 +388,9 @@ export function searchVocabulary(
     has: "something a contact does or does not have",
     google: "how it stands with Google",
     is: "how it relates to you",
+    ...Object.fromEntries(
+      SEMANTIC_FIELDS.map((k) => [k, "what a contact is about, ranked by meaning"]),
+    ),
     ...Object.fromEntries(Object.keys(DATES).map((k) => [k, "a date, or 30d for “30 days ago”"])),
     // The field's own description, from the table that defines it — so the box says
     // "middle name" rather than "the middleName field".

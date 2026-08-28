@@ -9,7 +9,8 @@ import {
   requireUserForAction,
   writablePeopleWhere,
 } from "@/lib/access";
-import { parseFilter, peopleWhere, type RawParams } from "@/lib/people-filter";
+import { parseFilter, type RawParams } from "@/lib/people-filter";
+import { resolvePeopleQuery } from "@/lib/search/resolve";
 import { genericFields, loadRegistry } from "@/lib/fields/registry";
 import { fieldInputName } from "@/lib/fields/types";
 import { parseOneField } from "@/lib/fields/validation";
@@ -72,7 +73,14 @@ async function selectedIds(
       loadRegistry(userId, "PERSON"),
       loadViewer(userId),
     ]);
-    const filtered = peopleWhere(parseFilter(params), viewer, bulkRegistry);
+    // Through the resolver: a `semantic:` ranking is part of "all matching this filter", and
+    // resolving it here is what stops "select all" from meaning something wider than the page
+    // showed.
+    const { where: filtered } = await resolvePeopleQuery(
+      parseFilter(params),
+      viewer,
+      bulkRegistry,
+    );
     const [all, allowed] = await Promise.all([
       prisma.person.count({ where: filtered }),
       prisma.person.findMany({

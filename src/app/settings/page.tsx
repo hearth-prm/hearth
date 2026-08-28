@@ -22,6 +22,9 @@ import {
   CardHeader,
   DetailRow,
 } from "@/components/ui";
+import { SearchIndexPanel } from "@/components/search-index-panel";
+import { rebuildSearchIndex } from "@/lib/actions/search-index";
+import { indexStatus } from "@/lib/search/indexer";
 import { SettingsForm } from "@/components/settings-form";
 import { AppearanceForm } from "@/components/appearance-form";
 
@@ -35,6 +38,7 @@ export default async function SettingsPage() {
     eventsPending,
     eventsError,
     calendars,
+    searchIndex,
   ] = await Promise.all([
     getUserSettings(user.id),
     getGoogleConnection(user.id),
@@ -73,6 +77,9 @@ export default async function SettingsPage() {
       where: { ...ownedEventsWhere(user.id), addToGoogle: true, googleSyncStatus: "ERROR" },
     }),
     listUserCalendars(user.id),
+    // Cheap when unconfigured (it returns zeroes without touching the database); a scan of
+    // the contacts' text when it is, which is the price of an honest number.
+    indexStatus(),
   ]);
 
   return (
@@ -185,6 +192,14 @@ export default async function SettingsPage() {
         errorCount={eventsError}
         timeZone={settings.timeZone}
         footnote="An event's guest list depends on your contacts, so changing someone's email does not by itself re-push the events they are on — re-queue events after changing addresses."
+      />
+
+      <SearchIndexPanel
+        fresh={searchIndex.fresh}
+        stale={searchIndex.stale}
+        model={searchIndex.model}
+        configured={searchIndex.configured}
+        rebuild={rebuildSearchIndex}
       />
 
       <SettingsForm
