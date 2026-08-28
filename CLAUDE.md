@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 734 checks
+npm run e2e         # builds, then drives a real browser through 761 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -44,6 +44,13 @@ a filtered list stays a URL. Three consequences, each of which has already bitte
   §31.9f. The first version of that check assumed brackets appeared, the second documented the
   surprising precedence instead, and the third produces the brackets now that a group can be a
   chip. Only the third is both correct and unsurprising.
+
+**A cross-entity predicate is an access decision.** `attended:`, `related:` and `gift:` each
+nest the viewer's own readable-clause inside the `some` that reaches the other record, because a
+predicate revealing that a record EXISTS leaks even when it shows nothing about it. The
+easy-to-miss one is `related:` by KIND rather than by name — §32.5b exists because that branch
+skipped the check in the first draft. Verified by removing the scoping and watching exactly four
+checks fail.
 
 **`semantic:` ranks; it never filters.** It is lifted out of the AST before compiling
 (`liftSemantic`) and resolved after the SQL half has run, which is what makes it rank INSIDE
@@ -150,6 +157,10 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   through the browser, or call the split-out helper (`findPeopleMatching`, not
   `searchPeople`). Never assert on a call that throws before reaching the logic — it passes
   for the wrong reason.
+- **A relative date resolves against the clock, so two compiles of one query differ.**
+  `JSON.stringify` comparison of `updated:>30d` compiled twice fails at random; it passed for
+  weeks because the calls landed in the same millisecond. Compare structurally with a tolerance,
+  and guard the tolerance with a check that two different dates still differ.
 - **A check that can pass without the feature working is not a check.** Assert painted
   colours over attributes, counted deltas over absences, a tooltip's own text over the
   page's. Say what failed as the third argument, never bare `true`.

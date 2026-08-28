@@ -28,6 +28,38 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **`attended:`, `related:` and `gift:` — asking about a contact through another record.**
+  - `attended:Picnic` by event name, `attended:>1y` by when, and therefore `-attended:>1y` for
+    *who have I not seen in a year* — the single most valuable query in the language and the
+    reason event dates were worth the ambiguity. A comparison always means the date; a plain
+    value means the date only if it looks like one, and otherwise the title. A second field name
+    for the same idea would have been a thing to remember rather than a thing to guess.
+  - `related:Mary` or `related:Parent` — the other person's name, or the kind of relationship.
+    Both readings are useful and neither is what you would call the other. The box offers your
+    relationship kinds after `related:`.
+  - `gift:kite` matches a gift's description or its notes, in either direction.
+  - **Each is scoped to what the viewer can already open**, which is the part that matters: a
+    predicate revealing that an event, a relationship or a gift exists is a leak even when it
+    never shows what it was. `related:Parent` will not report a parent in a household you cannot
+    see — asserted by kind as well as by name, since that is the leak that is easy to miss — and
+    a gift is visible only through a recipient you can see. §32 checks all four from both sides,
+    and removing the scoping fails exactly those four.
+  - They compose with everything: `label:Family (attended:Reunion or gift:kite)` works, and they
+    chip like any other term.
+
+### Fixed
+
+- A check of my own that could pass or fail on the clock. `updated:>30d` resolves against
+  `new Date()` at compile time, so comparing two compiles of the same query with
+  `JSON.stringify` failed at random — §31.10 had been passing because the two calls landed in
+  the same millisecond. It now compares structurally with a two-second tolerance on dates, plus
+  a guard (§31.10c) that two genuinely different dates still compare as different, so the
+  tolerance cannot be hiding a real difference. Found while deliberately breaking the §32
+  access scoping to check it bites: the run reported a fifth failure that had nothing to do with
+  the change.
+
+### Added
+
 - **Brackets group, and a group is a chip.** `(-has:email or -has:phone) semantic:cars` is two
   chips — the group and the ranking — so order of operations is visible and removable rather
   than being a query the row refused to take apart. Brackets appear in a chip only when they are

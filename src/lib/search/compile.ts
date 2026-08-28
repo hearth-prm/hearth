@@ -5,14 +5,20 @@ import {
   ADDRESS_PARTS,
   ALSO_POINT,
   COLUMNS,
+  COMPARABLE_FIELDS,
   FIELD_KEYS,
   FIELD_LABELS,
   POINT_KINDS,
   PRESENCE_KEYS,
   PRESENCE_LABELS,
   anywhereClause,
+  attendedClause,
+  dateFilter,
+  giftClause,
   googleClause,
+  matches,
   presenceClause,
+  relatedClause,
   relationClause,
   type Viewer,
 } from "./predicates";
@@ -138,75 +144,6 @@ const DATES: Record<string, string> = {
   changed: "updatedAt",
 };
 
-/**
- * Text matching: substring by default, whole value on `=`.
- *
- * `city:Sun` finding Sun Prairie AND Sun Gorge is usually what somebody wants, which is why
- * substring is the default and there is no wildcard syntax — there would be nothing for it to
- * enable. `city:="Sun Prairie"` is the way to say only that one, and it exists because the
- * parser already accepted `=` and the compiler used to throw it away: a query that quietly
- * means something other than what it says is worse than one that is refused.
- */
-function text(value: string, op: Comparison) {
-  return op === "="
-    ? { equals: value, mode: "insensitive" as const }
-    : { contains: value, mode: "insensitive" as const };
-}
-
-/**
- * A date written the way somebody types it.
- *
- * Absolute (2026-08-01, 2026-08), or relative (30d, 6m, 1y) meaning "that long ago". Relative
- * is the form that makes `updated:>30d` read correctly: everything touched since then.
- */
-function parseDate(value: string, field: string): Date {
-  const relative = /^(\d+)\s*([dwmy])$/i.exec(value.trim());
-  if (relative) {
-    const n = Number(relative[1]);
-    const unit = relative[2]!.toLowerCase();
-    const now = new Date();
-    const out = new Date(now);
-    if (unit === "d") out.setUTCDate(now.getUTCDate() - n);
-    if (unit === "w") out.setUTCDate(now.getUTCDate() - n * 7);
-    if (unit === "m") out.setUTCMonth(now.getUTCMonth() - n);
-    if (unit === "y") out.setUTCFullYear(now.getUTCFullYear() - n);
-    return out;
-  }
-
-  const ymd = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/.exec(value.trim());
-  if (!ymd) {
-    throw new QueryError(
-      `“${field}:${value}” is not a date. Try 2026-08-01, 2026-08, or 30d for “30 days ago”.`,
-    );
-  }
-  return new Date(
-    Date.UTC(Number(ymd[1]), ymd[2] ? Number(ymd[2]) - 1 : 0, ymd[3] ? Number(ymd[3]) : 1),
-  );
-}
-
-function dateClause(column: string, op: Comparison, value: string, field: string) {
-  const at = parseDate(value, field);
-  switch (op) {
-    case "<":
-      return { [column]: { lt: at } };
-    case "<=":
-      return { [column]: { lte: at } };
-    case ">":
-      return { [column]: { gt: at } };
-    case ">=":
-      return { [column]: { gte: at } };
-    default: {
-      // A bare date means that day, or that month if no day was given — "created:2026-08" is
-      // a question about August, not about the first of it.
-      const end = new Date(at);
-      if (/^\d{4}$/.test(value.trim())) end.setUTCFullYear(at.getUTCFullYear() + 1);
-      else if (/^\d{4}-\d{2}$/.test(value.trim())) end.setUTCMonth(at.getUTCMonth() + 1);
-      else end.setUTCDate(at.getUTCDate() + 1);
-      return { [column]: { gte: at, lt: end } };
-    }
-  }
-}
-
 function oneOf(value: string, allowed: readonly string[], field: string): string {
   const lower = value.toLowerCase();
   if (!allowed.includes(lower)) {
@@ -231,7 +168,7 @@ function compileTerm(
   // A comparison only means something on a date. Accepting `org:>Acme` and quietly treating
   // it as a substring search is how a query comes to mean something other than it says.
   if ((term.op === "<" || term.op === ">" || term.op === "<=" || term.op === ">=") &&
-      !(field in DATES)) {
+      !(field in DATES) && !COMPARABLE_FIELDS.includes(field)) {
     throw new QueryError(
       `“${term.op}” only works on a date. For an exact match use ${field}:=${value}.`,
     );
@@ -246,7 +183,7 @@ function compileTerm(
     return anywhereClause(value);
   }
   if (field === "label") {
-    return { labels: { some: { label: { name: text(value, term.op) } } } };
+    return { labels: { some: { label: { name: matches(value, term.op) } } } };
   }
   if (field === "has") {
     const clause = presenceClause(value, viewer);
@@ -268,28 +205,39 @@ function compileTerm(
     return relationClause(oneOf(value, RELATIONS, field) as Relation, viewer);
   }
   if (field in DATES) {
-    return dateClause(DATES[field]!, term.op, value, field);
+    return { [DATES[field]!]: dateFilter(term.op, value, field) };
+  }
+  // The cross-entity predicates. Each one asks about a contact through another record, and
+  // each is scoped so the other record has to be one this viewer could already open.
+  if (field === "attended" || field === "event" || field === "seen") {
+    return attendedClause(value, term.op, viewer);
+  }
+  if (field === "related") {
+    return relatedClause(value, term.op, viewer);
+  }
+  if (field === "gift" || field === "gifted") {
+    return giftClause(value, term.op, viewer);
   }
   if (field in ADDRESS_PARTS) {
     return {
       contactPoints: {
-        some: { kind: "ADDRESS", [ADDRESS_PARTS[field]!]: text(value, term.op) },
+        some: { kind: "ADDRESS", [ADDRESS_PARTS[field]!]: matches(value, term.op) },
       },
     };
   }
   if (field in POINT_KINDS) {
     return {
-      contactPoints: { some: { kind: POINT_KINDS[field]!, value: text(value, term.op) } },
+      contactPoints: { some: { kind: POINT_KINDS[field]!, value: matches(value, term.op) } },
     };
   }
   if (field in COLUMNS) {
-    const column = { [COLUMNS[field]!]: text(value, term.op) };
+    const column = { [COLUMNS[field]!]: matches(value, term.op) };
     // A couple of columns have a contact-point kind holding the same sort of value —
     // Google keeps one nickname on the name and any others as a list — so asking about
     // the column alone would silently miss half the answer.
     const kind = ALSO_POINT[field];
     return kind
-      ? { OR: [column, { contactPoints: { some: { kind, value: text(value, term.op) } } }] }
+      ? { OR: [column, { contactPoints: { some: { kind, value: matches(value, term.op) } } }] }
       : column;
   }
 
@@ -375,6 +323,9 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
     "google",
     "is",
     "like",
+    "attended",
+    "related",
+    "gift",
     ...SEMANTIC_FIELDS,
     ...Object.keys(DATES),
     // The offered spelling of each, not every alias: `surname` still works, but a list
@@ -394,6 +345,8 @@ export function knownFields(registry: readonly FieldDef[]): string[] {
 export function searchVocabulary(
   registry: readonly FieldDef[],
   labelNames: readonly string[],
+  /** Relationship kinds, offered as `related:` values — otherwise nobody would guess them. */
+  relationshipKinds: readonly string[] = [],
 ): Vocabulary {
   const describe: Record<string, string> = {
     label: "a label by name",
@@ -401,6 +354,12 @@ export function searchVocabulary(
     google: "how it stands with Google",
     is: "how it relates to you",
     like: "anywhere a bare word would look",
+    attended: "an event they were on the guest list of, by name or by when",
+    event: "an event they were on the guest list of, by name or by when",
+    seen: "an event they were on the guest list of, by name or by when",
+    related: "who they are related to, or how",
+    gift: "a gift they gave or received",
+    gifted: "a gift they gave or received",
     ...Object.fromEntries(
       SEMANTIC_FIELDS.map((k) => [k, "what a contact is about, ranked by meaning"]),
     ),
@@ -425,6 +384,7 @@ export function searchVocabulary(
       is: [...RELATIONS],
       rel: [...RELATIONS],
       relation: [...RELATIONS],
+      related: [...relationshipKinds],
     },
     describe,
   };

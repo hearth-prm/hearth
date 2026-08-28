@@ -3,6 +3,7 @@ import type { ContactKind, Prisma } from "@prisma/client";
 // one way: people-filter -> compile -> predicates.
 import type { GoogleState, Relation } from "@/lib/people-filter";
 import type { PersonNameParts } from "@/lib/people";
+import { QueryError, type Comparison } from "./parse";
 
 /**
  * The tables and clause builders shared by the filter chips and the query language.
@@ -577,6 +578,201 @@ export const PRESENCE_KEYS: readonly string[] = PRESENCE_DEFS.map((d) => d.key)
 export const PRESENCE_LABELS: Record<string, string> = Object.fromEntries(
   PRESENCE_DEFS.map((d) => [d.key, d.label]),
 );
+
+/**
+ * Text matching: substring by default, whole value on `=`.
+ *
+ * `city:Sun` finding Sun Prairie AND Sun Gorge is usually what somebody wants, which is why
+ * substring is the default and there is no wildcard syntax — there would be nothing for it to
+ * enable. `city:="Sun Prairie"` is the way to say only that one, and it exists because the
+ * parser already accepted `=` and the compiler used to throw it away: a query that quietly
+ * means something other than what it says is worse than one that is refused.
+ *
+ * Lives here rather than in the compiler because the cross-entity predicates below need the
+ * same rule applied to an event's title and a gift's description, and two spellings of "how a
+ * value matches" is one that gets fixed alone.
+ */
+export function matches(value: string, op: Comparison) {
+  return op === "="
+    ? { equals: value, mode: "insensitive" as const }
+    : { contains: value, mode: "insensitive" as const };
+}
+
+/** Absolute (2026-08-01, 2026-08, 2026) or relative (30d, 6m, 1y). */
+const RELATIVE_DATE = /^(\d+)\s*([dwmy])$/i;
+const ABSOLUTE_DATE = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/;
+
+/** Whether a value would be read as a date if it were given to one. */
+export function looksLikeDate(value: string): boolean {
+  const trimmed = value.trim();
+  return RELATIVE_DATE.test(trimmed) || ABSOLUTE_DATE.test(trimmed);
+}
+
+/**
+ * A date written the way somebody types it.
+ *
+ * Relative means "that long ago", which is the form that makes `updated:>30d` read correctly:
+ * everything touched since then.
+ */
+function parseDate(value: string, field: string): Date {
+  const relative = RELATIVE_DATE.exec(value.trim());
+  if (relative) {
+    const n = Number(relative[1]);
+    const unit = relative[2]!.toLowerCase();
+    const now = new Date();
+    const out = new Date(now);
+    if (unit === "d") out.setUTCDate(now.getUTCDate() - n);
+    if (unit === "w") out.setUTCDate(now.getUTCDate() - n * 7);
+    if (unit === "m") out.setUTCMonth(now.getUTCMonth() - n);
+    if (unit === "y") out.setUTCFullYear(now.getUTCFullYear() - n);
+    return out;
+  }
+
+  const ymd = ABSOLUTE_DATE.exec(value.trim());
+  if (!ymd) {
+    throw new QueryError(
+      `“${field}:${value}” is not a date. Try 2026-08-01, 2026-08, or 30d for “30 days ago”.`,
+    );
+  }
+  return new Date(
+    Date.UTC(Number(ymd[1]), ymd[2] ? Number(ymd[2]) - 1 : 0, ymd[3] ? Number(ymd[3]) : 1),
+  );
+}
+
+/**
+ * The comparison itself, without a column name attached.
+ *
+ * Returned bare so the same function can filter a contact's `updatedAt` and an event's
+ * `startAt` — the two are different Prisma types and a helper that baked the column in could
+ * only ever serve one of them.
+ */
+export function dateFilter(
+  op: Comparison,
+  value: string,
+  field: string,
+): { gte?: Date; gt?: Date; lte?: Date; lt?: Date } {
+  const at = parseDate(value, field);
+  switch (op) {
+    case "<":
+      return { lt: at };
+    case "<=":
+      return { lte: at };
+    case ">":
+      return { gt: at };
+    case ">=":
+      return { gte: at };
+    default: {
+      // A bare date means that day, or that month if no day was given — "created:2026-08" is
+      // a question about August, not about the first of it.
+      const end = new Date(at);
+      const trimmed = value.trim();
+      if (/^\d{4}$/.test(trimmed)) end.setUTCFullYear(at.getUTCFullYear() + 1);
+      else if (/^\d{4}-\d{2}$/.test(trimmed)) end.setUTCMonth(at.getUTCMonth() + 1);
+      else end.setUTCDate(at.getUTCDate() + 1);
+      return { gte: at, lt: end };
+    }
+  }
+}
+
+// --- the cross-entity predicates -------------------------------------------
+
+/**
+ * These three ask about a contact through another record, which makes each of them an access
+ * decision as much as a query. The rule is the same every time: the OTHER record has to be one
+ * this viewer could already have found on its own page. A predicate that reveals the existence
+ * of an event, a relationship or a gift you cannot open is a leak even when it never shows you
+ * what it was.
+ */
+
+/**
+ * On the guest list of an event.
+ *
+ * By title, or by WHEN — because "who have I not seen in a year" is the question a relationship
+ * manager exists to answer, and it needs the event's date rather than its name. A comparison
+ * always means the date; a plain value means the date only if it looks like one. That is
+ * stated in the help panel, and the alternative was a second field name for the same idea.
+ */
+export function attendedClause(
+  value: string,
+  op: Comparison,
+  viewer: Viewer,
+): Prisma.PersonWhereInput {
+  const byDate = op === ":" || op === "=" ? looksLikeDate(value) : true;
+  const event: Prisma.EventWhereInput = byDate
+    ? { startAt: dateFilter(op, value, "attended") }
+    : { title: matches(value, op) };
+  return {
+    eventAttendances: { some: { event: { AND: [viewer.readableEvents, event] } } },
+  };
+}
+
+/**
+ * Related to somebody, or related in some way.
+ *
+ * The value matches EITHER the other person's name or the kind of relationship, because both
+ * readings are useful and neither is what somebody would call the other: `related:Mary` and
+ * `related:Parent` are both obvious once you know it does both, and a second field name for
+ * the second reading would be a thing to remember rather than a thing to guess.
+ *
+ * Either way the other end must be readable — otherwise `related:Parent` would report that a
+ * contact has a parent in a household you have no access to.
+ */
+export function relatedClause(
+  value: string,
+  op: Comparison,
+  viewer: Viewer,
+): Prisma.PersonWhereInput {
+  const named = { displayName: matches(value, op) };
+  const kind = {
+    type: { OR: [{ label: matches(value, op) }, { inverseLabel: matches(value, op) }] },
+  };
+  return {
+    OR: [
+      {
+        relationshipsFrom: {
+          some: { AND: [{ to: viewer.readablePeople }, { OR: [{ to: named }, kind] }] },
+        },
+      },
+      {
+        relationshipsTo: {
+          some: { AND: [{ from: viewer.readablePeople }, { OR: [{ from: named }, kind] }] },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Gave or received a particular gift.
+ *
+ * Both directions, and scoped the way `has:gift` is: a gift is readable to whoever may read
+ * its RECIPIENT, so a received one needs no further test — the recipient is the contact being
+ * matched — while a given one is only visible through a recipient this viewer can see.
+ */
+export function giftClause(
+  value: string,
+  op: Comparison,
+  viewer: Viewer,
+): Prisma.PersonWhereInput {
+  const gift = {
+    OR: [{ description: matches(value, op) }, { notes: matches(value, op) }],
+  };
+  return {
+    OR: [
+      { giftsReceived: { some: { gift } } },
+      {
+        giftsGiven: {
+          some: {
+            AND: [gift, { recipients: { some: { person: viewer.readablePeople } } }],
+          },
+        },
+      },
+    ],
+  };
+}
+
+/** Fields that take `>` and `<`, because their value is a date somewhere. */
+export const COMPARABLE_FIELDS: readonly string[] = ["attended", "event", "seen"];
 
 /** Text search across the columns and contact points a person is findable by. */
 export function anywhereClause(q: string): Prisma.PersonWhereInput {

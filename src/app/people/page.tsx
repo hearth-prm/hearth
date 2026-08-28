@@ -54,13 +54,19 @@ export default async function PeoplePage({
   const params = await searchParams;
   const filter = parseFilter(params);
 
-  const [defs, settings, shareableUsers, viewer, saved] = await Promise.all([
+  const [defs, settings, shareableUsers, viewer, relationshipTypes, saved] = await Promise.all([
     loadRegistry(user.id, "PERSON"),
     getUserSettings(user.id),
     listOtherUsers(user.id),
     // Alongside the others rather than before them: the extra query for "am I the head of
     // the household" costs nothing when it is one of four in flight at once.
     loadViewer(user.id),
+    // Offered as `related:` values. Built-ins have a null ownerId, so both are in scope.
+    prisma.relationshipType.findMany({
+      where: { OR: [{ ownerId: null }, { ownerId: user.id }] },
+      orderBy: { order: "asc" },
+      select: { label: true, inverseLabel: true },
+    }),
     prisma.savedFilter.findMany({
       where: { ownerId: user.id },
       orderBy: { name: "asc" },
@@ -182,7 +188,13 @@ export default async function PeoplePage({
         filter={filter}
         labels={labels}
         resultCount={total}
-        vocab={searchVocabulary(defs, labelRows.map((l) => l.name))}
+        vocab={searchVocabulary(
+          defs,
+          labelRows.map((l) => l.name),
+          // Both directions, deduplicated: a symmetric kind has the same word twice, and
+          // offering "Spouse of" once is the point of the list.
+          [...new Set(relationshipTypes.flatMap((t) => [t.label, t.inverseLabel]))],
+        )}
         // Passed only when a model is configured, so an install without one shows no button
         // rather than a button that always fails. Same shape as the Places provider.
         interpret={naturalLanguageConfigured() ? interpretSearch : undefined}

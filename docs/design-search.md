@@ -1,6 +1,6 @@
 # Design: search and filtering
 
-Status: **phases 1–4 built.** Phase 5 agreed, not started. Supersedes the four fixed filter dimensions in
+Status: **phases 1–5 built.** Supersedes the four fixed filter dimensions in
 [src/lib/people-filter.ts](../src/lib/people-filter.ts), which stay working throughout.
 
 Decisions taken: phase 1 covers single-entity predicates only; the precise path before the
@@ -69,6 +69,19 @@ for the whole value. A comparison on a text field is refused rather than ignored
 **Scope of phase 1 is single-entity only**: person columns, contact points and their parts,
 custom fields, labels, presence, Google state, relation, dates. Events, relationships and
 gifts wait for phase 5 — they need their own access clauses and roughly double the compiler.
+
+**Amended again after phase 5** — the valued cross-entity predicates landed as `attended:`,
+`related:` and `gift:`, and they did not double the compiler: they are three clause builders in
+`predicates.ts` sharing the same date helper and the same `matches()` as everything else. What
+made them cheap was `loadViewer` already carrying the access clauses, so each one is a nested
+`some` with the viewer's own readable-clause inside it. Two decisions worth keeping:
+
+- **`attended:` reads a comparison as the date and a plain word as the title.** A second field
+  name for the same idea would have been a thing to remember rather than a thing to guess, and
+  `-attended:>1y` — "who have I not seen in a year" — is the single most valuable query in the
+  whole language.
+- **`related:` matches either the other person's name or the kind of relationship.** Same
+  reasoning. Both readings are obvious once you know it does both.
 
 **Amended after phase 3** — the *presence* half of the cross-entity work came forward, because
 it turned out not to need the compiler at all. `has:relationship`, `has:event`, `has:gift` and

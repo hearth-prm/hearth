@@ -5416,9 +5416,43 @@ try {
     combineQuery: combine,
   } = await import("@/lib/search/chips");
 
+  /**
+   * Two queries compiling to the same clause, compared structurally with a tolerance on dates.
+   *
+   * The tolerance is not laziness. A relative date is resolved against the clock at compile
+   * time, so `updated:>30d` compiled twice gives two Dates a millisecond apart and a
+   * JSON.stringify comparison fails at random — which is exactly what the first version of
+   * this did, and it passed only because the two calls happened to land in the same
+   * millisecond. Found while breaking the access scoping deliberately to check §32 bites: the
+   * run reported a fifth failure that had nothing to do with the change, which is the useful
+   * kind of accident.
+   */
+  const clausesMatch = (a: unknown, b: unknown): boolean => {
+    if (a instanceof Date || b instanceof Date) {
+      return (
+        a instanceof Date && b instanceof Date &&
+        Math.abs(a.getTime() - b.getTime()) < 2_000
+      );
+    }
+    if (Array.isArray(a) || Array.isArray(b)) {
+      return (
+        Array.isArray(a) && Array.isArray(b) && a.length === b.length &&
+        a.every((v, i) => clausesMatch(v, b[i]))
+      );
+    }
+    if (a && b && typeof a === "object" && typeof b === "object") {
+      const ka = Object.keys(a).sort();
+      const kb = Object.keys(b).sort();
+      return (
+        ka.join() === kb.join() &&
+        ka.every((k) => clausesMatch((a as Record<string, unknown>)[k],
+                                     (b as Record<string, unknown>)[k]))
+      );
+    }
+    return a === b;
+  };
   const sameWhere = (a: string, b: string) =>
-    JSON.stringify(compileQuery(a, qViewer, qDefs).where) ===
-    JSON.stringify(compileQuery(b, qViewer, qDefs).where);
+    clausesMatch(compileQuery(a, qViewer, qDefs).where, compileQuery(b, qViewer, qDefs).where);
 
   const chipsOf = (q: string): string => {
     const row = chipsFromQuery(q);
@@ -5606,6 +5640,216 @@ try {
      meaningChanged.length === 0, meaningChanged);
   ok("31.10b like:bob and a bare bob are the same search",
      sameWhere("bob", "like:bob"));
+  // The tolerance above must not have turned the comparison into "both are dates".
+  ok("31.10c and two genuinely different dates still compare as different",
+     !sameWhere("updated:>30d", "updated:>60d") && !sameWhere("updated:>30d", "created:>30d"));
+
+  section("§32 Asking through another record")
+
+  const { searchVocabulary: vocabForCross } = await import("@/lib/search/compile");
+  const crossKinds = await prisma.relationshipType.findMany({ select: { label: true } });
+  const searchVocabForCross = vocabForCross(qDefs, [], crossKinds.map((t) => t.label));
+
+  // attended:, related: and gift: ask about a contact through an event, a relationship or a
+  // gift — so each one is an access decision as much as a query. The rule is the same every
+  // time: the OTHER record has to be one this viewer could already have opened. A predicate
+  // that reveals the existence of an event you cannot see is a leak even when it never shows
+  // you what the event was, which is why every check below has a matching one from the other
+  // side rather than only asserting the happy path.
+
+  const xLabel = await prisma.label.create({ data: { ownerId: A.id, name: "Cross Entity" } });
+  const mkCross = async (name: string, ownerId: string) =>
+    prisma.person.create({
+      data: {
+        ownerId, displayName: `${name} Cross`, givenName: name, familyName: "Cross",
+        labels: ownerId === A.id ? { create: [{ labelId: xLabel.id }] } : undefined,
+      },
+    });
+  const xAda = await mkCross("Ada", A.id);
+  const xBen = await mkCross("Ben", A.id);
+  const xCal = await mkCross("Cal", A.id);
+  // Owned by B and never shared, so A cannot see it. §5 gives B a blanket grant over A's
+  // contacts and not the other way round, which is why the invisible side is always B's — the
+  // trap that caught three checks in §29 and §30.
+  const xHidden = await prisma.person.create({
+    data: { ownerId: B.id, displayName: "Hidden Cross", givenName: "Hidden", familyName: "Cross" },
+  });
+
+  const xNames = async (q: string, viewer = qViewer): Promise<string[]> => {
+    const { where } = compileQuery(q, viewer, qDefs);
+    const rows = await prisma.person.findMany({
+      where: { AND: [viewer.readablePeople, where] },
+      select: { displayName: true },
+      orderBy: { displayName: "asc" },
+    });
+    return rows.map((r) => r.displayName);
+  };
+
+  // --- attended: ------------------------------------------------------------
+
+  const xPicnic = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Cross Entity Picnic",
+      startAt: new Date("2026-07-04T12:00:00Z"), endAt: new Date("2026-07-04T14:00:00Z"),
+      attendees: { create: [{ personId: xAda.id }, { personId: xBen.id }] },
+    },
+  });
+  // Long ago, so the "not seen in a year" question has something to find.
+  await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Cross Entity Reunion",
+      startAt: new Date("2019-05-01T12:00:00Z"),
+      attendees: { create: [{ personId: xCal.id }] },
+    },
+  });
+
+  ok("32.1 attended: matches an event by name",
+     (await xNames('attended:"Cross Entity Picnic" label:"Cross Entity"')).join() ===
+       "Ada Cross,Ben Cross",
+     await xNames('attended:"Cross Entity Picnic" label:"Cross Entity"'));
+  ok("32.1b and part of a name, like every other text predicate",
+     (await xNames('attended:Picnic label:"Cross Entity"')).join() === "Ada Cross,Ben Cross");
+  ok("32.1c an exact match asks for the whole title",
+     (await xNames('attended:=Picnic label:"Cross Entity"')).length === 0 &&
+       (await xNames('attended:="Cross Entity Picnic" label:"Cross Entity"')).length === 2);
+
+  // The question a relationship manager exists to answer.
+  ok("32.2 attended:>1y is who you have seen recently",
+     (await xNames('attended:>1y label:"Cross Entity"')).join() === "Ada Cross,Ben Cross",
+     await xNames('attended:>1y label:"Cross Entity"'));
+  ok("32.2b and -attended:>1y is who you have not",
+     (await xNames('-attended:>1y label:"Cross Entity"')).join() === "Cal Cross",
+     await xNames('-attended:>1y label:"Cross Entity"'));
+  ok("32.2c a bare date that looks like one is read as one",
+     (await xNames('attended:2026-07 label:"Cross Entity"')).join() === "Ada Cross,Ben Cross" &&
+       (await xNames('attended:2019 label:"Cross Entity"')).join() === "Cal Cross",
+     [await xNames('attended:2026-07 label:"Cross Entity"'),
+      await xNames('attended:2019 label:"Cross Entity"')]);
+  ok("32.2d a value that is not a date is a title, not an error",
+     (await xNames('attended:Reunion label:"Cross Entity"')).join() === "Cal Cross");
+  ok("32.2e and a date that is not a date says so",
+     (() => {
+       try {
+         compileQuery("attended:>banana", qViewer, qDefs);
+         return false;
+       } catch (err) {
+         return /is not a date/.test((err as Error).message);
+       }
+     })());
+
+  // The access side. B owns an event A cannot see, with one of A's own contacts on the guest
+  // list — A may read the contact and must still not learn the event exists.
+  const bEvent = await prisma.event.create({
+    data: {
+      ownerId: B.id, title: "Bees Private Meeting",
+      startAt: new Date("2026-06-01T12:00:00Z"),
+      attendees: { create: [{ personId: xAda.id }] },
+    },
+  });
+  ok("32.3 an event you cannot see is not something you can ask about",
+     !(await xNames("attended:Bees")).includes("Ada Cross"), await xNames("attended:Bees"));
+  ok("32.3b while its owner can, so the check above is not passing on an empty clause",
+     (await xNames("attended:Bees", qViewerB)).includes("Ada Cross"),
+     await xNames("attended:Bees", qViewerB));
+
+  // --- related: -------------------------------------------------------------
+
+  const xType = await prisma.relationshipType.findFirstOrThrow({ where: { ownerId: null } });
+  await prisma.relationship.create({
+    data: { ownerId: A.id, fromPersonId: xAda.id, toPersonId: xBen.id, typeId: xType.id },
+  });
+
+  ok("32.4 related: matches the other person's name, in both directions",
+     (await xNames('related:Ben label:"Cross Entity"')).join() === "Ada Cross" &&
+       (await xNames('related:Ada label:"Cross Entity"')).join() === "Ben Cross",
+     [await xNames('related:Ben label:"Cross Entity"'),
+      await xNames('related:Ada label:"Cross Entity"')]);
+  ok("32.4b and the KIND of relationship, which is the other useful reading",
+     (await xNames(`related:"${xType.label}" label:"Cross Entity"`)).join() ===
+       "Ada Cross,Ben Cross",
+     await xNames(`related:"${xType.label}" label:"Cross Entity"`));
+  ok("32.4c somebody with no relationship at all is not in either answer",
+     !(await xNames(`related:"${xType.label}" label:"Cross Entity"`)).includes("Cal Cross"));
+
+  // A relationship whose other end is invisible must not be reported, by name OR by kind —
+  // otherwise related:Parent would say a contact has a parent in a household you cannot open.
+  await prisma.relationship.create({
+    data: { ownerId: B.id, fromPersonId: xHidden.id, toPersonId: xCal.id, typeId: xType.id },
+  });
+  ok("32.5 a relationship to somebody you cannot see is not reported by name",
+     !(await xNames("related:Hidden")).includes("Cal Cross"), await xNames("related:Hidden"));
+  ok("32.5b nor by kind, which is the leak that is easy to miss",
+     !(await xNames(`related:"${xType.label}" label:"Cross Entity"`)).includes("Cal Cross"),
+     await xNames(`related:"${xType.label}" label:"Cross Entity"`));
+  ok("32.5c while B, who can see both ends, gets it",
+     (await xNames("related:Hidden", qViewerB)).includes("Cal Cross"),
+     await xNames("related:Hidden", qViewerB));
+
+  // --- gift: ----------------------------------------------------------------
+
+  await prisma.gift.create({
+    data: {
+      ownerId: A.id, giverId: xAda.id, description: "A red kite", notes: "from the seaside shop",
+      recipients: { create: [{ personId: xBen.id }] },
+    },
+  });
+  ok("32.6 gift: finds the giver and the recipient",
+     (await xNames('gift:kite label:"Cross Entity"')).join() === "Ada Cross,Ben Cross",
+     await xNames('gift:kite label:"Cross Entity"'));
+  ok("32.6b and matches the note as well as the description, since either may hold the detail",
+     (await xNames('gift:seaside label:"Cross Entity"')).join() === "Ada Cross,Ben Cross",
+     await xNames('gift:seaside label:"Cross Entity"'));
+  ok("32.6c a contact with no such gift is not in the answer",
+     !(await xNames('gift:kite label:"Cross Entity"')).includes("Cal Cross"));
+
+  // A gift follows its recipient. Seeing the giver must not reveal what they gave a household
+  // you have no access to — the same rule readableGiftsWhere applies, asked from the giver's
+  // side, and the same shape as §29.12.
+  await prisma.gift.create({
+    data: {
+      ownerId: B.id, giverId: xCal.id, description: "A secret trombone",
+      recipients: { create: [{ personId: xHidden.id }] },
+    },
+  });
+  ok("32.7 a gift to somebody you cannot see is not something you can ask about",
+     !(await xNames("gift:trombone")).includes("Cal Cross"), await xNames("gift:trombone"));
+  ok("32.7b while the viewer who can see the recipient gets it",
+     (await xNames("gift:trombone", qViewerB)).includes("Cal Cross"),
+     await xNames("gift:trombone", qViewerB));
+
+  // --- the pieces compose ---------------------------------------------------
+
+  ok("32.8 the new predicates combine with everything else",
+     (await xNames('label:"Cross Entity" attended:Picnic gift:kite')).join() ===
+       "Ada Cross,Ben Cross",
+     await xNames('label:"Cross Entity" attended:Picnic gift:kite'));
+  ok("32.8b including inside a group",
+     (await xNames('label:"Cross Entity" (attended:Reunion or gift:kite)')).join() ===
+       "Ada Cross,Ben Cross,Cal Cross",
+     await xNames('label:"Cross Entity" (attended:Reunion or gift:kite)'));
+  ok("32.8c and they chip like any other term",
+     chipsOf('attended:>1y related:Ben gift:kite') ===
+       "attended:>1y | AND related:Ben | AND gift:kite",
+     chipsOf('attended:>1y related:Ben gift:kite'));
+  ok("32.9 the box offers them, and offers the relationship kinds for related:",
+     searchVocabForCross.fields.includes("attended") &&
+       searchVocabForCross.fields.includes("related") &&
+       searchVocabForCross.fields.includes("gift") &&
+       (searchVocabForCross.values.related ?? []).length > 0,
+     searchVocabForCross.values.related);
+
+  await A.page.goto('/people?q=label%3A"Cross Entity"%20-attended%3A%3E1y');
+  ok("32.10 and the whole thing works through the browser",
+     ((await A.page.textContent("tbody")) ?? "").includes("Cal Cross") &&
+       !((await A.page.textContent("tbody")) ?? "").includes("Ada Cross"),
+     await A.page.textContent("tbody"));
+
+  await prisma.event.deleteMany({ where: { id: { in: [xPicnic.id, bEvent.id] } } });
+  await prisma.event.deleteMany({ where: { title: "Cross Entity Reunion" } });
+  await prisma.person.deleteMany({
+    where: { id: { in: [xAda.id, xBen.id, xCal.id, xHidden.id] } },
+  });
+  await prisma.label.delete({ where: { id: xLabel.id } });
 
   section("§22 On a phone");
 

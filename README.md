@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 734 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 761 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -55,15 +55,17 @@ over to, other users on the same install.
 | ✅ | A query language for the people list, with autocomplete | Done |
 | ✅ | A sentence turned into a query by a model on your own network | Done |
 | ✅ | `semantic:` — finding contacts by meaning rather than spelling | Done |
+| ✅ | Chips, saved filters, and asking through events, relationships and gifts | Done |
 
-[Search and filtering](docs/design-search.md) is built through its fourth phase: a query
-language, autocomplete for it, a sentence turned into a query by a model on your own network,
-and `semantic:` for searching by meaning. One piece of work is designed and queued rather than
-built — [sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
+[Search and filtering](docs/design-search.md) is built out: a query language with chips and
+saved filters, autocomplete, a sentence turned into a query by a model on your own network,
+`semantic:` for searching by meaning, and `attended:` / `related:` / `gift:` for asking through
+another record. One piece of work is designed and queued rather than built —
+[sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
 intentions.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 734 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 761 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -717,6 +719,31 @@ Three of them are questions about other records, and each is scoped to what you 
 see: `has:relationship`, `has:event`, and `has:gift`. Seeing somebody does not entitle you to
 the list of what they gave a household you have no access to, so a gift is only visible
 through a recipient you can see.
+
+#### Asking through another record
+
+Three predicates ask about a contact through something else it is attached to:
+
+```
+attended:Picnic          on the guest list of an event whose name contains that
+attended:>1y             seen at something in the last year
+-attended:>1y            not seen at anything in the last year
+related:Mary             related to somebody whose name contains that
+related:Parent           related in that way, whatever the person
+gift:kite                gave or received a gift matching that
+```
+
+`attended:` reads a comparison as the event's **date** and a plain word as its **title** — so
+`attended:2026-07` is July and `attended:Picnic` is the picnic. A value that looks like a date is
+treated as one. `related:` matches either the other person's name or the kind of relationship,
+because both readings are useful and neither is what you would call the other; the box offers
+your relationship kinds after `related:`.
+
+Each of them is scoped to what you can already see: an event, a relationship or a gift you have
+no access to is not something you can ask about, even indirectly. A predicate that reveals such
+a record exists would be a leak even if it never showed you what it was — so `related:Parent`
+will not report that a contact has a parent in a household you cannot open, and a gift is
+visible only through a recipient you can see.
 
 #### Searching by meaning
 
