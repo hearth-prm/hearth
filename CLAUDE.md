@@ -1,6 +1,6 @@
 # Working on Hearth
 
-A self-hosted personal relationship manager: contacts, events, relationships, labels,
+AGPL-3.0. A self-hosted personal relationship manager: contacts, events, relationships, labels,
 gifts, one-way sync out to Google. Next.js 15.5 App Router · React 19 · Prisma 6 ·
 Postgres 16 · Auth.js v5 · Tailwind 4 · TypeScript. Deployed as a single Docker container
 on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 790 checks
+npm run e2e         # builds, then drives a real browser through 816 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -44,6 +44,16 @@ a filtered list stays a URL. Three consequences, each of which has already bitte
   §31.9f. The first version of that check assumed brackets appeared, the second documented the
   surprising precedence instead, and the third produces the brackets now that a group can be a
   chip. Only the third is both correct and unsurprising.
+
+**Sign-in is gated by `HEARTH_ALLOWED_EMAILS`, in Auth.js's `signIn` CALLBACK.** The callback,
+not the event — `@auth/core` runs `handleAuthorized` before `handleLoginOrRegister`, so
+returning falsy leaves no User row, no contact card and no card shares. Returning a STRING
+redirects instead, which is how the refusal gets a message naming the variable. The rule lives
+in `auth-allowlist.ts` and is pure, because the harness seeds sessions directly and can never
+drive the callback itself. An existing user is ALWAYS allowed: a typo in the variable must not
+lock the operator out. This hole existed for months and was invisible because the OAuth app's
+"Testing" status made Google's test-user list a de facto allowlist — look for other controls
+that only exist in this environment by accident.
 
 **Sticky shares are reconciled, never reacted to.** `reconcilePersonShares(tx, personId)` in
 `shares/sticky.ts` recomputes the shares a contact's labels imply; six paths call it and a

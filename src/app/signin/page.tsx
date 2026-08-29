@@ -11,6 +11,12 @@ const AUTH_ERRORS: Record<string, string> = {
   AccessDenied: "Google sign-in was cancelled or denied.",
   Configuration:
     "Hearth is misconfigured — check AUTH_SECRET, AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET.",
+  // Names the variable, because the person reading this is almost always the person who can
+  // edit it — and "access denied" alone sends them looking in Google instead.
+  NotAllowed:
+    "That Google account is not allowed to use this Hearth. Whoever runs it can add the " +
+    "address to HEARTH_ALLOWED_EMAILS and restart.",
+  NoEmail: "That Google account has no email address, which Hearth needs to identify you.",
 };
 
 export default async function SignInPage({

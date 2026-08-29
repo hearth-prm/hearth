@@ -28,6 +28,40 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **Hearth is licensed under the AGPL-3.0.** `LICENSE` carries the full text, and the footer on
+  every page offers a link to the source of the running version — which is what the licence asks
+  of software people reach over a network. `HEARTH_SOURCE_URL` points that link at a fork, so an
+  operator who has modified Hearth is compliant by setting a variable rather than by editing
+  code.
+- **`HEARTH_ALLOWED_EMAILS` — who may sign in.** Addresses, or `@domain` for anyone at a domain.
+
+### Fixed
+
+- **Anyone with a Google account could join the install.** There was no sign-in gate at all: a
+  stranger who reached the sign-in page became a user, was given a contact card, and — because
+  every household card is shared with every user — could see every household member's card.
+  - It had been invisible because the Google OAuth app was in "Testing", where Google's own
+    test-user list *was* the allowlist. Publishing the app removed that gate silently. That is
+    the shape of a whole class of self-hosting bug: a control that exists in one environment by
+    accident and in nobody else's.
+  - Three rules, in order: somebody who already has an account may always sign in; if the
+    install has no users at all, the first sign-in claims it; otherwise the address must match
+    `HEARTH_ALLOWED_EMAILS`. Leaving the variable unset is therefore safe for an install that
+    already has a user — but it should be set before first boot on anything internet-reachable,
+    or the first stranger to find the URL claims the install.
+  - Rule one is deliberate: a typo in the variable must not lock the operator out of their own
+    Hearth, which is likelier than admitting somebody who already has an account. Removing
+    access means removing the user.
+  - The refusal happens in Auth.js's `signIn` **callback**, which `@auth/core` runs before the
+    adapter creates anything — so a refused stranger leaves no user row, no contact card and no
+    card shares behind. Verified by reading the callback flow, and recorded in the code, because
+    the harness seeds sessions directly and cannot drive it.
+  - The refusal names the variable on the sign-in page, since whoever reads that message is
+    usually the person who can edit it, and is distinguishable from Google itself denying
+    consent.
+
+### Added
+
 - **Shared labels.** A label can carry standing sharing intentions: mark one as shared with
   Karen, and every contact you file under it is shared with her automatically. Take the contact
   out and the share goes — unless another label still implies it. Filing a contact is the thing

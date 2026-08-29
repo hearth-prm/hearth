@@ -53,3 +53,19 @@ export function versionDetail(): string {
   }
   return parts.join(" · ");
 }
+
+/**
+ * Where to get the source of the running version.
+ *
+ * The AGPL asks that anyone interacting with the software over a network be offered its
+ * Corresponding Source, and that a MODIFIED version offer ITS source rather than the
+ * original's. So this is a setting: an operator running an unmodified Hearth gets the upstream
+ * repository for free, and one running a fork points it at their fork and is compliant without
+ * touching the code — which is precisely the case the licence is written about.
+ */
+const UPSTREAM_SOURCE = "https://gitlab.com/hammerling/hearth";
+
+export function sourceUrl(): string {
+  const configured = (process.env.HEARTH_SOURCE_URL ?? "").trim();
+  return configured || UPSTREAM_SOURCE;
+}

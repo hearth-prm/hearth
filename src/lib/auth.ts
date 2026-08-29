@@ -3,6 +3,7 @@ import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
 import { GOOGLE_SCOPES } from "@/lib/google/scopes";
+import { allowlistFromEnv, decideSignIn } from "@/lib/auth-allowlist";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -12,7 +13,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "database" },
   // Self-hosted installs sit behind a reverse proxy; AUTH_URL is authoritative.
   trustHost: true,
-  pages: { signIn: "/signin" },
+  // The error page is the sign-in page, so a refusal explains itself where somebody can act
+  // on it rather than on Auth.js's own bare error screen.
+  pages: { signIn: "/signin", error: "/signin" },
   providers: [
     Google({
       authorization: {
@@ -30,6 +33,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
+    /**
+     * The gate. Returning anything falsy aborts the sign-in BEFORE the adapter creates a
+     * user, which is the property that makes this a real gate rather than a greeting: the
+     * @auth/core callback flow runs handleAuthorized before handleLoginOrRegister, so a
+     * refused stranger leaves no User row, no contact card and no card shares behind.
+     *
+     * Returning a STRING redirects instead, which is how the refusal gets a message that names
+     * the variable to edit. §34 asserts both halves.
+     */
+    async signIn({ user, account }) {
+      // Only Google exists today; a provider added later has to opt in here deliberately
+      // rather than inherit access by being added.
+      if (account?.provider !== "google") return "/signin?error=Configuration";
+
+      const email = user.email?.toLowerCase() ?? null;
+      const [existing, total] = await Promise.all([
+        email
+          ? prisma.user.count({ where: { email: { equals: email, mode: "insensitive" } } })
+          : Promise.resolve(0),
+        prisma.user.count(),
+      ]);
+
+      const verdict = decideSignIn({
+        email,
+        isExistingUser: existing > 0,
+        hasAnyUser: total > 0,
+        entries: allowlistFromEnv(),
+      });
+      if (verdict.allow) return true;
+      return verdict.reason === "no-email"
+        ? "/signin?error=NoEmail"
+        : "/signin?error=NotAllowed";
+    },
+
     session({ session, user }) {
       if (session.user) session.user.id = user.id;
       return session;

@@ -6154,6 +6154,130 @@ try {
     where: { id: { in: [stickyA.id, stickyB.id, plainLabel.id] } },
   });
 
+  section("§34 Who may sign in")
+
+  // The callback itself is not driven here, and cannot be: the harness seeds a User and a
+  // Session directly, so no sign-in in this suite goes through @auth/core at all. Driving it
+  // would need a real Google round trip. So the rule is extracted into a pure module and
+  // tested exhaustively, the glue that feeds it is checked against the real database, and the
+  // message a refusal produces is checked in the browser — the same posture this file takes
+  // for server actions it cannot call.
+  //
+  // The one fact that cannot be tested from here was verified by reading @auth/core:
+  // handleAuthorized (which invokes the signIn callback) runs BEFORE handleLoginOrRegister
+  // (which creates the User), so a refusal leaves no user row, no contact card and no card
+  // shares behind. That ordering is what makes this a gate rather than a greeting.
+  const { parseAllowlist, allowlistPermits, decideSignIn } =
+    await import("@/lib/auth-allowlist");
+
+  ok("34.1 the list splits on commas, spaces and newlines",
+     parseAllowlist("a@x.test, b@x.test\n c@x.test").join() === "a@x.test,b@x.test,c@x.test",
+     parseAllowlist("a@x.test, b@x.test\n c@x.test"));
+  ok("34.1b and is case-insensitive, because an email address is",
+     parseAllowlist("Alice@Example.TEST").join() === "alice@example.test");
+  ok("34.1c an empty or unset value is an empty list, not a list containing nothing",
+     parseAllowlist("").length === 0 && parseAllowlist(undefined).length === 0 &&
+       parseAllowlist("  ,  ,").length === 0);
+
+  const entries = parseAllowlist("alice@example.test, @family.test");
+  ok("34.2 a whole address matches", allowlistPermits(entries, "alice@example.test"));
+  ok("34.2b whatever its case", allowlistPermits(entries, "ALICE@Example.Test"));
+  ok("34.2c a @domain entry matches anyone at that domain",
+     allowlistPermits(entries, "anybody@family.test"));
+  ok("34.2d and nobody at another domain",
+     !allowlistPermits(entries, "anybody@family.test.evil") &&
+       !allowlistPermits(entries, "alice@example.test.evil"),
+     [allowlistPermits(entries, "anybody@family.test.evil"),
+      allowlistPermits(entries, "alice@example.test.evil")]);
+  ok("34.2e a bare domain in the list does not match an address at it, since @ is the marker",
+     !allowlistPermits(parseAllowlist("family.test"), "bob@family.test"));
+  ok("34.2f and something that is not an address matches nothing",
+     !allowlistPermits(entries, "alice") && !allowlistPermits(entries, ""));
+
+  // --- the rule, in order ---------------------------------------------------
+
+  const verdict = (o: {
+    email?: string | null; isExistingUser?: boolean; hasAnyUser?: boolean; entries?: string[];
+  }) =>
+    decideSignIn({
+      // `in` rather than `??`: the whole point of two of these cases is to pass null and the
+      // empty string, and a default applied with ?? swallows both. 34.6b failed on exactly
+      // that — the check was right and the helper was wrong.
+      email: "email" in o ? o.email : "stranger@nowhere.test",
+      isExistingUser: o.isExistingUser ?? false,
+      hasAnyUser: o.hasAnyUser ?? true,
+      entries: o.entries ?? [],
+    });
+
+  ok("34.3 a stranger is refused when the install already has users",
+     verdict({}).allow === false && verdict({}).reason === "not-allowed", verdict({}));
+  ok("34.3b which is the hole this closes: before it, they became a user with a contact card",
+     verdict({}).allow === false);
+  ok("34.4 an existing user is always allowed, so a typo cannot lock the operator out",
+     verdict({ isExistingUser: true }).allow === true &&
+       verdict({ isExistingUser: true, entries: ["somebody@else.test"] }).allow === true,
+     verdict({ isExistingUser: true, entries: ["somebody@else.test"] }));
+  ok("34.5 the first sign-in claims an empty install",
+     verdict({ hasAnyUser: false }).allow === true &&
+       verdict({ hasAnyUser: false }).reason === "first-user");
+  ok("34.5b but only while it is empty",
+     verdict({ hasAnyUser: true }).allow === false);
+  ok("34.6 an allowlisted address is let in",
+     verdict({ email: "new@family.test", entries: parseAllowlist("@family.test") }).allow === true);
+  ok("34.6b an account with no email is refused, since Hearth identifies people by one",
+     verdict({ email: null }).reason === "no-email" &&
+       verdict({ email: "" }).reason === "no-email");
+  // Rule order matters: an existing user is checked before the list, and the empty-install
+  // rule before it too. Asserted rather than assumed, because reordering them would produce a
+  // rule that reads the same and behaves differently.
+  ok("34.7 the rules are applied in order",
+     verdict({ isExistingUser: true, hasAnyUser: false }).reason === "existing-user" &&
+       verdict({ hasAnyUser: false, entries: parseAllowlist("@family.test") }).reason ===
+         "first-user");
+
+  // --- the glue, against the real database ---------------------------------
+
+  const existsByEmail = async (email: string) =>
+    (await prisma.user.count({
+      where: { email: { equals: email, mode: "insensitive" } },
+    })) > 0;
+  ok("34.8 the lookup the callback makes finds a real user",
+     await existsByEmail("alice@e2e.test"));
+  ok("34.8b case-insensitively, because Google may send a different case than was stored",
+     await existsByEmail("ALICE@E2E.TEST"));
+  ok("34.8c and does not find somebody who has never signed in",
+     !(await existsByEmail("nobody@e2e.test")));
+  ok("34.8d the install has users, so the first-user rule is not in play here",
+     (await prisma.user.count()) > 0);
+
+  // --- what a refused person sees ------------------------------------------
+
+  const anonForSignin = await A.context.browser()!.newContext({ baseURL: h.baseUrl });
+  const signinPage = await anonForSignin.newPage();
+  await signinPage.goto("/signin?error=NotAllowed");
+  const refusedText = (await signinPage.textContent("body")) ?? "";
+  ok("34.9 a refusal names the variable, because the reader is usually the person who edits it",
+     refusedText.includes("not allowed to use this Hearth") &&
+       refusedText.includes("HEARTH_ALLOWED_EMAILS"),
+     refusedText.slice(0, 200));
+  ok("34.9b and is distinguishable from Google itself refusing",
+     !refusedText.includes("cancelled or denied"));
+  await signinPage.goto("/signin?error=AccessDenied");
+  ok("34.9c which still has its own message",
+     ((await signinPage.textContent("body")) ?? "").includes("cancelled or denied"));
+
+  // --- the licence, which is a feature now ---------------------------------
+
+  await A.page.goto("/people");
+  const footer = (await A.page.textContent("footer")) ?? "";
+  ok("34.10 every page offers the source, which is what the AGPL asks of a network service",
+     footer.includes("source") && footer.includes("AGPL-3.0"), footer);
+  const href = await A.page.getAttribute('footer a:has-text("source")', "href");
+  ok("34.10b pointing at a repository, and overridable so a fork can point at itself",
+     (href ?? "").startsWith("http"), href);
+
+  await anonForSignin.close();
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

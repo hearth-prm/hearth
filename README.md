@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 790 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 816 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -66,7 +66,7 @@ another record. One piece of work is designed and queued rather than built —
 intentions — now built.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 790 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 816 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -116,11 +116,37 @@ docker compose down -v         # stop and destroy the database
 | `AUTH_URL` | yes | Public origin, no trailing slash. Must match Google's redirect URI. |
 | `AUTH_TRUST_HOST` | behind a proxy | `true` when running behind Caddy/nginx/Traefik. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
+| `HEARTH_ALLOWED_EMAILS` | see below | Who may sign in. Addresses and/or `@domain`, comma-separated. |
+| `HEARTH_SOURCE_URL` | no | Where to get this install's source, offered in the footer for the AGPL. Set it if you have modified Hearth. |
 | `APP_PORT` | no | Host port, default `3000`. |
 | `OLLAMA_URL` | no | A model on your own network for [asking in words](#asking-in-words). Unset means the feature is not offered. |
 | `OLLAMA_CHAT_MODEL` | no | Default `qwen2.5:7b-instruct`. |
 | `OLLAMA_EMBED_MODEL` | no | For [`semantic:`](#searching-by-meaning). Default `nomic-embed-text`. |
 | `SEARCH_INDEX_INTERVAL_SECONDS` | no | How often contacts are re-indexed. Default `300`, minimum `30`. |
+
+### Who may sign in
+
+Three rules, in order:
+
+1. Somebody who **already has an account** here may always sign in.
+2. If the install has **no users at all**, the first sign-in claims it.
+3. Otherwise the address must match `HEARTH_ALLOWED_EMAILS` — full addresses, or `@domain` for
+   anyone at that domain, separated by commas:
+
+```
+HEARTH_ALLOWED_EMAILS=you@gmail.com, partner@gmail.com, @yourfamily.example
+```
+
+Leaving it unset is safe for an install that already has a user: nobody new can join. But
+**set it before first boot if Hearth is reachable from the internet**, or the first stranger to
+find the URL claims the install instead of you.
+
+Rule 1 means a typo in the variable cannot lock you out of your own Hearth, which is a likelier
+disaster than admitting somebody who already has an account. It also means removing access is
+done by removing the *user*, not by editing this.
+
+A refused sign-in says so on the sign-in page and names the variable, because the person
+reading it is usually the person who can change it.
 
 ### Google Cloud setup
 
@@ -1414,6 +1440,14 @@ is no job anywhere that deletes by age.
 Deleting a user cascades to everything they own. The seeded relationship types
 (`ownerId = null`) are shared and survive.
 
+
 ## Licence
 
-Not yet chosen.
+Hearth is free software under the **GNU Affero General Public License, version 3** — see
+[LICENSE](LICENSE). You may run it, study it, change it and share it; if you distribute a
+modified version, or run one where other people can reach it over a network, those people are
+entitled to its source.
+
+Which is what `HEARTH_SOURCE_URL` is for: the footer offers a link to the source of the running
+version, and if you have changed anything, that link should point at *your* repository rather
+than this one. Set the variable and you are compliant without touching the code.

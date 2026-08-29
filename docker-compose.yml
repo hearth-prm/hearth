@@ -65,6 +65,11 @@ services:
       AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:?set AUTH_GOOGLE_SECRET in .env}"
       # Background sync. SYNC_ENABLED=false leaves the app running but stops the
       # in-process scheduler, for anyone driving sync from outside.
+      # Who may sign in. See .env.example: unset is safe once the install has a
+      # user, but set it before first boot on anything internet-reachable.
+      HEARTH_ALLOWED_EMAILS: "${HEARTH_ALLOWED_EMAILS:-}"
+      # Where to get this install's source, offered in the footer for the AGPL.
+      HEARTH_SOURCE_URL: "${HEARTH_SOURCE_URL:-}"
       GOOGLE_PLACES_API_KEY: "${GOOGLE_PLACES_API_KEY:-}"
       # Optional: a model on your own network for turning a sentence into a search
       # query. Empty means the feature is not offered.
