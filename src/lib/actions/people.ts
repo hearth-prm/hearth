@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { reconcilePersonShares } from "@/lib/shares/sticky";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
@@ -243,6 +244,11 @@ export async function restorePerson(form: FormData): Promise<void> {
       data: { googleSyncStatus: "PENDING" },
     });
     await tx.person.update({ where: { id }, data: { deletedAt: null } });
+
+    // Reconciliation skips a trashed contact — its shares are dormant anyway, since every
+    // access clause filters deletedAt — so a restore is where its labels get to imply shares
+    // again. After the update above, or it would still look trashed and be skipped.
+    await reconcilePersonShares(tx, id);
   });
 
   await recordPersonVersionAfter(id, { byUserId: user.id, source: "RESTORED" });

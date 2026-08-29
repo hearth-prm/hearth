@@ -10,6 +10,7 @@ import {
   writablePeopleWhere,
 } from "@/lib/access";
 import { parseFilter, type RawParams } from "@/lib/people-filter";
+import { reapForLostRecipients, reconcilePersonShares } from "@/lib/shares/sticky";
 import { resolvePeopleQuery } from "@/lib/search/resolve";
 import { genericFields, loadRegistry } from "@/lib/fields/registry";
 import { fieldInputName } from "@/lib/fields/types";
@@ -137,6 +138,7 @@ export async function bulkLabelPeople(
     });
 
     let changed = 0;
+    const lost: string[] = [];
     for (const person of people) {
       await prisma.$transaction(async (tx) => {
         const labelIds: string[] = [];
@@ -172,8 +174,11 @@ export async function bulkLabelPeople(
         changed += 1;
         // A label is a Google group, so a change here is a change to every copy.
         await requeueEveryCopy(tx, person.id, person.addToGoogle);
+        // And a label may decide who the contact is shared with.
+        lost.push(...(await reconcilePersonShares(tx, person.id)).lost);
       });
     }
+    await reapForLostRecipients(lost);
 
     revalidatePath("/people");
     return actionOk(

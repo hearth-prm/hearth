@@ -5,6 +5,12 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { requireUserForAction, requireWritablePerson } from "@/lib/access";
 import { isLabelColor, normaliseLabelName, labelKey } from "@/lib/labels";
+import {
+  applicableLabelsWhere,
+  reapForLostRecipients,
+  reconcileLabelShares,
+  reconcilePersonShares,
+} from "@/lib/shares/sticky";
 import { requeueEveryCopy, requeueLabelledContacts } from "@/lib/sync/requeue";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
@@ -140,6 +146,9 @@ export async function deleteLabel(form: FormData): Promise<void> {
     select: {
       id: true,
       googleGroups: { select: { userId: true, googleResourceName: true, googleEtag: true } },
+      // Who the label was sharing contacts with. Read BEFORE the delete for the same reason
+      // the groups are: the rows cascade away and take the only record of them with them.
+      impliedShares: { select: { withUserId: true } },
     },
   });
   if (!label) return;
@@ -169,23 +178,113 @@ export async function deleteLabel(form: FormData): Promise<void> {
     await tx.label.delete({ where: { id: label.id } });
   });
 
+  // The shares the label implied cascaded with it, so whoever held one may no longer be able
+  // to see the contact at all — and a Google copy nothing will ever update again is worse
+  // than no copy.
+  await reapForLostRecipients(label.impliedShares.map((s) => s.withUserId));
+
   revalidatePath("/settings/labels");
+  revalidatePath("/settings/sharing");
   revalidatePath("/people");
+}
+
+/**
+ * Who a label shares its contacts with.
+ *
+ * Owner-only, and that is load-bearing rather than tidy: a participant who could edit the set
+ * could add somebody and expose the owner's contacts to them. Participants see the set — they
+ * are consenting to it — but only the owner changes it.
+ *
+ * The whole set is replaced rather than added to, because it is presented as a list of every
+ * user with a permission each: a form that shows all three states has to be read as all three
+ * states, or unticking somebody would do nothing.
+ */
+export async function setLabelParticipants(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
+  let summary = "";
+  try {
+    const user = await requireUserForAction();
+    const labelId = readString(form, "labelId");
+
+    const label = await prisma.label.findFirst({
+      where: { id: labelId, ownerId: user.id },
+      select: { id: true, name: true },
+    });
+    if (!label) return actionError("That label no longer exists, or is not yours to share.");
+
+    // One entry per user, as `userId:PERMISSION`. Anything unrecognised is dropped rather
+    // than erroring: the only way to submit one is a stale form or a hand-made request, and
+    // in both cases the user's intent is served by applying the rest.
+    const wanted = new Map<string, "VIEW" | "EDIT">();
+    for (const raw of form.getAll("participant").map(String)) {
+      const [userId, permission] = raw.split(":");
+      if (!userId || (permission !== "VIEW" && permission !== "EDIT")) continue;
+      wanted.set(userId, permission);
+    }
+
+    const real = await prisma.user.findMany({
+      where: { id: { in: [...wanted.keys()] } },
+      select: { id: true },
+    });
+    const valid = new Set(real.map((u) => u.id));
+
+    await prisma.$transaction(async (tx) => {
+      await tx.labelShare.deleteMany({
+        where: { labelId: label.id, withUserId: { notIn: [...valid] } },
+      });
+      for (const [withUserId, permission] of wanted) {
+        if (!valid.has(withUserId)) continue;
+        await tx.labelShare.upsert({
+          where: { labelId_withUserId: { labelId: label.id, withUserId } },
+          create: { labelId: label.id, withUserId, permission },
+          update: { permission },
+        });
+      }
+    });
+
+    // Reaching the contacts already filed under it, not only the next one. Outside the
+    // transaction above because it takes one per contact — see reconcileLabelShares.
+    const run = await reconcileLabelShares(label.id);
+    await reapForLostRecipients(run.lost);
+
+    summary =
+      valid.size === 0
+        ? `“${label.name}” no longer shares anything.`
+        : `“${label.name}” shares with ${valid.size} ${valid.size === 1 ? "person" : "people"}: ` +
+          `${run.created} share${run.created === 1 ? "" : "s"} added, ${run.removed} withdrawn.`;
+  } catch (err) {
+    if (isFrameworkError(err)) throw err;
+    return toActionError(err);
+  }
+
+  revalidatePath("/settings/labels");
+  revalidatePath("/settings/sharing");
+  revalidatePath("/people");
+  return actionOk(summary);
 }
 
 /**
  * Replace a contact's labels.
  *
- * The labels must belong to the contact's OWNER, not to whoever is editing. A
- * shared contact carries one set of labels so it looks the same to everyone who can
- * see it, which means an editing recipient is choosing from the owner's labels —
- * the same rule the field registry already follows.
+ * The labels must be ones the contact's OWNER may use, not ones whoever is editing may use. A
+ * shared contact carries one set of labels so it looks the same to everyone who can see it,
+ * which means that set has to be a function of the contact rather than of the viewer — the
+ * same rule the field registry already follows.
+ *
+ * With sticky shares that rule does a second job for free. "Usable by the owner" means the
+ * owner's own labels plus sticky labels the owner participates in, so a recipient with EDIT
+ * can still file the contact under its owner's labels — unchanged — but cannot drag it into a
+ * sharing circle of their own, because a label they participate in and the owner does not is
+ * not applicable here.
  */
 export async function setPersonLabels(
   _prev: ActionState,
   form: FormData,
 ): Promise<ActionState> {
   const personId = readString(form, "personId");
+  let lost: string[] = [];
   try {
     const user = await requireUserForAction();
     const person = await requireWritablePerson(user.id, personId);
@@ -200,7 +299,7 @@ export async function setPersonLabels(
     // one is a stale form or a hand-made request, and in both cases the user's
     // intent is served by applying the labels that do belong here.
     const owned = await prisma.label.findMany({
-      where: { id: { in: requested }, ownerId: person.ownerId },
+      where: { AND: [{ id: { in: requested } }, applicableLabelsWhere(person.ownerId)] },
       select: { id: true },
     });
     const labelIds: string[] = owned.map((l) => l.id);
@@ -229,7 +328,16 @@ export async function setPersonLabels(
       // Labels decide Google group membership, so a change here is a change to
       // every copy — the owner's and each recipient's.
       await requeueEveryCopy(tx, personId, person.addToGoogle);
+
+      // And labels may decide who the contact is shared WITH. Inside the same
+      // transaction, because a contact filed somewhere it is not shared from is a
+      // half-applied change nobody would think to look for.
+      lost = (await reconcilePersonShares(tx, personId)).lost;
     });
+
+    // After the commit: withdrawing access withdraws it from that person's Google too, and
+    // the reaper writes tombstones in a transaction of its own.
+    await reapForLostRecipients(lost);
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);

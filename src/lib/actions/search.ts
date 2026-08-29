@@ -3,6 +3,7 @@
 import { requireUserForAction } from "@/lib/access";
 import { loadRegistry } from "@/lib/fields/registry";
 import { prisma } from "@/lib/db";
+import { usableLabelsWhere } from "@/lib/shares/sticky";
 import { searchVocabulary } from "@/lib/search/compile";
 import { translateToQuery, type Translation } from "@/lib/search/nl";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
@@ -28,7 +29,9 @@ export async function interpretSearch(
     const [registry, labels] = await Promise.all([
       loadRegistry(user.id, "PERSON"),
       prisma.label.findMany({
-        where: { ownerId: user.id },
+        // The same set the box offers, so a sentence can name a sticky label somebody
+        // participates in — anything else and the model is told a smaller language.
+        where: usableLabelsWhere(user.id),
         select: { name: true },
         orderBy: { name: "asc" },
       }),

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { reapForLostRecipients, reconcilePersonShares } from "@/lib/shares/sticky";
 import { recordPersonVersionAfter } from "@/lib/person-versions";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
@@ -104,6 +105,9 @@ export async function applyImport(
       });
       labelsMade += result.labelsCreated;
       sharesMade += result.sharesCreated;
+      // Per row, like the rest of this loop: a sticky label the file removed withdraws access,
+      // and a Google copy nothing will ever update again is worse than no copy.
+      await reapForLostRecipients(result.lostRecipients);
     }
 
     revalidatePath("/people");
@@ -147,10 +151,13 @@ async function applyRow(
   createdPerson: boolean;
   labelsCreated: number;
   sharesCreated: number;
+  /** Recipients a sticky label stopped sharing with, for the caller to reap. */
+  lostRecipients: string[];
 }> {
   return db.$transaction(async (tx) => {
     let labelsCreated = 0;
     let sharesCreated = 0;
+    const lostRecipients: string[] = [];
 
     const nameParts = write.columns as PersonNameParts;
     const personId = write.personId;
@@ -257,6 +264,8 @@ async function applyRow(
           skipDuplicates: true,
         });
       }
+      // A sticky label in the file shares the contact as surely as the sharing controls do.
+      lostRecipients.push(...(await reconcilePersonShares(tx, id)).lost);
     }
 
     for (const share of write.shares) {
@@ -296,6 +305,6 @@ async function applyRow(
       ).addToGoogle;
     await requeueEveryCopy(tx, id, addToGoogle);
 
-    return { personId: id, createdPerson, labelsCreated, sharesCreated };
+    return { personId: id, createdPerson, labelsCreated, sharesCreated, lostRecipients };
   });
 }

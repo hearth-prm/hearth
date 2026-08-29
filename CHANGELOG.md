@@ -28,6 +28,48 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **Shared labels.** A label can carry standing sharing intentions: mark one as shared with
+  Karen, and every contact you file under it is shared with her automatically. Take the contact
+  out and the share goes — unless another label still implies it. Filing a contact is the thing
+  people actually do; sharing is the thing they forget.
+  - **It works both ways.** The participant set is symmetric: Karen sees the label too, can
+    file her own contacts under it, and those are shared back with you and with everyone else in
+    it. A shared label is a shared filing cabinet, not a distribution list. One rule covers both
+    directions — *share from the contact's owner to every other participant* — where two rules
+    would have needed a decision at every call site about which applied.
+  - **Reconcile, not react.** One function recomputes the shares a contact's labels imply, and
+    it is called from all six paths that put a label on a contact: the picker, bulk labelling,
+    CSV import, the Google in-place import, ownership transfer, and restoring from the trash.
+    The obvious alternative — delete the shares a removed label implied — revokes access that a
+    *second* label still implies. Recomputation gets that right without knowing it was a hazard,
+    and §33.12 runs four separate label-arrival paths to the same shares.
+  - **A hand-made share and a rule-made one coexist**, as two rows. Every access clause tests
+    shares with `some`, so a manual VIEW beside a rule-made EDIT is simply EDIT: permissions are
+    additive with no merge logic anywhere. Reconciliation never raises, lowers or removes what a
+    person granted — proved by removing the provenance filter and watching §33.6 swallow the
+    hand-made share and §33.6c destroy it.
+  - **A share from a label says so** on the contact's sharing card — *"via Shared-Contacts"* —
+    and has no × of its own, because withdrawing it means taking the contact out of the label.
+    Otherwise the first thing anyone does is revoke it and watch it come back. The card groups by
+    recipient now rather than listing rows.
+  - **Only the owner edits the set**; participants see it. A participant who could edit it could
+    add somebody and expose the owner's contacts to them.
+  - The editor states the consequences before you save: how many contacts it will share, that it
+    works in both directions, and that shared contacts appear in the other person's Google
+    Contacts and disappear again when withdrawn.
+  - **Ownership transfer converts sticky shares to hand-made ones** rather than revoking them.
+    Transfer already deletes a contact's labels and deliberately keeps its shares so nobody
+    silently loses access; a strict reconcile would have revoked exactly the access that promise
+    protects.
+  - A trashed contact is skipped rather than stripped — its shares are dormant anyway, since
+    every access clause filters `deletedAt` — so restoring it has something to restore, and the
+    restore is where reconciliation runs again.
+  - Stickiness is **derived from the participant rows**, not a flag. A boolean saying "sticky"
+    with nobody in the set would be a state that does nothing, and one saying "not sticky" with
+    people in it would be a trap.
+
+### Added
+
 - **`attended:`, `related:` and `gift:` — asking about a contact through another record.**
   - `attended:Picnic` by event name, `attended:>1y` by when, and therefore `-attended:>1y` for
     *who have I not seen in a year* — the single most valuable query in the language and the

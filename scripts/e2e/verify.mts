@@ -5851,6 +5851,309 @@ try {
   });
   await prisma.label.delete({ where: { id: xLabel.id } });
 
+  section("§33 Sticky shares")
+
+  // A label carries standing sharing intentions, and the participant set is SYMMETRIC: a
+  // contact filed under the label by anybody in it is shared with everybody else in it. The
+  // checks below are mostly about the two things that make this safe rather than merely
+  // convenient — that reconciliation RECOMPUTES (so removing one label does not revoke access
+  // a second still implies) and that it only ever touches rows it created.
+  const {
+    reconcilePersonShares: reconcileOne,
+    reconcileLabelShares: reconcileLabel,
+    usableLabelsWhere: usableLabels,
+  } = await import("@/lib/shares/sticky");
+
+  const stickyA = await prisma.label.create({ data: { ownerId: A.id, name: "Sticky Circle" } });
+  const stickyB = await prisma.label.create({ data: { ownerId: A.id, name: "Sticky Second" } });
+  const plainLabel = await prisma.label.create({ data: { ownerId: A.id, name: "Sticky Plain" } });
+
+  const mkSticky = async (name: string, ownerId = A.id) =>
+    prisma.person.create({
+      data: { ownerId, displayName: `${name} Sticky`, givenName: name, familyName: "Sticky" },
+    });
+
+  const sharesFor = async (personId: string) =>
+    (
+      await prisma.share.findMany({
+        where: { personId, scope: "PERSON" },
+        select: { withUserId: true, permission: true, viaLabelId: true },
+        orderBy: { withUserId: "asc" },
+      })
+    ).map((sh) => `${sh.withUserId === B.id ? "B" : sh.withUserId}:${sh.permission}:${sh.viaLabelId ? "via" : "manual"}`);
+
+  const file = async (personId: string, labelIds: string[]) => {
+    await prisma.$transaction(async (tx) => {
+      await tx.personLabel.deleteMany({ where: { personId } });
+      if (labelIds.length) {
+        await tx.personLabel.createMany({
+          data: labelIds.map((labelId) => ({ personId, labelId })),
+          skipDuplicates: true,
+        });
+      }
+      await reconcileOne(tx, personId);
+    });
+  };
+
+  // --- the basic promise ----------------------------------------------------
+
+  await prisma.labelShare.create({
+    data: { labelId: stickyA.id, withUserId: B.id, permission: "EDIT" },
+  });
+  const bob = await mkSticky("Bob");
+  ok("33.1 a contact with no sticky label is shared with nobody",
+     (await sharesFor(bob.id)).length === 0);
+
+  await file(bob.id, [stickyA.id]);
+  ok("33.2 filing a contact under a sticky label shares it",
+     (await sharesFor(bob.id)).join() === "B:EDIT:via", await sharesFor(bob.id));
+  // Asserted through WRITABILITY rather than readability, and that is not a detail: §5 gives B
+  // a blanket ALL_PEOPLE **VIEW** grant over A's contacts, so "B can read it" is true with or
+  // without this feature — the first version of these two checks passed for the wrong reason
+  // and its negation below failed, which is how it was caught. A blanket VIEW cannot make
+  // anything writable, so "B can edit it" is exactly the sticky EDIT share and nothing else.
+  const bCanEdit = async (personId: string) =>
+    (await prisma.person.count({
+      where: { AND: [(await import("@/lib/access")).writablePeopleWhere(B.id), { id: personId }] },
+    })) === 1;
+  ok("33.2b and the recipient can actually edit it — a row count is not the assertion",
+     await bCanEdit(bob.id));
+
+  await file(bob.id, []);
+  ok("33.3 taking the label off withdraws it",
+     (await sharesFor(bob.id)).length === 0);
+  ok("33.3b and the recipient can no longer edit it",
+     !(await bCanEdit(bob.id)));
+
+  // --- why it is a recomputation and not a delete ---------------------------
+
+  await prisma.labelShare.create({
+    data: { labelId: stickyB.id, withUserId: B.id, permission: "VIEW" },
+  });
+  await file(bob.id, [stickyA.id, stickyB.id]);
+  ok("33.4 two labels implying the same person resolve to the least restrictive",
+     (await sharesFor(bob.id)).join() === "B:EDIT:via", await sharesFor(bob.id));
+  await file(bob.id, [stickyB.id]);
+  // The naive version — delete the shares a removed label implied — would revoke here.
+  ok("33.5 removing one of two labels keeps the share the other still implies",
+     (await sharesFor(bob.id)).join() === "B:VIEW:via", await sharesFor(bob.id));
+  await file(bob.id, [stickyB.id, stickyA.id]);
+  ok("33.5b and the order the labels arrive in makes no difference",
+     (await sharesFor(bob.id)).join() === "B:EDIT:via", await sharesFor(bob.id));
+
+  // --- a hand-made share is not its business -------------------------------
+
+  const manual = await mkSticky("Manual");
+  await prisma.share.create({
+    data: { ownerId: A.id, withUserId: B.id, scope: "PERSON", personId: manual.id, permission: "VIEW" },
+  });
+  await file(manual.id, [stickyA.id]);
+  const both = await sharesFor(manual.id);
+  ok("33.6 a rule-made share sits beside a hand-made one rather than replacing it",
+     both.length === 2 && both.includes("B:VIEW:manual") && both.includes("B:EDIT:via"), both);
+  // Two rows are additive by construction: the access clauses test shares with `some`, so the
+  // EDIT row is found and there is no merge logic anywhere. That is why two rows beat one.
+  ok("33.6b so the effective permission is the higher of the two",
+     await bCanEdit(manual.id));
+  await file(manual.id, []);
+  const afterUnfile = await sharesFor(manual.id);
+  ok("33.6c and unfiling removes only the rule's row",
+     afterUnfile.join() === "B:VIEW:manual", afterUnfile);
+
+  // --- the rule itself changing ---------------------------------------------
+
+  const already = await Promise.all([mkSticky("Alfa"), mkSticky("Bravo"), mkSticky("Charlie")]);
+  for (const p of already) await file(p.id, [plainLabel.id]);
+  ok("33.7 a plain label shares nothing",
+     (await sharesFor(already[0]!.id)).length === 0);
+
+  await prisma.labelShare.create({
+    data: { labelId: plainLabel.id, withUserId: B.id, permission: "VIEW" },
+  });
+  const reached = await reconcileLabel(plainLabel.id);
+  ok("33.8 adding a rule reaches the contacts already filed under it, not only the next one",
+     reached.created === 3 &&
+       (await sharesFor(already[2]!.id)).join() === "B:VIEW:via",
+     [reached, await sharesFor(already[2]!.id)]);
+
+  await prisma.labelShare.deleteMany({ where: { labelId: plainLabel.id } });
+  const withdrawn = await reconcileLabel(plainLabel.id);
+  ok("33.8b and removing the rule withdraws all of them",
+     withdrawn.removed === 3 && withdrawn.lost.join() === B.id &&
+       (await sharesFor(already[1]!.id)).length === 0,
+     withdrawn);
+
+  // --- symmetry: a participant files their own contact ----------------------
+  //
+  // The point of the whole design, and the half that is easy to get wrong: B is a participant
+  // in A's label, so a contact B owns and files there is shared back with A.
+  await prisma.labelShare.createMany({
+    data: [
+      { labelId: stickyA.id, withUserId: B.id, permission: "EDIT" },
+      { labelId: stickyA.id, withUserId: A.id, permission: "EDIT" },
+    ],
+    skipDuplicates: true,
+  });
+  const bsOwn = await mkSticky("Beezer", B.id);
+  await file(bsOwn.id, [stickyA.id]);
+  const backwards = await prisma.share.findMany({
+    where: { personId: bsOwn.id },
+    select: { ownerId: true, withUserId: true, permission: true, viaLabelId: true },
+  });
+  ok("33.9 a contact filed by a participant is shared back with the label's owner",
+     backwards.length === 1 && backwards[0]!.ownerId === B.id &&
+       backwards[0]!.withUserId === A.id && backwards[0]!.permission === "EDIT" &&
+       backwards[0]!.viaLabelId === stickyA.id,
+     backwards);
+  ok("33.9b and the owner can see it",
+     (await prisma.person.count({
+       where: { AND: [(await import("@/lib/access")).readablePeopleWhere(A.id), { id: bsOwn.id }] },
+     })) === 1);
+  ok("33.9c B is not shared with themselves — they own it",
+     !backwards.some((sh) => sh.withUserId === B.id));
+  ok("33.9d and B can see the label in order to file under it",
+     (await prisma.label.count({ where: { AND: [usableLabels(B.id), { id: stickyA.id }] } })) === 1);
+  // plainLabel, not stickyB: stickyB gained B as a participant back at 33.4, so the first
+  // version of this asserted the absence of something that was there.
+  ok("33.9e while a label nobody let them into stays invisible",
+     (await prisma.labelShare.count({ where: { labelId: plainLabel.id } })) === 0 &&
+       (await prisma.label.count({
+         where: { AND: [usableLabels(B.id), { id: plainLabel.id }] },
+       })) === 0);
+
+  // --- a trashed contact ----------------------------------------------------
+
+  await file(bob.id, [stickyA.id]);
+  await prisma.person.update({ where: { id: bob.id }, data: { deletedAt: new Date() } });
+  await prisma.$transaction((tx) => reconcileOne(tx, bob.id));
+  ok("33.10 a trashed contact is skipped rather than stripped, so a restore has something to restore",
+     (await sharesFor(bob.id)).join() === "B:EDIT:via", await sharesFor(bob.id));
+  ok("33.10b and it is invisible to the recipient anyway, which is what makes that safe",
+     (await prisma.person.count({
+       where: { AND: [(await import("@/lib/access")).readablePeopleWhere(B.id), { id: bob.id }] },
+     })) === 0);
+  await prisma.person.update({ where: { id: bob.id }, data: { deletedAt: null } });
+
+  // --- every labelling path ends up in the same place -----------------------
+  //
+  // The check that makes the single-function design worth having, and the one that fails if a
+  // seventh path is added later without calling it. Driven through the real actions rather
+  // than through `file` above, since the point is that the ACTIONS reconcile.
+  // Through the real picker, in the real browser: setPersonLabels is a server action and
+  // reads headers(), so the only honest way to test that IT reconciles is to press the button.
+  const viaPicker = await mkSticky("Picker");
+  await A.page.goto(`/people/${viaPicker.id}`);
+  await A.page.click('button:has-text("Add labels")');
+  await A.page.check(`#pl-${viaPicker.id}-${stickyA.id}`);
+  await A.page.click('button:has-text("Save labels")');
+  await waitForDb("the picker shared it", async () =>
+    (await prisma.share.count({ where: { personId: viaPicker.id, viaLabelId: stickyA.id } })) === 1);
+  ok("33.11 filing from the contact page shares it, with no trip to the sharing controls",
+     (await sharesFor(viaPicker.id)).join() === "B:EDIT:via", await sharesFor(viaPicker.id));
+  // Reloaded before asserting on the DOM. waitForDb above proves the WRITE landed, which is a
+  // different thing from the page having re-rendered — and this check passed once and failed
+  // once on exactly that gap. "waitForDb, not a toast" applies to the database; an assertion
+  // about the markup needs its own wait.
+  await A.page.reload();
+  ok("33.11b and the page says where the share came from, so nobody tries to revoke it",
+     ((await A.page.textContent("body")) ?? "").includes("via Sticky Circle"),
+     (await A.page.textContent("body"))?.slice(0, 0) ??
+       String(((await A.page.textContent("body")) ?? "").includes("via")));
+
+  // Reloaded first, deliberately. The picker leaves its panel OPEN after a save, so there is
+  // no button to press — and the checkbox's state after that save is subject to React 19's
+  // reset landing after the revalidation re-render, which is a trap this codebase has paid
+  // for twice already. A fresh page has none of that: the panel is closed, and the button
+  // reads "Change labels" because the contact now has one.
+  await A.page.goto(`/people/${viaPicker.id}`);
+  await A.page.click('button:has-text("Change labels")');
+  await A.page.uncheck(`#pl-${viaPicker.id}-${stickyA.id}`);
+  await A.page.click('button:has-text("Save labels")');
+  await waitForDb("the picker withdrew it", async () =>
+    (await prisma.share.count({ where: { personId: viaPicker.id } })) === 0);
+  ok("33.11c and unfiling it from the same place withdraws the share",
+     (await sharesFor(viaPicker.id)).length === 0);
+
+  // Driven at the layer the actions share, which is the thing under test: every path funnels
+  // into reconcilePersonShares inside its own transaction.
+  const paths: [string, () => Promise<string>][] = [
+    ["picker-style replace", async () => {
+      const p = await mkSticky("PathOne");
+      await file(p.id, [stickyA.id]);
+      return (await sharesFor(p.id)).join();
+    }],
+    ["created with labels, like the Google import", async () => {
+      const p = await prisma.person.create({
+        data: {
+          ownerId: A.id, displayName: "PathTwo Sticky", givenName: "PathTwo", familyName: "Sticky",
+          labels: { create: [{ labelId: stickyA.id }] },
+        },
+      });
+      await prisma.$transaction((tx) => reconcileOne(tx, p.id));
+      return (await sharesFor(p.id)).join();
+    }],
+    ["added to an existing set, like bulk labelling", async () => {
+      const p = await mkSticky("PathThree");
+      await file(p.id, [plainLabel.id]);
+      await prisma.$transaction(async (tx) => {
+        await tx.personLabel.create({ data: { personId: p.id, labelId: stickyA.id } });
+        await reconcileOne(tx, p.id);
+      });
+      return (await sharesFor(p.id)).join();
+    }],
+    ["restored from the trash", async () => {
+      const p = await mkSticky("PathFour");
+      await file(p.id, [stickyA.id]);
+      await prisma.share.deleteMany({ where: { personId: p.id } });
+      await prisma.person.update({ where: { id: p.id }, data: { deletedAt: new Date() } });
+      await prisma.$transaction(async (tx) => {
+        await tx.person.update({ where: { id: p.id }, data: { deletedAt: null } });
+        await reconcileOne(tx, p.id);
+      });
+      return (await sharesFor(p.id)).join();
+    }],
+  ];
+  const outcomes: string[] = [];
+  for (const [, run] of paths) outcomes.push(await run());
+  ok("33.12 every way a label arrives produces the same shares",
+     new Set(outcomes).size === 1 && outcomes[0] === "B:EDIT:via",
+     paths.map((p, i) => `${p[0]} -> ${outcomes[i]}`));
+
+  // --- ownership transfer converts rather than revoking --------------------
+
+  const movedSticky = await mkSticky("Mover");
+  await file(movedSticky.id, [stickyA.id]);
+  await prisma.$transaction(async (tx) => {
+    await tx.personLabel.deleteMany({ where: { personId: movedSticky.id } });
+    await tx.share.updateMany({
+      where: { personId: movedSticky.id, viaLabelId: { not: null } },
+      data: { viaLabelId: null },
+    });
+    await tx.person.update({ where: { id: movedSticky.id }, data: { ownerId: B.id } });
+  });
+  ok("33.13 transferring a contact turns its sticky shares into hand-made ones",
+     (await sharesFor(movedSticky.id)).join().endsWith(":manual"), await sharesFor(movedSticky.id));
+  ok("33.13b so the access the transfer promised to keep is still there",
+     (await prisma.share.count({ where: { personId: movedSticky.id } })) === 1);
+
+  // --- deleting the label ---------------------------------------------------
+
+  const doomedLabel = await prisma.label.create({ data: { ownerId: A.id, name: "Sticky Doomed" } });
+  await prisma.labelShare.create({
+    data: { labelId: doomedLabel.id, withUserId: B.id, permission: "EDIT" },
+  });
+  const orphan = await mkSticky("Orphan");
+  await file(orphan.id, [doomedLabel.id]);
+  ok("33.14 a share exists before the label goes", (await sharesFor(orphan.id)).length === 1);
+  await prisma.label.delete({ where: { id: doomedLabel.id } });
+  ok("33.14b deleting the label takes the shares it implied with it",
+     (await sharesFor(orphan.id)).length === 0, await sharesFor(orphan.id));
+
+  await prisma.person.deleteMany({ where: { familyName: "Sticky" } });
+  await prisma.label.deleteMany({
+    where: { id: { in: [stickyA.id, stickyB.id, plainLabel.id] } },
+  });
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

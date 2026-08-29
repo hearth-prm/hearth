@@ -70,6 +70,17 @@ export async function transferOwnership(
       // is not ours to do.
       await tx.personLabel.deleteMany({ where: { personId } });
 
+      // Sticky shares become hand-made ones.
+      //
+      // The labels are gone a line above, so reconciliation would revoke every share they
+      // implied — which is exactly the access this transfer has just promised not to take
+      // away. Clearing the provenance instead says the truth: these were granted by a rule
+      // that no longer applies, and they are now a standing grant to maintain by hand.
+      await tx.share.updateMany({
+        where: { personId, viaLabelId: { not: null } },
+        data: { viaLabelId: null },
+      });
+
       // Shares the old owner granted move with the record, so nobody the contact was
       // shared with silently loses it. The exception is a share TO the new owner,
       // which becomes meaningless.

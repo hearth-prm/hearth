@@ -15,7 +15,7 @@ already have in Google can be imported once, in place, when you first move in.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 761 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 790 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -56,16 +56,17 @@ over to, other users on the same install.
 | ✅ | A sentence turned into a query by a model on your own network | Done |
 | ✅ | `semantic:` — finding contacts by meaning rather than spelling | Done |
 | ✅ | Chips, saved filters, and asking through events, relationships and gifts | Done |
+| ✅ | Shared labels — filing a contact shares it, both ways | Done |
 
 [Search and filtering](docs/design-search.md) is built out: a query language with chips and
 saved filters, autocomplete, a sentence turned into a query by a model on your own network,
 `semantic:` for searching by meaning, and `attended:` / `related:` / `gift:` for asking through
 another record. One piece of work is designed and queued rather than built —
 [sticky shares](docs/design-sticky-shares.md), where a label carries standing sharing
-intentions.
+intentions — now built.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 761 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 790 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -887,6 +888,33 @@ The weights are gigabytes, an Unraid install would put them inside `docker.img`,
 Hearth would mean re-downloading a model that has not changed. A 7B model is chosen for
 latency rather than memory — a larger one translates no better on a task this constrained, and
 every extra second is a second somebody spends looking at a search box.
+
+#### Shared labels
+
+A label can carry standing sharing intentions. Mark *Shared-Contacts* as shared with Karen —
+**Settings → Labels → Sharing** — and every contact you file under it is shared with her
+automatically, with no trip to the sharing controls. Take a contact out and the share goes,
+unless another label still implies it.
+
+It works **both ways**, which is the point. Karen can see the label too and file *her own*
+contacts under it; those are shared back with you and with everybody else in the label. A shared
+label is a shared filing cabinet, not a distribution list. Only its owner decides who is in it —
+a participant who could change that could let somebody else at your contacts — but everyone in
+it can see the whole list, because they are consenting to it.
+
+Filing a contact is the thing people actually do. Sharing is the thing they forget, and a share
+nobody remembered to grant is indistinguishable from a decision not to.
+
+Two things worth knowing before you use it:
+
+- **A shared contact reaches that person's Google Contacts**, and disappears from it again when
+  the sharing is withdrawn. Adding somebody to a label with seventeen contacts in it shares
+  seventeen contacts immediately — the editor says the count before you save. Anyone who would
+  rather not receive other people's contacts in Google can turn that off in their own settings.
+- **A share that came from a label says so** on the contact's sharing card — *"via
+  Shared-Contacts"* — and has no × of its own, because withdrawing it means taking the contact
+  out of the label. A share you granted by hand keeps its own ×, and the two coexist: if you
+  granted View and the label grants Edit, the answer is Edit.
 
 The contact list also filters by label (any or all of them), by who can see a contact
 (mine, private, shared by me, shared with me), by Google sync state, and by whether

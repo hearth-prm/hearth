@@ -55,6 +55,7 @@ model User {
   tombstones        SyncTombstone[]
   sharesGiven       Share[]            @relation("SharesGiven")
   savedFilters      SavedFilter[]
+  labelShares       LabelShare[]
   sharesReceived    Share[]            @relation("SharesReceived")
   personSyncs       PersonSync[]
   labels            Label[]
@@ -743,17 +744,28 @@ model Share {
   /// Set for scope EVENT.
   eventId  String?
 
+  /// Which label's sticky rule created this share, or null if a person did.
+  ///
+  /// The whole design of sticky shares. Reconciliation only ever creates, updates or deletes
+  /// rows where this is set; a hand-made share is not its business, is never raised, lowered
+  /// or removed, and coexists with a rule-made row for the same pair. The access clauses test
+  /// shares with `some`, so two rows are additive by construction: a manual VIEW beside a
+  /// rule-made EDIT is EDIT, with no merge logic anywhere.
+  viaLabelId String?
+
   createdAt DateTime @default(now())
 
   owner    User    @relation("SharesGiven", fields: [ownerId], references: [id], onDelete: Cascade)
   withUser User    @relation("SharesReceived", fields: [withUserId], references: [id], onDelete: Cascade)
   person   Person? @relation(fields: [personId], references: [id], onDelete: Cascade)
   event    Event?  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  viaLabel Label?  @relation("ShareViaLabel", fields: [viaLabelId], references: [id], onDelete: Cascade)
 
   @@index([withUserId, scope])
   @@index([ownerId])
   @@index([personId])
   @@index([eventId])
+  @@index([viaLabelId])
 }
 
 // ---------------------------------------------------------------------------
@@ -822,9 +834,13 @@ model Label {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  people       PersonLabel[]
-  googleGroups LabelGroup[]
+  owner         User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  people        PersonLabel[]
+  googleGroups  LabelGroup[]
+  /// Who a contact filed under this label is shared with. Empty means an ordinary label.
+  participants  LabelShare[]
+  /// The shares this label currently implies. Cascade takes them with it.
+  impliedShares Share[]       @relation("ShareViaLabel")
 
   /// Names are the thing users type, filter by and match on import, so they have
   /// to be unique per owner or none of those operations has one answer. This also
@@ -1161,4 +1177,30 @@ model SavedFilter {
 
   @@unique([ownerId, name])
   @@index([ownerId])
+}
+
+/// One participant of a sticky-share label.
+///
+/// The participant set is SYMMETRIC: a contact filed under the label by any participant is
+/// shared with every other participant, at that participant's stated permission. So this is
+/// read as "what this person receives", whoever filed the contact.
+///
+/// The label's owner may have a row here too, and needs one to receive contacts other people
+/// file under the label — she is always allowed to USE her own label, but receives nothing
+/// without a row. Only she may edit the set; otherwise a participant could add somebody and
+/// expose her contacts to them.
+model LabelShare {
+  labelId    String
+  withUserId String
+  permission SharePermission @default(VIEW)
+
+  createdAt DateTime @default(now())
+
+  label    Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  withUser User  @relation(fields: [withUserId], references: [id], onDelete: Cascade)
+
+  @@id([labelId, withUserId])
+  /// Drives "which sticky labels am I a participant in", which widens somebody's label list
+  /// beyond the ones they own.
+  @@index([withUserId])
 }

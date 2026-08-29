@@ -1,6 +1,6 @@
 # Design: sticky shares on a label
 
-Status: **agreed, queued behind the search work.**
+Status: **built.** Amended in three places while building; see the end.
 
 ## What it is
 
@@ -114,3 +114,41 @@ watch it come back.
   later without calling it.
 - The recipient can actually see the contact afterwards, and cannot once it is withdrawn: a row
   count is not the assertion that matters.
+
+## Amended while building
+
+**The participant set is symmetric, and that was the point of the feature after all.** The
+design above only had the label's owner sharing outward. What was actually wanted is a shared
+filing cabinet: anybody in the label can file their own contacts under it, and those contacts
+are shared with everybody else in it — the owner included. So `LabelShare` is read as "what
+this person receives, whoever filed the contact", the owner may have a row of her own (and
+needs one to receive anything), and reconciliation is one rule for both directions: *share from
+the contact's owner to every other participant*. Two rules — one out, one back — would have
+needed a decision at every call site about which applied.
+
+Three consequences fell out of that:
+
+- A sticky label has to be **visible to participants**, so three read sites widened from
+  "labels I own" to `usableLabelsWhere`. The Google layer needed nothing: `LabelGroup` already
+  carried `@@unique([labelId, userId])` and the comment *"not necessarily the label's owner"*,
+  because Google groups are per-account.
+- `setPersonLabels` keys the allowed labels on the **contact's owner**, not the actor. That
+  keeps "one contact, one set of labels" true, and it also means a recipient with EDIT can file
+  the contact under its owner's labels — unchanged — but cannot drag it into a sharing circle of
+  their own, because a label they are in and the owner is not does not apply there.
+- **Only the owner edits the set.** A participant who could would be able to add somebody and
+  expose the owner's contacts to them. Participants see it, since they are consenting to it.
+
+**A hand-made share and a rule-made one coexist as two rows**, rather than the rule standing
+aside. Better than what this document originally proposed, for a reason worth stating: every
+access clause tests shares with `some`, so a manual VIEW beside a rule-made EDIT is simply
+EDIT — permissions are additive with **no merge logic anywhere**. The rule never raises,
+lowers or removes what a person granted, and nothing has to explain a silent no-op. The cost
+is that the sharing UI groups by recipient instead of listing rows, which it should have done
+anyway: two × buttons for one person, only one of which works, is worse than the grouping.
+
+**Ownership transfer converts sticky shares to manual** rather than revoking them. Transfer
+already deletes the contact's labels and deliberately keeps its shares so nobody silently loses
+access; a strict reconcile would have revoked exactly the access that promise protects.
+Clearing `viaLabelId` says the truth — granted by a rule that no longer applies, now a standing
+grant to maintain by hand.

@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 761 checks
+npm run e2e         # builds, then drives a real browser through 790 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -44,6 +44,16 @@ a filtered list stays a URL. Three consequences, each of which has already bitte
   §31.9f. The first version of that check assumed brackets appeared, the second documented the
   surprising precedence instead, and the third produces the brackets now that a group can be a
   chip. Only the third is both correct and unsurprising.
+
+**Sticky shares are reconciled, never reacted to.** `reconcilePersonShares(tx, personId)` in
+`shares/sticky.ts` recomputes the shares a contact's labels imply; six paths call it and a
+seventh must. It touches only rows with `viaLabelId` set — a hand-made share is never raised,
+lowered or removed, and the two coexist because the access clauses use `some`, which makes
+permissions additive with no merge logic. The naive delete-what-that-label-implied revokes
+access a SECOND label still implies; §33.5 is that check. A label's participant set is
+symmetric: any participant may file their own contacts under it, so `setPersonLabels` keys the
+allowed labels on the CONTACT'S OWNER — which keeps "one contact, one set of labels" true and
+stops a recipient dragging somebody else's contact into a circle of their own.
 
 **A cross-entity predicate is an access decision.** `attended:`, `related:` and `gift:` each
 nest the viewer's own readable-clause inside the `some` that reaches the other record, because a

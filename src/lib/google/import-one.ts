@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { reapForLostRecipients, reconcilePersonShares } from "@/lib/shares/sticky";
 import { computeDisplayName } from "@/lib/people";
 import { nextCustomFieldOrder } from "@/lib/fields/registry";
 import { recordPersonVersionAfter } from "@/lib/person-versions";
@@ -149,6 +150,12 @@ export async function importOne(
       console.warn(`[hearth] photo for ${contact.displayName}: ${outcome}`);
     }
   }
+
+  // A Google group that maps to a sticky label shares the contact as surely as the sharing
+  // controls do — which is the whole reason reconciliation is one function called from every
+  // labelling path rather than a rule bolted onto the picker.
+  const shares = await prisma.$transaction((tx) => reconcilePersonShares(tx, created.id));
+  await reapForLostRecipients(shares.lost);
 
   // The first version of an adopted contact is what Google had, which makes the history
   // start where the data did rather than at the first edit somebody makes afterwards.

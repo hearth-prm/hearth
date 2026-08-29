@@ -16,6 +16,7 @@ import {
 } from "@/lib/people-filter";
 import { deleteSavedFilter, saveFilter } from "@/lib/actions/saved-filters";
 import { resolvePeopleQuery } from "@/lib/search/resolve";
+import { usableLabelsWhere } from "@/lib/shares/sticky";
 import {
   btnPrimary,
   btnSecondary,
@@ -108,11 +109,12 @@ export default async function PeoplePage({
       },
     }),
     prisma.person.count({ where }),
-    // The filter bar offers the viewer's OWN labels. A label belonging to someone
-    // who shared a contact with you is theirs to manage, and offering it here would
-    // imply you could.
+    // The filter bar offers the labels the viewer may USE: their own, plus sticky labels
+    // they participate in — which they can file under, so they can certainly filter by. A
+    // label belonging to someone who merely shared a contact with you is theirs alone, and
+    // offering it here would imply you could file under it.
     prisma.label.findMany({
-      where: { ownerId: user.id },
+      where: usableLabelsWhere(user.id),
       orderBy: { name: "asc" },
       select: {
         id: true,

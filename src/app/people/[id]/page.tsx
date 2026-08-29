@@ -54,6 +54,7 @@ import { effectivePhotoFor } from "@/lib/photos-db";
 import { clearPersonPhoto, setPersonPhoto } from "@/lib/actions/photos";
 import { PersonLabelsForm } from "@/components/label-forms";
 import { setPersonLabels } from "@/lib/actions/labels";
+import { applicableLabelsWhere } from "@/lib/shares/sticky";
 import { revokeShare, shareRecord } from "@/lib/actions/shares";
 import { TransferForm } from "@/components/transfer-form";
 import { transferOwnership } from "@/lib/actions/transfer";
@@ -179,13 +180,19 @@ export default async function PersonPage({
       isOwner
         ? prisma.share.findMany({
             where: { ownerId: user.id, scope: "PERSON", personId: person.id },
-            include: { withUser: { select: { email: true } } },
+            include: {
+              withUser: { select: { email: true } },
+              viaLabel: { select: { name: true } },
+            },
           })
         : Promise.resolve([]),
-      // The owner's labels, for the same reason as the registry: one shared contact
-      // carries one set of labels, so an editing recipient picks from the owner's.
+      // The labels the OWNER may use, for the same reason as the registry: one shared contact
+      // carries one set of labels, so an editing recipient picks from the owner's. With sticky
+      // shares that means the owner's own labels plus any sticky label the owner participates
+      // in — and keying it on the owner rather than the viewer is also what stops a recipient
+      // filing somebody else's contact into a sharing circle of their own.
       prisma.label.findMany({
-        where: { ownerId: person.ownerId },
+        where: applicableLabelsWhere(person.ownerId),
         orderBy: { name: "asc" },
         select: { id: true, name: true, color: true },
       }),
@@ -208,6 +215,35 @@ export default async function PersonPage({
       select: { userId: true },
     }),
   ]);
+
+  /**
+   * The sharing list, one row per person rather than one per Share row.
+   *
+   * Two rows for one recipient is the normal case now: a hand-made share and a rule-made one
+   * coexist, because reconciliation never touches what a person granted. The access clauses
+   * test shares with `some`, so the effective permission is simply the higher of the two and
+   * there is no merge logic anywhere — but the UI has to do the grouping, or Karen appears
+   * twice and only one of the two × buttons does what it looks like it does.
+   */
+  const sharesByPerson = [
+    ...myShares
+      .reduce((acc, sh) => {
+        const row = acc.get(sh.withUserId) ?? {
+          withUserId: sh.withUserId,
+          email: sh.withUser.email ?? "somebody",
+          permission: "VIEW" as "VIEW" | "EDIT",
+          /** The hand-made row, if there is one. Only that one is removable. */
+          manualId: null as string | null,
+          viaLabels: [] as string[],
+        };
+        if (sh.permission === "EDIT") row.permission = "EDIT";
+        if (sh.viaLabel) row.viaLabels.push(sh.viaLabel.name);
+        else row.manualId = sh.id;
+        acc.set(sh.withUserId, row);
+        return acc;
+      }, new Map<string, { withUserId: string; email: string; permission: "VIEW" | "EDIT"; manualId: string | null; viaLabels: string[] }>())
+      .values(),
+  ].sort((a, b) => a.email.localeCompare(b.email));
   const hasOwnPhoto = photoRows.some((r) => r.userId === user.id);
   const ownerHasPhoto = photoRows.some((r) => r.userId === person.ownerId);
 
@@ -612,31 +648,52 @@ export default async function PersonPage({
                 description="Give someone else access to this contact."
               />
               <div className="space-y-3 px-5 py-3">
-                {myShares.length > 0 ? (
+                {sharesByPerson.length > 0 ? (
                   <ul className="divide-y divide-neutral-100 text-xs dark:divide-neutral-800/60">
-                    {myShares.map((sh) => (
+                    {sharesByPerson.map((group) => (
                       <li
-                        key={sh.id}
+                        key={group.withUserId}
                         className="flex items-start justify-between gap-2 py-1.5"
                       >
                         <span className="min-w-0 break-words text-neutral-600 dark:text-neutral-400">
-                          {sh.withUser.email}
+                          {group.email}
                           <span className="text-neutral-400">
                             {" · "}
-                            {sh.permission === "EDIT" ? "can edit" : "view only"}
+                            {group.permission === "EDIT" ? "can edit" : "view only"}
+                            {/* Where it came from. Otherwise the first thing anyone does with
+                                a share they did not grant is revoke it and watch it come back
+                                on the next label change. */}
+                            {group.viaLabels.length > 0
+                              ? ` · via ${group.viaLabels.join(", ")}`
+                              : null}
                           </span>
                         </span>
                         {/* Revoking lives beside the person it affects. It used to be
                             only in Settings, which meant the page that told you who had
-                            access was not the page where you could change it. */}
-                        <DeleteForm
-                          action={revokeShare}
-                          id={sh.id}
-                          label="Remove"
-                          pendingLabel="Removing…"
-                          className="shrink-0 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                          confirmMessage={`Stop sharing ${person.displayName} with ${sh.withUser.email}? It will be removed from their Google Contacts on the next sync.`}
-                        />
+                            access was not the page where you could change it.
+                            Only the hand-made row is removable: a rule-made one comes
+                            straight back, so offering to remove it would be a lie. */}
+                        {group.manualId ? (
+                          <DeleteForm
+                            action={revokeShare}
+                            id={group.manualId}
+                            label="Remove"
+                            pendingLabel="Removing…"
+                            className="shrink-0 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                            confirmMessage={
+                              group.viaLabels.length > 0
+                                ? `Remove the direct share of ${person.displayName} with ${group.email}? They keep access through ${group.viaLabels.join(", ")}.`
+                                : `Stop sharing ${person.displayName} with ${group.email}? It will be removed from their Google Contacts on the next sync.`
+                            }
+                          />
+                        ) : (
+                          <span
+                            className="shrink-0 text-xs text-neutral-400"
+                            title="Withdraw it by taking the contact out of the label, or by changing who the label shares with."
+                          >
+                            from a label
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
