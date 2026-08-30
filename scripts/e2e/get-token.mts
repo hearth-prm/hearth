@@ -25,7 +25,7 @@
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
-import { GOOGLE_SCOPES, missingScopes } from "../../src/lib/google/scopes.ts";
+import { ALL_GOOGLE_SCOPES, missingScopes } from "../../src/lib/google/scopes.ts";
 
 const ENV_FILE = path.join(process.cwd(), ".env.e2e");
 const PORT = 8765;
@@ -88,7 +88,7 @@ const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
 authUrl.searchParams.set("client_id", clientId);
 authUrl.searchParams.set("redirect_uri", REDIRECT_URI);
 authUrl.searchParams.set("response_type", "code");
-authUrl.searchParams.set("scope", GOOGLE_SCOPES.join(" "));
+authUrl.searchParams.set("scope", ALL_GOOGLE_SCOPES.join(" "));
 // Exactly what Hearth sends. offline + consent is what actually yields a refresh
 // token: Google withholds one on a repeat consent unless it is re-prompted.
 authUrl.searchParams.set("access_type", "offline");
@@ -170,7 +170,7 @@ https://myaccount.google.com/permissions for account ${slot}, then run this agai
 // through missingScopes, because Google returns `email` and `profile` expanded to
 // their userinfo.* URLs and a plain string compare calls them missing.
 const granted = new Set((body.scope ?? "").split(/\s+/).filter(Boolean));
-const missing = missingScopes(body.scope, GOOGLE_SCOPES);
+const missing = missingScopes(body.scope, ALL_GOOGLE_SCOPES);
 
 setEnvValue(`E2E_REFRESH_TOKEN_${slot}`, body.refresh_token);
 

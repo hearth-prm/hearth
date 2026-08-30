@@ -18,7 +18,9 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { google } from "googleapis";
 import { createPeopleClient, type PeopleClient } from "@/lib/google/people-client";
-import { GOOGLE_SCOPES } from "@/lib/google/scopes";
+// The superset, not what an install asks for: these scripts hold one token and
+// exercise features whose scopes are per-install opt-ins.
+import { ALL_GOOGLE_SCOPES } from "@/lib/google/scopes";
 import { startDatabase, ok, section, report } from "./harness.mts";
 import { makePng } from "./png.mts";
 
@@ -64,7 +66,7 @@ async function buildAccount(slot: "A" | "B"): Promise<Account> {
     process.exit(1);
   }
   const auth = new google.auth.OAuth2({ clientId, clientSecret });
-  auth.setCredentials({ refresh_token: token, scope: GOOGLE_SCOPES.join(" ") });
+  auth.setCredentials({ refresh_token: token, scope: ALL_GOOGLE_SCOPES.join(" ") });
   return { slot, email: env.get(`E2E_EMAIL_${slot}`) ?? `account ${slot}`, people: createPeopleClient(auth) };
 }
 

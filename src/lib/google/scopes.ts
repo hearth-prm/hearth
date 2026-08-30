@@ -5,7 +5,7 @@
  * consent round-trip. Granular scopes are used in preference to the blanket
  * `.../auth/calendar` so a compromised token cannot delete calendars.
  */
-export const GOOGLE_SCOPES = [
+const BASE_SCOPES = [
   "openid",
   "email",
   "profile",
@@ -21,13 +21,48 @@ export const GOOGLE_SCOPES = [
   // List the user's calendars so Settings can offer a target-calendar picker.
   // Read-only: Hearth never creates or modifies calendars themselves.
   "https://www.googleapis.com/auth/calendar.readonly",
-
-  // Send a thank-you list as the signed-in user. Send-only: it cannot read a
-  // mailbox, which is the least a feature that only ever sends should ask for.
-  "https://www.googleapis.com/auth/gmail.send",
 ] as const;
 
+/**
+ * Send a thank-you list as the signed-in user.
+ *
+ * Send-only — it cannot read a mailbox, which is the least a feature that only ever sends
+ * should ask for. It is nonetheless a **Gmail** scope, and Gmail scopes are the category
+ * Google controls most tightly: an app that wanted verification with one faces a far heavier
+ * process than the same app without.
+ *
+ * So it is OPT-IN, per install, via HEARTH_ENABLE_MAIL. Most people running a personal
+ * relationship manager will never email a thank-you from it, and asking every one of them to
+ * grant mail-sending access to get contact sync is the wrong default — the consent screen is
+ * where somebody decides whether to trust this, and it should not be carrying a scope the
+ * install has no use for.
+ */
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+
+/** Whether this install asks for mail-sending access at all. */
+export function mailEnabled(): boolean {
+  return (process.env.HEARTH_ENABLE_MAIL ?? "").toLowerCase() === "true";
+}
+
+/**
+ * Every scope Hearth is capable of asking for.
+ *
+ * For the Google-facing test scripts, which acquire a token once and then exercise features
+ * across several installs' worth of configuration — including mail. Not for the sign-in path:
+ * that asks for what THIS install wants, which is what googleScopes() answers.
+ */
+export const ALL_GOOGLE_SCOPES: readonly string[] = [...BASE_SCOPES, GMAIL_SEND_SCOPE];
+
+/**
+ * What to request at sign-in.
+ *
+ * A function rather than a constant, because it reads the environment — and because a
+ * constant evaluated at module load would bake in whatever the environment was when the
+ * bundle was first imported.
+ */
+export function googleScopes(): string[] {
+  return mailEnabled() ? [...BASE_SCOPES, GMAIL_SEND_SCOPE] : [...BASE_SCOPES];
+}
 
 export const SCOPE_DESCRIPTIONS: Record<string, string> = {
   [GMAIL_SEND_SCOPE]: "Send mail as you (thank-you lists only)",

@@ -1,6 +1,9 @@
 #!/bin/sh
 # ---------------------------------------------------------------------------
-# Build and start Hearth with build identity baked in.
+# Build and start Hearth FROM SOURCE, with build identity baked in.
+#
+# For contributors. An operator pulls the published image instead — plain
+# `docker compose up -d` — and never needs a toolchain or the memory a Next.js build wants.
 #
 # `docker compose up --build` on its own works fine, but produces an image that
 # cannot say which commit it came from — .dockerignore excludes .git, so the
@@ -78,4 +81,8 @@ BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 export APP_VERSION GIT_SHA BUILD_TIME
 
 echo "[hearth] building v${APP_VERSION} (${GIT_SHA}) at ${BUILD_TIME}"
-exec docker compose up -d --build "$@"
+# The override file is what turns the base compose from "pull the published image" into
+# "build this checkout". Named explicitly rather than relying on docker-compose.override.yml,
+# because an override file that applies by accident is how an operator ends up building
+# without meaning to.
+exec docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build "$@"

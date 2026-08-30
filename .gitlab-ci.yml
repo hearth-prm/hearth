@@ -1,0 +1,81 @@
+# Build and publish the container image.
+#
+# Two jobs, one image. `build` runs on every push to the default branch and publishes
+# `:edge`, so there is always something current to test against. `release` runs only on a
+# version tag and publishes `:1.2.3`, `:1.2`, `:1` and `:latest` — the four things somebody
+# might reasonably pin to.
+#
+# No credentials are configured anywhere: $CI_REGISTRY_USER, $CI_REGISTRY_PASSWORD and
+# $CI_REGISTRY_IMAGE are provided by GitLab per job, and the token they carry dies with the
+# job. That is the whole reason the image lives in this project's own registry rather than
+# somewhere that would need a personal token stored in CI settings.
+#
+# amd64 only, deliberately. Unraid — the platform this is packaged for — is amd64, and an
+# arm64 image would have to be built under QEMU, where a Next.js build takes the best part of
+# an hour of CI minutes per release. Anyone on arm builds from source with
+# docker-compose.build.yml, which the README explains.
+
+stages: [build]
+
+.docker:
+  image: docker:27-cli
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+
+# The build args that make the running app able to say what it is. Without them the footer
+# reports 0.0.0/unknown, which turns every bug report into a guessing game.
+.build_args: &build_args
+  - VERSION="$(node -p "require('./package.json').version" 2>/dev/null || echo 0.0.0)"
+  - BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+build:
+  extends: .docker
+  stage: build
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - apk add --no-cache nodejs
+    - *build_args
+    - |
+      docker build \
+        --build-arg APP_VERSION="$VERSION" \
+        --build-arg GIT_SHA="$CI_COMMIT_SHORT_SHA" \
+        --build-arg BUILD_TIME="$BUILD_TIME" \
+        -t "$CI_REGISTRY_IMAGE:edge" \
+        -t "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA" \
+        .
+    - docker push "$CI_REGISTRY_IMAGE:edge"
+    - docker push "$CI_REGISTRY_IMAGE:sha-$CI_COMMIT_SHORT_SHA"
+
+release:
+  extends: .docker
+  stage: build
+  # Tags only, and only ones that look like versions: a stray tag must not publish `:latest`.
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+$/
+  script:
+    - apk add --no-cache nodejs
+    - *build_args
+    # From the TAG rather than package.json, so the published tags and the git tag cannot
+    # disagree — and the version in the footer is the version somebody pulled.
+    - SEMVER="${CI_COMMIT_TAG#v}"
+    - MAJOR="${SEMVER%%.*}"
+    - MINOR="${SEMVER%.*}"
+    - |
+      docker build \
+        --build-arg APP_VERSION="$SEMVER" \
+        --build-arg GIT_SHA="$CI_COMMIT_SHORT_SHA" \
+        --build-arg BUILD_TIME="$BUILD_TIME" \
+        -t "$CI_REGISTRY_IMAGE:$SEMVER" \
+        -t "$CI_REGISTRY_IMAGE:$MINOR" \
+        -t "$CI_REGISTRY_IMAGE:$MAJOR" \
+        -t "$CI_REGISTRY_IMAGE:latest" \
+        .
+    - docker push "$CI_REGISTRY_IMAGE:$SEMVER"
+    - docker push "$CI_REGISTRY_IMAGE:$MINOR"
+    - docker push "$CI_REGISTRY_IMAGE:$MAJOR"
+    - docker push "$CI_REGISTRY_IMAGE:latest"

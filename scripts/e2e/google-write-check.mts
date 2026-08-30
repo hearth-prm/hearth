@@ -33,7 +33,9 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { google } from "googleapis";
 import { createPeopleClient } from "@/lib/google/people-client";
-import { GOOGLE_SCOPES } from "@/lib/google/scopes";
+// The superset, not what an install asks for: these scripts hold one token and
+// exercise features whose scopes are per-install opt-ins.
+import { ALL_GOOGLE_SCOPES } from "@/lib/google/scopes";
 import { GOOGLE_IMPORT_FIELDS, planGoogleImport } from "@/lib/google/import-plan";
 import {
   MANAGED_PERSON_FIELDS,
@@ -84,7 +86,7 @@ if (!clientId || !clientSecret || !refreshToken) {
 }
 
 const auth = new google.auth.OAuth2({ clientId, clientSecret });
-auth.setCredentials({ refresh_token: refreshToken, scope: GOOGLE_SCOPES.join(" ") });
+auth.setCredentials({ refresh_token: refreshToken, scope: ALL_GOOGLE_SCOPES.join(" ") });
 const people = createPeopleClient(auth);
 
 /**

@@ -2,7 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
-import { GOOGLE_SCOPES } from "@/lib/google/scopes";
+import { googleScopes } from "@/lib/google/scopes";
 import { allowlistFromEnv, decideSignIn } from "@/lib/auth-allowlist";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -20,7 +20,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       authorization: {
         params: {
-          scope: GOOGLE_SCOPES.join(" "),
+          scope: googleScopes().join(" "),
           // access_type=offline + prompt=consent is what actually yields a
           // refresh_token. Google only returns one on the first consent unless
           // consent is re-prompted, and without it background sync dies as soon

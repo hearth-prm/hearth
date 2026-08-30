@@ -1,0 +1,19 @@
+# Build Hearth from this checkout instead of pulling the published image.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# For contributors and for anyone on an architecture no image is published for. Needs a couple
+# of gigabytes of RAM: the Dockerfile already carries the max-old-space flag Next's build
+# worker needs, but the machine has to have the memory to give it.
+services:
+  app:
+    build:
+      context: .
+      # Populated by `npm run docker:up`, which exports them from git and package.json.
+      # Building with plain `docker compose up --build` still works — the image just reports
+      # an unknown commit.
+      args:
+        APP_VERSION: "${APP_VERSION:-}"
+        GIT_SHA: "${GIT_SHA:-unknown}"
+        BUILD_TIME: "${BUILD_TIME:-}"
+    image: "hearth:${APP_VERSION:-dev}"

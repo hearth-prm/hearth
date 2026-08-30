@@ -3,7 +3,7 @@ import { ownedEventsWhere,
   readablePeopleWhere, requireUser } from "@/lib/access";
 import { signIn } from "@/lib/auth";
 import { getGoogleConnection, getUserSettings } from "@/lib/settings";
-import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
+import { SCOPE_DESCRIPTIONS, mailEnabled } from "@/lib/google/scopes";
 import { commonTimeZones } from "@/lib/time";
 import { updateSettings } from "@/lib/actions/settings";
 import {
@@ -106,9 +106,14 @@ export default async function SettingsPage() {
             {google.canSyncCalendar ? "Granted" : "Not granted"}
           </DetailRow>
           <DetailRow label="Send mail permission">
-            {google.canSendMail
-              ? "Granted — thank-you lists can be emailed"
-              : "Not granted — reconnect to email thank-you lists"}
+            {/* Three states, not two. Telling somebody to "reconnect to email thank-you
+                lists" on an install that never asks for the scope is advice that cannot
+                work — the scope is opt-in, and the fix is a variable, not a reconnect. */}
+            {!mailEnabled()
+              ? "Not requested — set HEARTH_ENABLE_MAIL=true to offer thank-you emails"
+              : google.canSendMail
+                ? "Granted — thank-you lists can be emailed"
+                : "Not granted — reconnect to email thank-you lists"}
           </DetailRow>
           <DetailRow label="Offline access">
             {google.hasRefreshToken
@@ -123,6 +128,20 @@ export default async function SettingsPage() {
               Hearth is missing a permission it needs
               {google.hasRefreshToken ? "" : ", or offline access"}.
               Reconnecting re-prompts Google for consent.
+            </p>
+          ) : null}
+          {/*
+            The one failure that looks like a Hearth bug and is not.
+            Named where the symptom appears, because the symptom — works, then stops about a
+            week later, for ever — is otherwise indistinguishable from a sync bug, and the
+            cause is a button in Google's console that most people never press.
+          */}
+          {settings.googleAuthError ? (
+            <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+              If sign-in works and then fails about a week later, the Google OAuth app is
+              probably still in <strong>Testing</strong>, where Google expires refresh tokens
+              after seven days. Publishing it fixes that permanently — see{" "}
+              <code>docs/google-setup.md</code>.
             </p>
           ) : null}
           <form

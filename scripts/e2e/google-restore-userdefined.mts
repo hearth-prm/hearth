@@ -15,7 +15,9 @@ import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { google } from "googleapis";
 import { createPeopleClient } from "@/lib/google/people-client";
-import { GOOGLE_SCOPES } from "@/lib/google/scopes";
+// The superset, not what an install asks for: these scripts hold one token and
+// exercise features whose scopes are per-install opt-ins.
+import { ALL_GOOGLE_SCOPES } from "@/lib/google/scopes";
 import { GOOGLE_IMPORT_FIELDS } from "@/lib/google/import-plan";
 
 const BEFORE = path.join(process.cwd(), ".probe", "all-before.json");
@@ -38,7 +40,7 @@ const auth = new google.auth.OAuth2({
 });
 auth.setCredentials({
   refresh_token: env.get(`E2E_REFRESH_TOKEN_${slot}`),
-  scope: GOOGLE_SCOPES.join(" "),
+  scope: ALL_GOOGLE_SCOPES.join(" "),
 });
 const people = createPeopleClient(auth);
 

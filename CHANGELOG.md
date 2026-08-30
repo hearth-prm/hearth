@@ -28,6 +28,54 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **Hearth can be installed by somebody else.** The pieces that were missing rather than
+  broken:
+  - **A published image.** `.gitlab-ci.yml` builds and pushes to the project's own container
+    registry — `:edge` from every commit to the default branch, and `:1.2.3`, `:1.2`, `:1`,
+    `:latest` from a version tag. No credentials are configured anywhere: CI's own per-job token
+    does it, which is why the image lives in this project's registry rather than somewhere that
+    would need a personal token in CI settings. amd64 only; arm64 would mean QEMU and most of an
+    hour of CI minutes per release, and anyone on arm builds from source.
+  - **`docker compose up -d` now pulls instead of building.** A Next.js build wants the
+    max-old-space flag the Dockerfile carries and a couple of gigabytes of RAM, which is more
+    than a small NAS has spare — an operator should never be asked for it. Building moved to
+    `docker-compose.build.yml`, named explicitly rather than as an override that applies by
+    accident.
+  - **[docs/google-setup.md](docs/google-setup.md)** — the whole OAuth setup for somebody who
+    does not know what OAuth is, with *publish the app* given its own step and its own warning,
+    because skipping it is the bug everybody would otherwise report: sync works for seven days
+    and then stops, for ever. Plus a failure table, the Workspace shortcut, and why verification
+    is not needed for an install with one user.
+  - **A Community Applications template** for Unraid, with an icon rendered from the app's own
+    mark, and `unraid/README.md` covering what CA's policies require of a submission — GitHub
+    hosting with 2FA, a forum support thread, a publicly pullable image, no code injection.
+    CA templates describe one container and Hearth is two, so the template takes a
+    `DATABASE_URL` pointing at a Postgres installed separately; its Overview says so first.
+  - **A quickstart, a privacy statement, and reverse-proxy examples** for Caddy, nginx and
+    Traefik — SWAG was the only one documented. Plus backup and restore recipes that do not
+    assume the Unraid script, since the database is the entire install, photos included.
+  - Issue templates asking the four questions that decide whether a bug can be reproduced.
+
+### Changed
+
+- **The Gmail scope is opt-in.** `HEARTH_ENABLE_MAIL=true` turns on thank-you emails; without
+  it the scope is never requested, and the sign-in page's consent list does not promise it. Most
+  people running a relationship manager will never email a thank-you, and asking every install
+  to grant mail-sending access in order to sync contacts is the wrong trade — the consent screen
+  is where somebody decides whether to trust this, and it should not carry a permission the
+  install has no use for. Gmail is also the scope category Google controls most tightly, which
+  matters to anyone who ever wants their app verified.
+  - The bug that change would otherwise have shipped with: `needsReconnect` counted a missing
+    mail scope as an incomplete grant, so every default install would have shown "Reconnect
+    Google" permanently over a permission it deliberately did not want. §35.3 is that check, and
+    it had to be taught to hold the other scopes still — it first failed on a grant that was
+    missing contacts and calendar for unrelated reasons, which made it a check about the wrong
+    thing.
+  - Settings now distinguishes *not requested* from *not granted*, since telling somebody to
+    reconnect for a scope the install never asks for is advice that cannot work.
+
+### Added
+
 - **Hearth is licensed under the AGPL-3.0.** `LICENSE` carries the full text, and the footer on
   every page offers a link to the source of the running version — which is what the licence asks
   of software people reach over a network. `HEARTH_SOURCE_URL` points that link at a fork, so an

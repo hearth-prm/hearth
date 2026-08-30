@@ -4,6 +4,7 @@ import {
   CALENDAR_SYNC_SCOPES,
   CONTACT_SYNC_SCOPES,
   MAIL_SEND_SCOPES,
+  mailEnabled,
   grantCovers,
 } from "@/lib/google/scopes";
 import { normalizeAppearance, type Appearance } from "@/lib/theme";
@@ -88,6 +89,13 @@ export async function getGoogleConnection(
   const canSyncContacts = grantCovers(account.scope, CONTACT_SYNC_SCOPES);
   const canSyncCalendar = grantCovers(account.scope, CALENDAR_SYNC_SCOPES);
   const canSendMail = grantCovers(account.scope, MAIL_SEND_SCOPES);
+  // Whether a MISSING mail scope is a problem at all.
+  //
+  // It is not, on an install that never asked for one: without this, making the Gmail scope
+  // opt-in would have left every default install showing "Reconnect Google" for ever, over a
+  // permission it deliberately does not want. A capability the install has switched off is
+  // not an incomplete grant.
+  const wantsMail = mailEnabled();
 
   return {
     connected: true,
@@ -97,7 +105,10 @@ export async function getGoogleConnection(
     canSyncCalendar,
     canSendMail,
     needsReconnect:
-      !canSyncContacts || !canSyncCalendar || !canSendMail || !account.refresh_token,
+      !canSyncContacts ||
+      !canSyncCalendar ||
+      (wantsMail && !canSendMail) ||
+      !account.refresh_token,
     grantedScopes: (account.scope ?? "").split(/\s+/).filter(Boolean),
   };
 }

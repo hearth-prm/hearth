@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 816 checks
+npm run e2e         # builds, then drives a real browser through 828 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 ```
@@ -204,6 +204,23 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   day's worth starved the machine until `tsc` and the editor were being OOM-killed. The
   harness spawns `detached: true` and signals the process GROUP (`-pid`), and records the pid
   so a killed run's server is reaped by the next one.
+
+## Distribution
+
+- **The published image is the product for an operator; the repo is for contributors.**
+  `docker-compose.yml` pulls; `docker-compose.build.yml` is what a contributor adds to build.
+  `scripts/docker-up.sh` names both files explicitly rather than relying on
+  `docker-compose.override.yml`, because an override that applies by accident is how somebody
+  builds without meaning to.
+- **CI needs no secrets.** `$CI_REGISTRY_USER` / `$CI_REGISTRY_PASSWORD` / `$CI_REGISTRY_IMAGE`
+  come from GitLab per job. Publishing anywhere else would mean storing a personal token in CI
+  settings, which is the reason not to.
+- **A scope is a per-install decision.** `googleScopes()` reads the environment; `mailEnabled()`
+  gates Gmail. Anything that treats a missing optional scope as an incomplete grant will show a
+  permanent "Reconnect Google" — see §35.3.
+- **The CA template is one container and Hearth is two.** It takes a `DATABASE_URL` for a
+  separately-installed Postgres. `unraid/README.md` holds the submission requirements; the two
+  `REPLACE_ME` markers need accounts that must exist first.
 
 ## Process
 

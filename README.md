@@ -11,11 +11,60 @@ already have in Google can be imported once, in place, when you first move in.
 
 ---
 
+## Install it
+
+Docker, five minutes, and a Google OAuth client you create yourself (ten minutes, free —
+[docs/google-setup.md](docs/google-setup.md) walks through it).
+
+```bash
+git clone https://gitlab.com/hammerling/hearth.git hearth && cd hearth
+cp .env.example .env
+$EDITOR .env                    # DATABASE_URL, AUTH_SECRET, AUTH_URL, the two Google values
+docker compose up -d
+```
+
+Then open <http://localhost:3000>. The image is pulled, not built — no toolchain needed, and
+nothing to compile on a NAS. Postgres comes up alongside it, migrations run on start, and the
+first sign-in claims the install.
+
+**Set `HEARTH_ALLOWED_EMAILS` before you start if this is reachable from the internet**, or the
+first stranger to find the URL claims it instead of you.
+
+**On Unraid:** install PostgreSQL 16 from Community Applications, then Hearth, and point its
+`DATABASE_URL` at the Postgres container. See [Running on Unraid](#running-on-unraid).
+
+**Upgrading:** `docker compose pull && docker compose up -d`. Migrations run on start and are
+forward-only, so back the database up before a major version.
+
+**Building from source instead** (contributors, or an architecture with no published image):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+### What it needs from the outside world
+
+Nothing, unless you ask for it. There is **no telemetry and no Hearth server** — no phoning
+home, no account with anyone, no usage statistics. The remote services Hearth will talk to are
+exactly these, all optional:
+
+| Service | When it is used | Turn it off by |
+|---|---|---|
+| **Google** | Signing in, and pushing contacts and events | Not configuring it — though sign-in needs it, so in practice this is required |
+| **Gmail** | Only when you press send on a thank-you list | Leaving `HEARTH_ENABLE_MAIL` unset, which is the default and means the scope is never even requested |
+| **OpenStreetMap** or **Google Places** | Looking up an event location as you type | `placesProvider: off` in Settings |
+| **Ollama** | Turning a sentence into a search, and `semantic:` search | Leaving `OLLAMA_URL` unset. It runs on *your* network — nothing leaves it |
+
+Your data lives in your Postgres. Contact photos too — there is no file store to back up, which
+also means the database is the whole install.
+
+---
+
 ## Status
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 816 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 828 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -66,7 +115,7 @@ another record. One piece of work is designed and queued rather than built —
 intentions — now built.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 816 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 828 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -85,13 +134,12 @@ your data.
 
 ## Running it
 
-You need Docker and a Google Cloud project. Two commands, once the `.env` is
-filled in.
+See [Install it](#install-it) for the short version. This section is the detail.
 
 ```bash
 cp .env.example .env
 $EDITOR .env          # see "Configuration" below
-docker compose up -d --build
+docker compose up -d
 ```
 
 Then open <http://localhost:3000>.
@@ -118,6 +166,8 @@ docker compose down -v         # stop and destroy the database
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
 | `HEARTH_ALLOWED_EMAILS` | see below | Who may sign in. Addresses and/or `@domain`, comma-separated. |
 | `HEARTH_SOURCE_URL` | no | Where to get this install's source, offered in the footer for the AGPL. Set it if you have modified Hearth. |
+| `HEARTH_ENABLE_MAIL` | no | `true` to offer thank-you emails, which needs Google's `gmail.send` scope. Off by default, and the scope is not requested unless set. |
+| `HEARTH_IMAGE` / `HEARTH_TAG` | no | Which published image to run. Defaults to `registry.gitlab.com/hammerling/hearth:latest`. |
 | `APP_PORT` | no | Host port, default `3000`. |
 | `OLLAMA_URL` | no | A model on your own network for [asking in words](#asking-in-words). Unset means the feature is not offered. |
 | `OLLAMA_CHAT_MODEL` | no | Default `qwen2.5:7b-instruct`. |
@@ -195,6 +245,11 @@ when it re-prompts for consent, and the stored grant is refreshed on every sign-
 
 ## Publishing the OAuth app
 
+> Setting Google up from scratch? [**docs/google-setup.md**](docs/google-setup.md) is the
+> step-by-step. This section is the reference on publishing specifically, which is the one step
+> everybody skips and then reports as a bug.
+
+
 Do this once, before you rely on the install. It takes about five minutes and it is the
 difference between sync that keeps working and sync that dies every seventh day.
 
@@ -247,6 +302,81 @@ what every stored token is tied to, and replacing it invalidates all of them. Ad
 scope later is fine, but it re-prompts for consent, which is the intended behaviour.
 
 ---
+
+## Behind a reverse proxy
+
+Hearth expects to be reached over https, and expects `AUTH_URL` to be the address people
+actually type. Two things matter to every proxy: forward the original host and scheme, and
+leave `AUTH_TRUST_HOST=true` so Auth.js believes them.
+
+The `deploy-hearth.sh` script writes a SWAG config for you on Unraid. Everywhere else, one of
+these:
+
+**Caddy** — the shortest, because it gets a certificate on its own:
+
+```
+hearth.example.com {
+    reverse_proxy hearth:3000
+}
+```
+
+**nginx**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name hearth.example.com;
+
+    # ssl_certificate / ssl_certificate_key as usual
+
+    client_max_body_size 12M;   # contact photos are resized client-side, but leave room
+
+    location / {
+        proxy_pass http://hearth:3000;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+}
+```
+
+**Traefik**, as compose labels on the `app` service:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.hearth.rule=Host(`hearth.example.com`)"
+  - "traefik.http.routers.hearth.entrypoints=websecure"
+  - "traefik.http.routers.hearth.tls.certresolver=letsencrypt"
+  - "traefik.http.services.hearth.loadbalancer.server.port=3000"
+```
+
+If sign-in redirects to the wrong host, or Google reports `redirect_uri_mismatch`, the cause is
+almost always `AUTH_URL` disagreeing with the address in the browser — Google compares them
+character for character.
+
+## Backing up, and restoring
+
+The database is the whole install: contacts, events, photos, history, everything. There are no
+files on disk to keep.
+
+```bash
+# Back up — a compressed dump, safe to run while Hearth is up
+docker compose exec -T db pg_dump -U hearth -d hearth --clean --if-exists \
+  | gzip > "hearth-$(date -u +%Y%m%d).sql.gz"
+
+# Restore into an empty database
+gunzip -c hearth-20260829.sql.gz | docker compose exec -T db psql -U hearth -d hearth
+```
+
+Restore into a database created by the **same or a newer** Hearth: migrations run forward on
+start, and there is no path back down. Before a major upgrade, take a dump first — that is the
+rollback.
+
+The Unraid deploy script does this on a schedule for you; everywhere else, a cron entry and a
+directory that is itself backed up.
 
 ## Running on Unraid
 
@@ -322,7 +452,7 @@ sh deploy-hearth.sh \
   --port 3080 \
   --proxy-conf-dir  nginx/site-confs \
   --proxy-conf-name HEARTH.EXAMPLE.COM.conf \
-  --host-ip 192.168.0.2          # override the detected address if needed
+  --host-ip 192.168.1.10        # override the detected address if needed
 ```
 
 `--proxy-conf-dir` accepts a path relative to SWAG's `/config` mount, which the

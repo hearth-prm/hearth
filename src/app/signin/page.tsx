@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { signIn } from "@/lib/auth";
 import { currentUser } from "@/lib/access";
-import { SCOPE_DESCRIPTIONS } from "@/lib/google/scopes";
+import { SCOPE_DESCRIPTIONS, googleScopes } from "@/lib/google/scopes";
 import { btnPrimary, Card } from "@/components/ui";
 import { HearthMark } from "@/components/hearth-mark";
 
@@ -66,17 +66,23 @@ export default async function SignInPage({
             Hearth will ask Google for permission to:
           </p>
           <ul className="mt-2 space-y-1.5">
-            {Object.entries(SCOPE_DESCRIPTIONS).map(([scope, description]) => (
-              <li
-                key={scope}
-                className="flex gap-2 text-xs text-neutral-500 dark:text-neutral-400"
-              >
-                <span aria-hidden className="text-neutral-400">
-                  •
-                </span>
-                {description}
-              </li>
-            ))}
+            {/* What this install will ACTUALLY ask for, not everything Hearth can ask for.
+                The Gmail scope is opt-in, and a consent list promising a permission that is
+                never requested teaches people to distrust the list. */}
+            {googleScopes()
+              .map((scope) => [scope, SCOPE_DESCRIPTIONS[scope]] as const)
+              .filter((pair): pair is readonly [string, string] => Boolean(pair[1]))
+              .map(([scope, description]) => (
+                <li
+                  key={scope}
+                  className="flex gap-2 text-xs text-neutral-500 dark:text-neutral-400"
+                >
+                  <span aria-hidden className="text-neutral-400">
+                    •
+                  </span>
+                  {description}
+                </li>
+              ))}
           </ul>
           <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
             Nothing is sent to Google until you turn syncing on in Settings.

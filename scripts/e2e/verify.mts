@@ -6278,6 +6278,98 @@ try {
 
   await anonForSignin.close();
 
+  section("§35 What this install asks Google for")
+
+  // The Gmail scope is opt-in per install, which means two things have to stay true: an
+  // install that has not asked for it must not request it, and — the part that broke first —
+  // must not then report itself as needing a reconnect for ever over a permission it
+  // deliberately does not want.
+  const { googleScopes, mailEnabled, ALL_GOOGLE_SCOPES, GMAIL_SEND_SCOPE } =
+    await import("@/lib/google/scopes");
+  const savedMail = process.env.HEARTH_ENABLE_MAIL;
+
+  delete process.env.HEARTH_ENABLE_MAIL;
+  ok("35.1 mail is off unless asked for", !mailEnabled());
+  ok("35.1b so the Gmail scope is not requested at sign-in",
+     !googleScopes().includes(GMAIL_SEND_SCOPE), googleScopes());
+  ok("35.1c while the scopes sync actually needs are",
+     googleScopes().includes("https://www.googleapis.com/auth/contacts") &&
+       googleScopes().includes("https://www.googleapis.com/auth/calendar.events"),
+     googleScopes());
+
+  process.env.HEARTH_ENABLE_MAIL = "true";
+  ok("35.2 and requested when it is", googleScopes().includes(GMAIL_SEND_SCOPE));
+  process.env.HEARTH_ENABLE_MAIL = "TRUE";
+  ok("35.2b whatever the case", mailEnabled());
+  process.env.HEARTH_ENABLE_MAIL = "yes";
+  ok("35.2c but only for a value that means true — no accidental truthiness",
+     !mailEnabled(), process.env.HEARTH_ENABLE_MAIL);
+
+  // The bug this feature would otherwise have shipped with: needsReconnect counted a missing
+  // mail scope as an incomplete grant, so every default install would show "Reconnect Google"
+  // permanently over a permission it never asked for.
+  delete process.env.HEARTH_ENABLE_MAIL;
+  const { getGoogleConnection } = await import("@/lib/settings");
+
+  // The stored grant is set explicitly here, and put back afterwards. Earlier sections rewrite
+  // A's account scope to test the reconnect prompt, so reading whatever it happens to hold
+  // made this check about contacts and calendar instead of about mail — it failed on a grant
+  // missing both. A check about one dimension has to hold the others still.
+  const mailScopeAccount = await prisma.account.findFirstOrThrow({
+    where: { userId: A.id, provider: "google" },
+    select: { id: true, scope: true },
+  });
+  const grantWithoutMail =
+    "openid email profile https://www.googleapis.com/auth/contacts " +
+    "https://www.googleapis.com/auth/calendar.events " +
+    "https://www.googleapis.com/auth/calendar.readonly";
+  await prisma.account.update({
+    where: { id: mailScopeAccount.id },
+    data: { scope: grantWithoutMail },
+  });
+
+  const connNoMail = await getGoogleConnection(A.id);
+  ok("35.3 an install that does not want mail is not asked to reconnect for it",
+     connNoMail.connected && !connNoMail.canSendMail && !connNoMail.needsReconnect,
+     connNoMail);
+  process.env.HEARTH_ENABLE_MAIL = "true";
+  const connWantsMail = await getGoogleConnection(A.id);
+  ok("35.3b while one that does want it, and has not been granted it, is",
+     connWantsMail.needsReconnect && !connWantsMail.canSendMail, connWantsMail);
+  await prisma.account.update({
+    where: { id: mailScopeAccount.id },
+    data: { scope: `${grantWithoutMail} ${GMAIL_SEND_SCOPE}` },
+  });
+  ok("35.3c and granting it settles the prompt",
+     !(await getGoogleConnection(A.id)).needsReconnect);
+
+  await prisma.account.update({
+    where: { id: mailScopeAccount.id },
+    data: { scope: mailScopeAccount.scope },
+  });
+  if (savedMail === undefined) delete process.env.HEARTH_ENABLE_MAIL;
+  else process.env.HEARTH_ENABLE_MAIL = savedMail;
+
+  ok("35.4 the superset the Google scripts use still holds everything",
+     ALL_GOOGLE_SCOPES.includes(GMAIL_SEND_SCOPE) &&
+       ALL_GOOGLE_SCOPES.length === googleScopes().length + (mailEnabled() ? 0 : 1),
+     [ALL_GOOGLE_SCOPES.length, googleScopes().length]);
+
+  // The sign-in page promises what will actually be requested. A consent list naming a
+  // permission the install never asks for teaches people not to read the list.
+  const anonScopes = await A.context.browser()!.newContext({ baseURL: h.baseUrl });
+  const scopePage = await anonScopes.newPage();
+  await scopePage.goto("/signin");
+  const promised = (await scopePage.textContent("body")) ?? "";
+  ok("35.5 the sign-in page lists the contacts and calendar permissions",
+     promised.includes("Manage your Google Contacts") &&
+       promised.includes("Manage events on your calendars"),
+     promised.slice(0, 0) || String(promised.includes("Manage your Google Contacts")));
+  ok("35.5b and does not promise mail, since this install does not ask for it",
+     !promised.includes("Send mail as you"),
+     String(promised.includes("Send mail as you")));
+  await anonScopes.close();
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the
