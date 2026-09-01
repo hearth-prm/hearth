@@ -17,7 +17,7 @@ Docker, five minutes, and a Google OAuth client you create yourself (ten minutes
 [docs/google-setup.md](docs/google-setup.md) walks through it).
 
 ```bash
-git clone https://gitlab.com/hammerling/hearth.git hearth && cd hearth
+git clone https://gitlab.com/hearth-prm/hearth.git hearth && cd hearth
 cp .env.example .env
 $EDITOR .env                    # DATABASE_URL, AUTH_SECRET, AUTH_URL, the two Google values
 docker compose up -d
@@ -167,7 +167,7 @@ docker compose down -v         # stop and destroy the database
 | `HEARTH_ALLOWED_EMAILS` | see below | Who may sign in. Addresses and/or `@domain`, comma-separated. |
 | `HEARTH_SOURCE_URL` | no | Where to get this install's source, offered in the footer for the AGPL. Set it if you have modified Hearth. |
 | `HEARTH_ENABLE_MAIL` | no | `true` to offer thank-you emails, which needs Google's `gmail.send` scope. Off by default, and the scope is not requested unless set. |
-| `HEARTH_IMAGE` / `HEARTH_TAG` | no | Which published image to run. Defaults to `registry.gitlab.com/hammerling/hearth:latest`. |
+| `HEARTH_IMAGE` / `HEARTH_TAG` | no | Which published image to run. Defaults to `registry.gitlab.com/hearth-prm/hearth:latest`. |
 | `APP_PORT` | no | Host port, default `3000`. |
 | `OLLAMA_URL` | no | A model on your own network for [asking in words](#asking-in-words). Unset means the feature is not offered. |
 | `OLLAMA_CHAT_MODEL` | no | Default `qwen2.5:7b-instruct`. |
@@ -384,7 +384,7 @@ directory that is itself backed up.
 
 ```bash
 # On Unraid, via SSH as root
-git clone https://gitlab.com/hammerling/hearth.git /mnt/user/appdata/hearth/app
+git clone https://gitlab.com/hearth-prm/hearth.git /mnt/user/appdata/hearth/app
 cd /mnt/user/appdata/hearth/app
 sh deploy-hearth.sh --domain hearth.example.com
 ```
@@ -550,7 +550,7 @@ Doing it by hand rather than with `deploy-hearth.sh`:
 
 ```bash
 mkdir -p /mnt/user/appdata/hearth/postgres
-git clone https://gitlab.com/hammerling/hearth.git /mnt/user/appdata/hearth/app
+git clone https://gitlab.com/hearth-prm/hearth.git /mnt/user/appdata/hearth/app
 
 cd /mnt/user/appdata/hearth/app
 cp .env.example .env
@@ -564,7 +564,7 @@ curl -s http://localhost:3000/api/health
 For a private repository, put a token in the clone URL:
 
 ```bash
-git clone https://oauth2:YOUR_TOKEN@gitlab.com/hammerling/hearth.git \
+git clone https://oauth2:YOUR_TOKEN@gitlab.com/hearth-prm/hearth.git \
   /mnt/user/appdata/hearth/app
 ```
 

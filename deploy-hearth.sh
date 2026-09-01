@@ -57,7 +57,7 @@
 # ===========================================================================
 set -eu
 
-REPO_URL="https://gitlab.com/hammerling/hearth.git"
+REPO_URL="https://gitlab.com/hearth-prm/hearth.git"
 BRANCH="main"
 INSTALL_ROOT="/mnt/user/appdata/hearth"
 DOMAIN=""

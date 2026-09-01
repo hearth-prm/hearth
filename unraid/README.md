@@ -17,7 +17,7 @@ CA's policies require a few things that only a human with accounts can do.
    and CA expects that to be where users go — so it has to exist before submission.
 
 3. **A publicly pullable image.** Make the GitLab project public so
-   `registry.gitlab.com/hammerling/hearth:latest` can be pulled anonymously, and check the
+   `registry.gitlab.com/hearth-prm/hearth:latest` can be pulled anonymously, and check the
    Container Registry's own visibility setting as well as the project's.
 
 4. **Fill in the two `REPLACE_ME` markers** in `hearth.xml`:

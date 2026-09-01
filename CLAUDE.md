@@ -3,7 +3,7 @@
 AGPL-3.0. A self-hosted personal relationship manager: contacts, events, relationships, labels,
 gifts, one-way sync out to Google. Next.js 15.5 App Router · React 19 · Prisma 6 ·
 Postgres 16 · Auth.js v5 · Tailwind 4 · TypeScript. Deployed as a single Docker container
-on Unraid behind SWAG, pulled from `gitlab.com/hammerling/hearth`.
+on Unraid behind SWAG, pulled from `gitlab.com/hearth-prm/hearth`.
 
 [README.md](README.md) is for someone running Hearth. This file is for someone changing it.
 

@@ -49,7 +49,7 @@ services:
     #
     # To build from source instead, add the override file:
     #   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
-    image: "${HEARTH_IMAGE:-registry.gitlab.com/hammerling/hearth}:${HEARTH_TAG:-latest}"
+    image: "${HEARTH_IMAGE:-registry.gitlab.com/hearth-prm/hearth}:${HEARTH_TAG:-latest}"
     restart: unless-stopped
     depends_on:
       db:

@@ -63,7 +63,7 @@ export function versionDetail(): string {
  * repository for free, and one running a fork points it at their fork and is compliant without
  * touching the code — which is precisely the case the licence is written about.
  */
-const UPSTREAM_SOURCE = "https://gitlab.com/hammerling/hearth";
+const UPSTREAM_SOURCE = "https://gitlab.com/hearth-prm/hearth";
 
 export function sourceUrl(): string {
   const configured = (process.env.HEARTH_SOURCE_URL ?? "").trim();

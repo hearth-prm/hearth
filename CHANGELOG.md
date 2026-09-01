@@ -1562,14 +1562,14 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hammerling/hearth/-/compare/v1.1.0...main
-[1.1.0]: https://gitlab.com/hammerling/hearth/-/tags/v1.1.0
-[1.0.0]: https://gitlab.com/hammerling/hearth/-/tags/v1.0.0
-[0.6.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.6.0
-[0.5.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.5.0
-[0.4.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.4.0
-[0.3.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.3.0
-[0.2.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.1
-[0.2.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.2.0
-[0.1.1]: https://gitlab.com/hammerling/hearth/-/tags/v0.1.1
-[0.1.0]: https://gitlab.com/hammerling/hearth/-/tags/v0.1.0
+[Unreleased]: https://gitlab.com/hearth-prm/hearth/-/compare/v1.1.0...main
+[1.1.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v1.1.0
+[1.0.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v1.0.0
+[0.6.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.6.0
+[0.5.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.5.0
+[0.4.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.4.0
+[0.3.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.3.0
+[0.2.1]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.2.1
+[0.2.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.2.0
+[0.1.1]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.1.1
+[0.1.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.1.0

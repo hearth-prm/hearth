@@ -19,14 +19,14 @@
 -->
 <Container version="2">
   <Name>Hearth</Name>
-  <Repository>registry.gitlab.com/hammerling/hearth:latest</Repository>
-  <Registry>https://gitlab.com/hammerling/hearth/container_registry</Registry>
+  <Repository>registry.gitlab.com/hearth-prm/hearth:latest</Repository>
+  <Registry>https://gitlab.com/hearth-prm/hearth/container_registry</Registry>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
   <Support>REPLACE_ME_UNRAID_FORUM_THREAD</Support>
-  <Project>https://gitlab.com/hammerling/hearth</Project>
+  <Project>https://gitlab.com/hearth-prm/hearth</Project>
   <Overview>
     A self-hosted personal relationship manager: the people in your life, how they are related,
     what you gave them, and where you saw them — with one-way sync out to Google Contacts and

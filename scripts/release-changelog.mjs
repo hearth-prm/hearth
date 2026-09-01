@@ -14,7 +14,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const changelogPath = path.join(root, "CHANGELOG.md");
-const REPO = "https://gitlab.com/hammerling/hearth";
+const REPO = "https://gitlab.com/hearth-prm/hearth";
 
 const { version } = JSON.parse(
   readFileSync(path.join(root, "package.json"), "utf8"),
