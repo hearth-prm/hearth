@@ -48,6 +48,18 @@ One thing worth stating in the support thread: **Hearth keeps everything in Post
 contact photos.** There is no appdata path to map and nothing to lose by recreating the
 container — but the database is the whole install, so that is what needs backing up.
 
+## Warning worth repeating in the support thread
+
+The compose file pins `name: hearth`, so **two Hearth checkouts on one host are the same Compose
+project.** Cloning the repo somewhere else on a server that already runs Hearth and typing
+`docker compose up -d` does not create a second stack — it adopts and recreates the running one
+with the new directory's `.env`. Anybody testing an upgrade before applying it will do exactly
+this, so the answer is worth saying out loud: `docker compose -p hearth-test up -d`.
+
+Data survives (Postgres is a bind mount, and `down -v` only touches named volumes) but the
+containers come back on the wrong configuration, and a stale locally-built image can leave an
+old app running against a newer database. The version in the footer is what makes that visible.
+
 ## Testing the template before submitting
 
 Community Applications can install a template from a local file: put `hearth.xml` in

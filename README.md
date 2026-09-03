@@ -42,6 +42,22 @@ forward-only, so back the database up before a major version.
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
+**Running a second Hearth on a host that already has one** — to try an upgrade, say — needs its
+own project name:
+
+```bash
+docker compose -p hearth-test up -d
+```
+
+The compose file pins `name: hearth`, so that a checkout in a directory called `app` does not
+become project `app` and collide with unrelated stacks. The cost is that two *Hearth* checkouts
+on one host collide with each other instead: without `-p`, the second `docker compose up -d`
+does not start a second stack, it **adopts and recreates the first one** with the second
+directory's `.env`. `-p` overrides the pinned name and keeps them apart.
+
+The database survives that — it is a bind mount, and `down -v` only removes named volumes — but
+the containers come back on whatever configuration the other directory specified.
+
 ### What it needs from the outside world
 
 Nothing, unless you ask for it. There is **no telemetry and no Hearth server** — no phoning

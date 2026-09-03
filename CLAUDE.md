@@ -218,6 +218,12 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **A scope is a per-install decision.** `googleScopes()` reads the environment; `mailEnabled()`
   gates Gmail. Anything that treats a missing optional scope as an incomplete grant will show a
   permanent "Reconnect Google" — see §35.3.
+- **`name: hearth` in the compose file makes two checkouts one project.** Cloning elsewhere on a
+  host that already runs Hearth and typing `docker compose up -d` adopts and recreates the
+  running stack with the other directory's `.env` — which is how a live install ended up as a
+  stale `hearth:dev` image (footer said v0.5.0) against a database already migrated to 1.2.0.
+  Nothing was lost: the bind mount is out of `down -v`'s reach and migrations are forward-only.
+  Use `-p hearth-test` for a second stack.
 - **The CA template is one container and Hearth is two.** It takes a `DATABASE_URL` for a
   separately-installed Postgres. `unraid/README.md` holds the submission requirements; the two
   `REPLACE_ME` markers need accounts that must exist first.
