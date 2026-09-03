@@ -26,6 +26,8 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-03
+
 ### Added
 
 - **Hearth can be installed by somebody else.** The pieces that were missing rather than
@@ -1562,7 +1564,8 @@ groundwork the Google sync worker needs. **Nothing is sent to Google yet.**
 - Sync settings are saved and every record tracks its own sync state, but no
   requests are made to Google until `0.2.0`.
 
-[Unreleased]: https://gitlab.com/hearth-prm/hearth/-/compare/v1.1.0...main
+[Unreleased]: https://gitlab.com/hearth-prm/hearth/-/compare/v1.2.0...main
+[1.2.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v1.2.0
 [1.1.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v1.1.0
 [1.0.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v1.0.0
 [0.6.0]: https://gitlab.com/hearth-prm/hearth/-/tags/v0.6.0
