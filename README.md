@@ -1589,10 +1589,25 @@ Deleting a user cascades to everything they own. The seeded relationship types
 
 ## Licence
 
-Hearth is free software under the **GNU Affero General Public License, version 3** — see
-[LICENSE](LICENSE). You may run it, study it, change it and share it; if you distribute a
-modified version, or run one where other people can reach it over a network, those people are
-entitled to its source.
+```
+Hearth — a self-hosted personal relationship manager
+Copyright (C) 2026 Taylor Hammerling
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free Software
+Foundation, version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+```
+
+The full text is in [LICENSE](LICENSE). In short: you may run it, study it, change it and share
+it; if you distribute a modified version, or run one where other people can reach it over a
+network, those people are entitled to its source.
 
 Which is what `HEARTH_SOURCE_URL` is for: the footer offers a link to the source of the running
 version, and if you have changed anything, that link should point at *your* repository rather

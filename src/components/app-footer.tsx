@@ -7,16 +7,18 @@ import { sourceUrl, versionDetail, versionLabel } from "@/lib/version";
  * access. The full detail — commit and build time — sits in the title attribute
  * to keep the footer quiet while staying one hover away.
  *
- * The source link is here for the licence rather than for decoration: the AGPL asks that
- * anyone using the software over a network be offered its source, and a footer on every page
- * is the plainest way to offer it. HEARTH_SOURCE_URL points it at a fork.
+ * The copyright line and source link are here for the licence rather than for decoration: the
+ * AGPL asks that anyone using the software over a network be offered its source, and that an
+ * interactive program display a notice. A footer on every page is the plainest way to do both.
+ * HEARTH_SOURCE_URL points the link at a fork, which is what a modified version owes its own
+ * users rather than pointing them upstream.
  */
 export function AppFooter() {
   return (
     <footer className="mx-auto w-full max-w-5xl px-4 pb-8 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 pt-4 text-xs text-neutral-400 dark:border-neutral-800 dark:text-neutral-500">
         <span>
-          Hearth ·{" "}
+          Hearth · © 2026 Taylor Hammerling ·{" "}
           <a
             href={sourceUrl()}
             target="_blank"
