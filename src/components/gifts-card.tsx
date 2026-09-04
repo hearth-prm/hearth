@@ -56,7 +56,7 @@ export function GiftsCard({
   // One row read from either end; which name to show is the only difference. See the
   // note on the Gift model for why there is no direction column to consult.
   const received = gifts.filter((g) => g.recipients.some((r) => r.id === personId));
-  const given = gifts.filter((g) => g.giverId === personId);
+  const given = gifts.filter((g) => g.givers.some((gv) => gv.id === personId));
 
   return (
     <Card>
@@ -324,7 +324,9 @@ function GiftLine({
 }) {
   // Going out, a gift may have been for several people at once, so the other end is a
   // list rather than a name.
-  const others = otherSide === "from" ? [gift.giver] : gift.recipients;
+  // Either end may be several people now: a present from a couple to two children is one
+  // gift with two names on each side.
+  const others = otherSide === "from" ? gift.givers : gift.recipients;
   // Whose thanks this row is about: the contact whose page this is.
   const forRecipient = gift.recipients.find((r) => r.id === personId);
 
@@ -371,10 +373,15 @@ function GiftLine({
             giftId={gift.id}
             recipientId={forRecipient.id}
             giftDescription={gift.description}
-            giverName={gift.giver.displayName}
-            giverEmail={gift.giver.email}
-            thanked={Boolean(forRecipient.thankedAt)}
-            thankYouNote={forRecipient.thankYouNote}
+            givers={gift.givers.map((g) => ({
+              id: g.id,
+              displayName: g.displayName,
+              email: g.email,
+              // Per giver, from the same derivation has:unthanked uses — so the dialog and
+              // the search agree about who is still owed a note.
+              thanked: !forRecipient.outstandingGiverIds.includes(g.id),
+            }))}
+            lastNote={forRecipient.thankYous[0]?.message ?? null}
             canSend={canSend}
             yours={forRecipient.canThank}
           />

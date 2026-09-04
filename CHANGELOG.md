@@ -26,6 +26,49 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Added
+
+- **A gift can be from several people**, because a present from a couple is one present. Both
+  sides of the record are checkbox lists now, and a gift's row names everyone on each end.
+- **A thank-you goes to all the givers or to each of them separately**, chosen at the moment of
+  sending rather than in settings — the right answer depends on who the givers are, which
+  varies per gift. The dropdown appears only when there is more than one person to address, and
+  each option explains itself on hover:
+  - **One email to everyone** (the default) — everyone in the To line, so it reads as a shared
+    note. Right for a couple, or a family who know each other.
+  - **A separate email to each** — the same words sent individually, so nobody sees the others'
+    addresses. Right for people who do not know each other.
+  - **One email, addresses hidden** — Bcc, addressed to you. Private, but reads a little oddly.
+  - How it was addressed is recorded **on the note**, not read from a setting, because a
+    setting describes what happens next and a record has to describe what happened then.
+- **Attachments on a thank-you** — up to 5 files and 15MB in total, which is what an email can
+  actually carry once base64 has added its third. Stored in the database like contact photos, so
+  a dump is still the whole install. A group note carries one copy however many people it goes
+  to. Refused *here*, naming the file and its size, rather than at Gmail's API where the same
+  problem arrives as an unreadable 400.
+
+### Changed
+
+- **`GiftRecipient.thankedAt` and `Gift.giverId` are gone.** Once a present can come from
+  several people, "has this recipient said thank you" stops being a single fact — you may have
+  written to Karen and not to Kenny — so the thanks became what they always were in spirit: a
+  record of something Hearth sent. There is still no checkbox; writing the note is still the
+  record.
+  - `has:unthanked` is now exact **per giver**: thank Karen individually and Kenny stays on the
+    list. That needed a structural correlation Prisma can express — `ThankYouSendGiver.giftId`
+    duplicates `send.giftId` so the row can relate to its `GiftGiver`, because a filter nested
+    under Gift cannot refer back to the giver it came from. §37.5 asserts the two always agree.
+  - A send that **failed** for one giver is still owed. `sentAt` is stamped per giver as each
+    message actually goes, so two succeeding and the third bouncing produces a truthful record
+    and an honest message, rather than a note that claims everybody or nobody.
+- The migration copies every existing gift and every existing thank-you into the new tables
+  before dropping the three old columns, and is marked `allow-destructive` because it must be.
+  `npm run check:gift-migration` proves the copy: it applies the 29 migrations before it, writes
+  old-shaped rows by hand, applies it, and asserts what came out — including that a note keeps
+  the time it was actually sent and gains no invented sender or address. **The e2e suite could
+  not have caught a fault there**, because its database is always fresh and the copy runs
+  against zero rows.
+
 ### Changed
 
 - **An event that does not go to Google no longer asks about RSVPs.** No Google means no

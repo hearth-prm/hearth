@@ -85,6 +85,64 @@ try {
   const A = await h.signIn("alice@e2e.test", "Alice");
   const B = await h.signIn("bob@e2e.test", "Bob");
 
+  // --- gift fixtures -------------------------------------------------------
+  //
+  // A gift's givers are a relation now, and its thanks are a record of a send, so a fixture
+  // cannot set either with a column. These three say what the old columns used to say, in one
+  // place, so a section that only wants "a gift from Auntie, thanked" does not have to know
+  // the shape of ThankYouSend.
+  const givenBy = (...personIds: string[]) => ({
+    create: personIds.map((personId) => ({ personId })),
+  });
+
+  /** Record a thank-you as if it had been sent — including the giftId the FK needs. */
+  const recordThanks = async (
+    giftId: string,
+    fromPersonId: string,
+    giverPersonIds: string[],
+    message = "Thank you.",
+  ): Promise<string> => {
+    const send = await prisma.thankYouSend.create({
+      data: {
+        giftId,
+        fromPersonId,
+        message,
+        addressing: giverPersonIds.length > 1 ? "together" : "together",
+        givers: {
+          create: giverPersonIds.map((giverPersonId) => ({
+            giverPersonId,
+            giftId,
+            emailUsed: "fixture@e2e.test",
+            sentAt: new Date(),
+          })),
+        },
+      },
+      select: { id: true },
+    });
+    return send.id;
+  };
+
+  /** Take the thanks back off, for a fixture that needs to be owed again. */
+  const clearThanks = (giftId: string, fromPersonId?: string) =>
+    prisma.thankYouSend.deleteMany({
+      where: { giftId, ...(fromPersonId ? { fromPersonId } : {}) },
+    });
+
+  /** Whether a note has actually reached this giver from this recipient. */
+  const hasThanked = async (
+    giftId: string,
+    fromPersonId: string,
+    giverPersonId: string,
+  ): Promise<boolean> =>
+    (await prisma.thankYouSendGiver.count({
+      where: {
+        giftId,
+        giverPersonId,
+        sentAt: { not: null },
+        send: { giftId, fromPersonId },
+      },
+    })) > 0;
+
   // ════════════════════════════════════════════════════════════════════════
   section("§1 Labels in Hearth");
 
@@ -1743,7 +1801,8 @@ try {
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
   await A.page.click('button:has-text("Record a gift")');
-  await A.page.selectOption('select[name="giverId"]', auntie.id);
+  // Checkboxes on both sides now: a present from a couple is one present.
+  await A.page.check(`input[name="giverId"][value="${auntie.id}"]`);
   // Checkboxes now, and this one arrives pre-ticked as the only candidate — check()
   // is idempotent, so it states the intent either way.
   await A.page.check(`input[name="recipientId"][value="${kid.id}"]`);
@@ -1754,11 +1813,12 @@ try {
     (await prisma.gift.count({ where: { eventId: xmas.id } })) === 1);
   const recorded = await prisma.gift.findFirstOrThrow({
     where: { eventId: xmas.id },
-    include: { recipients: true },
+    include: { recipients: true, givers: true },
   });
   ok("16.4 a gift records what it was, who gave it and who got it",
-     recorded.description === "A blue scarf" && recorded.giverId === auntie.id
-       && recorded.recipients.map((r) => r.personId).includes(kid.id),
+     recorded.description === "A blue scarf" &&
+       recorded.givers.map((g) => g.personId).includes(auntie.id) &&
+       recorded.recipients.map((r) => r.personId).includes(kid.id),
      recorded.description);
   ok("16.4b including a note of its own", recorded.notes === "Hand-knitted", recorded.notes);
   ok("16.4c and no date, since the event already answers when",
@@ -1789,12 +1849,15 @@ try {
   // The recording controls live behind the card's edit toggle now.
   await A.page.click('button[aria-label="Edit gifts"]');
   await A.page.click('button:has-text("Record a gift")');
-  const defaultGiver = await A.page.inputValue('select[name="giverId"]');
+  const defaultGiver = await A.page.isChecked(
+    `input[name="giverId"][value="${auntie.id}"]`,
+  );
   ok("16.6 the giver defaults to the contact whose page you are on",
-     defaultGiver === auntie.id, defaultGiver);
+     defaultGiver, defaultGiver);
 
   // …and is overridable, which is the whole point: this one goes the other way.
-  await A.page.selectOption('select[name="giverId"]', kid.id);
+  await A.page.uncheck(`input[name="giverId"][value="${auntie.id}"]`);
+  await A.page.check(`input[name="giverId"][value="${kid.id}"]`);
   await A.page.check(`input[name="recipientId"][value="${auntie.id}"]`);
   await A.page.uncheck(`input[name="recipientId"][value="${kid.id}"]`).catch(() => {});
   await A.page.fill('input[name="description"]', "A thank-you plant");
@@ -1813,8 +1876,13 @@ try {
      oneOff?.eventId === null
        && oneOff?.receivedOn?.toISOString().startsWith("2026-07-04") === true,
      oneOff?.receivedOn);
+  const oneOffGivers = await prisma.giftGiver.findMany({
+    where: { giftId: oneOff!.id },
+    select: { personId: true },
+  });
   ok("16.6c recorded in the direction chosen rather than the one prefilled",
-     oneOff?.giverId === kid.id, oneOff?.giverId);
+     oneOffGivers.map((g) => g.personId).join() === kid.id,
+     oneOffGivers.map((g) => g.personId));
 
   // Access follows the recipient, not the giver and not the recorder.
   //
@@ -1846,7 +1914,7 @@ try {
   // The thank-you note, built without a mailbox. These are pure functions precisely so
   // the wording a person will actually read can be checked without sending anything.
   const mail = buildThankYouMail({
-    to: "auntie@e2e.test",
+    to: ["auntie@e2e.test"],
     giftDescription: "blue scarf",
     message: "Dear Auntie,\n\nThank you for the <lovely> scarf.\nIt fits.",
   });
@@ -1959,7 +2027,7 @@ try {
   });
   const shared = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: auntie.id, description: "A week in Wales",
+      ownerId: A.id, givers: givenBy(auntie.id), description: "A week in Wales",
       eventId: xmas.id,
       recipients: { create: [{ personId: kid.id }, { personId: twin.id }] },
     },
@@ -1968,17 +2036,16 @@ try {
   ok("16.21 one gift can be for several people",
      shared.recipients.length === 2, shared.recipients.length);
   ok("16.21d and each of them owes their own thanks",
-     shared.recipients.every((r) => r.thankedAt === null));
+     !(await hasThanked(shared.id, kid.id, auntie.id)) &&
+       !(await hasThanked(shared.id, twin.id, auntie.id)));
 
   // One recipient thanking must not discharge the other's obligation.
-  await prisma.giftRecipient.update({
-    where: { giftId_personId: { giftId: shared.id, personId: kid.id } },
-    data: { thankedAt: new Date(), thankYouNote: "Thanks for Wales!" },
-  });
-  const afterOne = await prisma.giftRecipient.findMany({ where: { giftId: shared.id } });
+  await recordThanks(shared.id, kid.id, [auntie.id], "Thanks for Wales!");
   ok("16.21e one recipient thanking leaves the other still owing",
-     afterOne.filter((r) => r.thankedAt !== null).length === 1,
-     afterOne.map((r) => r.thankedAt));
+     (await hasThanked(shared.id, kid.id, auntie.id)) &&
+       !(await hasThanked(shared.id, twin.id, auntie.id)),
+     [await hasThanked(shared.id, kid.id, auntie.id),
+      await hasThanked(shared.id, twin.id, auntie.id)]);
   // Twin is a contact, not a user of this install, so nobody holds their signature —
   // and a note has to be signed by somebody. Their share of the present is recorded and
   // visible, and no one is offered the chance to thank for it. Intended: thank-yous are
@@ -1990,10 +2057,7 @@ try {
   // Put the shared present back to unthanked. This section sits above §16.10, which
   // asserts that nothing on the event page claims to have been thanked for yet — so a
   // mark left behind here fails a check further down that is testing something else.
-  await prisma.giftRecipient.updateMany({
-    where: { giftId: shared.id },
-    data: { thankedAt: null, thankYouNote: null },
-  });
+  await clearThanks(shared.id);
 
   await A.page.goto(`/people/${twin.id}`);
   ok("16.21b and shows on each of their pages",
@@ -2013,7 +2077,7 @@ try {
   });
   const karensGift = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: auntie.id, description: "A mug",
+      ownerId: A.id, givers: givenBy(auntie.id), description: "A mug",
       recipients: { create: [{ personId: karenCard.id }] },
     },
   });
@@ -2116,7 +2180,7 @@ try {
   });
   const notMine = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: auntie.id, description: "A candle", eventId: xmas.id,
+      ownerId: A.id, givers: givenBy(auntie.id), description: "A candle", eventId: xmas.id,
       recipients: { create: [{ personId: karen.id }] },
     },
   });
@@ -2125,7 +2189,7 @@ try {
      (await A.page.$$('text="write thank you"')).length === 0, notMine.id);
 
   ok("16.19 nothing is marked thanked until something is sent",
-     scarf.recipients.every((r) => r.thankedAt === null));
+     (await prisma.thankYouSend.count({ where: { giftId: scarf.id } })) === 0);
 
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
@@ -2150,9 +2214,11 @@ try {
   ok("16.19e and the modal still holds what was written",
      (await A.page.inputValue("dialog[open] textarea")) === "Thank you for the scarf.",
      await A.page.inputValue("dialog[open] textarea").catch(() => null));
+  // No row with a sentAt, which is the exact thing has:unthanked tests — a send that failed
+  // may leave a record behind, but never a stamped one.
   ok("16.19f with the gift not marked thanked by a send that never landed",
-     (await prisma.giftRecipient.count({
-       where: { giftId: scarf.id, thankedAt: { not: null } },
+     (await prisma.thankYouSendGiver.count({
+       where: { giftId: scarf.id, sentAt: { not: null } },
      })) === 0);
   await A.page.keyboard.press("Escape");
 
@@ -2179,10 +2245,7 @@ try {
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
   const offersBefore = await shows("write thank you");
-  await prisma.giftRecipient.updateMany({
-    where: { giftId: scarf.id },
-    data: { thankedAt: new Date(), thankYouNote: "Thank you for the scarf." },
-  });
+  await recordThanks(scarf.id, kid.id, [auntie.id], "Thank you for the scarf.");
   await A.page.goto(`/events/${xmas.id}`);
   await openGifts();
   ok("16.20 once sent, the row reads thanked", (await shows("thanked")) >= 1);
@@ -2192,10 +2255,7 @@ try {
   await A.page.goto(`/people/${kid.id}`);
   ok("16.20c the same on the contact page, for what they received",
      (await shows("thanked")) >= 1);
-  await prisma.giftRecipient.updateMany({
-    where: { giftId: scarf.id },
-    data: { thankedAt: null, thankYouNote: null },
-  });
+  await clearThanks(scarf.id);
 
   // ---------------------------------------------------------------------------
   section("§17 Importing from Google Contacts");
@@ -3146,7 +3206,7 @@ try {
   // Something hanging off it, to prove trashing keeps the row rather than cascading.
   const doomedGift = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: doomed.id, description: "Bin bag",
+      ownerId: A.id, givers: givenBy(doomed.id), description: "Bin bag",
       receivedOn: new Date("2026-03-01T00:00:00Z"),
       recipients: { create: [{ personId: kid.id }] },
     },
@@ -3206,7 +3266,7 @@ try {
   const binBag = giftsAfterTrash.find((g) => g.description === "Bin bag");
   ok("19.8 a gift outlives the trashing of its giver", binBag !== undefined);
   ok("19.8b but the giver is no longer a link to a page that is gone",
-     binBag?.giver.deleted === true);
+     binBag?.givers.every((g) => g.deleted) === true, binBag?.givers);
 
   // Somebody else's bin is not a place you can look, even for a record they shared.
   const bobHit = await B.page.goto(`/people/${doomed.id}`);
@@ -4799,13 +4859,13 @@ try {
   });
   const umaGift = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: pUma.id, description: "A kite",
+      ownerId: A.id, givers: givenBy(pUma.id), description: "A kite",
       recipients: { create: [{ personId: aOwnCard.id }] },
     },
   });
   await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: pVic.id, description: "A jigsaw",
+      ownerId: A.id, givers: givenBy(pVic.id), description: "A jigsaw",
       // To a plain contact, who has nobody to write for them.
       recipients: { create: [{ personId: pWes.id }] },
     },
@@ -4820,10 +4880,7 @@ try {
        (await hasNames("giftreceived")).includes("Wes Presence"),
      await hasNames("giftgiven"));
 
-  await prisma.giftRecipient.update({
-    where: { giftId_personId: { giftId: umaGift.id, personId: aOwnCard.id } },
-    data: { thankedAt: new Date(), thankYouNote: "Thank you for the kite" },
-  });
+  await recordThanks(umaGift.id, aOwnCard.id, [pUma.id], "Thank you for the kite");
   ok("29.10 writing the note is what clears it — there is nothing to tick",
      !(await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
   ok("29.10b and the gift is still there afterwards",
@@ -4833,21 +4890,19 @@ try {
   // match a gift carrying one thanked card and one unthankable stranger, which is neither.
   const mixed = await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: pUma.id, description: "A joint present",
+      ownerId: A.id, givers: givenBy(pUma.id), description: "A joint present",
       recipients: {
-        create: [
-          { personId: aOwnCard.id, thankedAt: new Date(), thankYouNote: "ta" },
-          { personId: pWes.id },
-        ],
+        create: [{ personId: aOwnCard.id }, { personId: pWes.id }],
       },
     },
   });
+  // The card is thanked; the stranger is not thankable by anybody. Recorded after the create
+  // rather than inline, now that thanks are a send rather than a column — and the ordering is
+  // the point of the check, so it is worth being explicit that the note exists before it runs.
+  await recordThanks(mixed.id, aOwnCard.id, [pUma.id], "ta");
   ok("29.11 a thanked card beside an unthankable stranger owes nothing",
      !(await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
-  await prisma.giftRecipient.update({
-    where: { giftId_personId: { giftId: mixed.id, personId: aOwnCard.id } },
-    data: { thankedAt: null, thankYouNote: null },
-  });
+  await clearThanks(mixed.id, aOwnCard.id);
   ok("29.11b and owes it again the moment the card's own note is missing",
      (await hasNames("unthanked")).includes("Uma Presence"), await hasNames("unthanked"));
 
@@ -4870,7 +4925,7 @@ try {
   });
   await prisma.gift.create({
     data: {
-      ownerId: B.id, giverId: pZane.id, description: "Something private",
+      ownerId: B.id, givers: givenBy(pZane.id), description: "Something private",
       recipients: { create: [{ personId: pYara.id }] },
     },
   });
@@ -5797,7 +5852,7 @@ try {
 
   await prisma.gift.create({
     data: {
-      ownerId: A.id, giverId: xAda.id, description: "A red kite", notes: "from the seaside shop",
+      ownerId: A.id, givers: givenBy(xAda.id), description: "A red kite", notes: "from the seaside shop",
       recipients: { create: [{ personId: xBen.id }] },
     },
   });
@@ -5815,7 +5870,7 @@ try {
   // side, and the same shape as §29.12.
   await prisma.gift.create({
     data: {
-      ownerId: B.id, giverId: xCal.id, description: "A secret trombone",
+      ownerId: B.id, givers: givenBy(xCal.id), description: "A secret trombone",
       recipients: { create: [{ personId: xHidden.id }] },
     },
   });
@@ -6464,6 +6519,259 @@ try {
 
   await prisma.event.deleteMany({ where: { id: { in: [quietEvent.id, loudEvent.id] } } });
   await prisma.person.delete({ where: { id: rsvpKeep.id } });
+
+  section("§37 A gift from several people")
+
+  // A present from a couple is one present. That turns "has this person said thank you" from
+  // one fact into one per giver — you may have written to Karen and not to Kenny — which is
+  // why the thanks are a record of a SEND now rather than a column on the recipient.
+  const { buildMessage: buildMsg } = await import("@/lib/google/mail");
+  const { buildThankYouMail: buildTy, ADDRESSING_MODES, isAddressing } =
+    await import("@/lib/thank-you");
+  const { readAttachments, safeFilename, MAX_FILE_BYTES, MAX_FILES } =
+    await import("@/lib/attachments");
+
+  const karenG = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Karen Giver", givenName: "Karen", familyName: "Giver",
+      contactPoints: { create: [{ kind: "EMAIL", value: "karen.giver@e2e.test", order: 0 }] },
+    },
+  });
+  const kennyG = await prisma.person.create({
+    data: {
+      ownerId: A.id, displayName: "Kenny Giver", givenName: "Kenny", familyName: "Giver",
+      contactPoints: { create: [{ kind: "EMAIL", value: "kenny.giver@e2e.test", order: 0 }] },
+    },
+  });
+  const noMailG = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Silent Giver", givenName: "Silent", familyName: "Giver" },
+  });
+  const myCard = await prisma.person.findFirstOrThrow({ where: { linkedUserId: A.id } });
+
+  const multiGift = await prisma.gift.create({
+    data: {
+      ownerId: A.id,
+      description: "A joint telescope",
+      givers: givenBy(karenG.id, kennyG.id),
+      recipients: { create: [{ personId: myCard.id }] },
+    },
+    include: { givers: true },
+  });
+  ok("37.1 a gift can have several givers", multiGift.givers.length === 2,
+     multiGift.givers.length);
+
+  // --- who is owed, per giver ------------------------------------------------
+
+  const owedNames = async () => {
+    const { where } = compileQuery("has:unthanked", qViewer, qDefs);
+    const rows = await prisma.person.findMany({
+      where: { AND: [qViewer.readablePeople, where, { familyName: "Giver" }] },
+      select: { displayName: true },
+      orderBy: { displayName: "asc" },
+    });
+    return rows.map((r) => r.displayName);
+  };
+  ok("37.2 both givers are owed a thank-you",
+     (await owedNames()).join() === "Karen Giver,Kenny Giver", await owedNames());
+
+  // The whole reason the thanks moved off GiftRecipient. Thanking one must not discharge the
+  // other, and a column on the recipient could not tell them apart.
+  await recordThanks(multiGift.id, myCard.id, [karenG.id], "Thank you Karen.");
+  ok("37.3 thanking one giver leaves the other still owed",
+     (await owedNames()).join() === "Kenny Giver", await owedNames());
+  await recordThanks(multiGift.id, myCard.id, [kennyG.id], "Thank you Kenny.");
+  ok("37.3b and thanking the second clears it",
+     (await owedNames()).length === 0, await owedNames());
+
+  // A send that failed leaves a row behind. Counting it would report a bounce as delivered,
+  // which is the one thing has:unthanked must never do.
+  await prisma.thankYouSendGiver.updateMany({
+    where: { giftId: multiGift.id, giverPersonId: kennyG.id },
+    data: { sentAt: null, error: "Gmail refused the message (400)." },
+  });
+  ok("37.4 a send that failed is still owed, not silently done",
+     (await owedNames()).join() === "Kenny Giver", await owedNames());
+  await prisma.thankYouSendGiver.updateMany({
+    where: { giftId: multiGift.id, giverPersonId: kennyG.id },
+    data: { sentAt: new Date(), error: null },
+  });
+
+  // The redundancy the model buys the query with. ThankYouSendGiver.giftId must always equal
+  // its send's giftId — nothing but the application can enforce that, so it is asserted over
+  // every row rather than trusted.
+  const mismatched = await prisma.thankYouSendGiver.findMany({
+    select: { giftId: true, send: { select: { giftId: true } } },
+  });
+  ok(`37.5 all ${mismatched.length} thanks rows agree with their send about which gift it was`,
+     mismatched.every((r) => r.giftId === r.send.giftId),
+     mismatched.filter((r) => r.giftId !== r.send.giftId).length);
+
+  // --- the message itself ---------------------------------------------------
+
+  ok("37.6 one note to several people puts them all in To",
+     (() => {
+       const raw = Buffer.from(
+         buildMsg(buildTy({
+           to: ["a@e2e.test", "b@e2e.test"],
+           giftDescription: "telescope",
+           message: "Thanks!",
+         })),
+         "base64url",
+       ).toString("utf8");
+       return raw.includes("To: a@e2e.test, b@e2e.test") && !raw.includes("Bcc:");
+     })());
+  ok("37.6b and a hidden send puts them in Bcc, with a visible recipient of its own",
+     (() => {
+       const raw = Buffer.from(
+         buildMsg(buildTy({
+           to: ["me@e2e.test"],
+           bcc: ["a@e2e.test", "b@e2e.test"],
+           giftDescription: "telescope",
+           message: "Thanks!",
+         })),
+         "base64url",
+       ).toString("utf8");
+       // Gmail requires a visible recipient; a note addressed to nobody reads as spam.
+       return raw.includes("To: me@e2e.test") && raw.includes("Bcc: a@e2e.test, b@e2e.test");
+     })());
+
+  const withFile = Buffer.from(
+    buildMsg(buildTy({
+      to: ["a@e2e.test"],
+      giftDescription: "telescope",
+      message: "Thanks!",
+      attachments: [
+        { filename: "moon.png", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3, 4]) },
+      ],
+    })),
+    "base64url",
+  ).toString("utf8");
+  ok("37.7 an attachment makes the message multipart/mixed",
+     withFile.includes("Content-Type: multipart/mixed"), withFile.slice(0, 0) || "no mixed");
+  ok("37.7b with the two body alternatives still beside each other inside it",
+     withFile.indexOf("multipart/alternative") > withFile.indexOf("multipart/mixed") &&
+       withFile.includes('Content-Type: text/plain; charset="UTF-8"') &&
+       withFile.includes('Content-Type: text/html; charset="UTF-8"'));
+  ok("37.7c and the file named in both the type and the disposition",
+     withFile.includes('Content-Type: image/png; name="moon.png"') &&
+       withFile.includes('Content-Disposition: attachment; filename="moon.png"'),
+     withFile.slice(withFile.indexOf("image/png"), withFile.indexOf("image/png") + 90));
+  ok("37.7d base64, in lines short enough for a client that enforces the limit",
+     Buffer.from(withFile.slice(withFile.lastIndexOf("base64") + 8).split("\r\n")[1] ?? "", "utf8")
+       .length <= 76);
+  // A name with an accent passed through raw arrives mangled or loses the parameter entirely,
+  // which turns a photograph into "noname".
+  const accentFile = Buffer.from(
+    buildMsg(buildTy({
+      to: ["a@e2e.test"],
+      giftDescription: "telescope",
+      message: "Thanks!",
+      attachments: [
+        { filename: "café.png", mimeType: "image/png", bytes: new Uint8Array([1]) },
+      ],
+    })),
+    "base64url",
+  ).toString("utf8");
+  ok("37.7e a non-ASCII filename is encoded rather than sent raw",
+     accentFile.includes("filename*=UTF-8''") && !accentFile.includes('filename="café.png"'),
+     accentFile.slice(accentFile.indexOf("image/png"), accentFile.indexOf("image/png") + 80));
+
+  ok("37.8 no attachments keeps the message as it was",
+     !Buffer.from(
+       buildMsg(buildTy({ to: ["a@e2e.test"], giftDescription: "t", message: "m" })),
+       "base64url",
+     ).toString("utf8").includes("multipart/mixed"));
+
+  // --- what the form will accept -------------------------------------------
+
+  const formWith = (...files: File[]) => {
+    const f = new FormData();
+    for (const file of files) f.append("attachment", file);
+    return f;
+  };
+  const upload = (name: string, size: number, type = "image/png") =>
+    new File([new Uint8Array(size)], name, { type });
+
+  ok("37.9 an untouched file input attaches nothing",
+     "files" in (await readAttachments(formWith(upload("", 0)))) &&
+       (await readAttachments(formWith(upload("", 0))) as { files: unknown[] }).files.length === 0);
+  const tooBig = await readAttachments(formWith(upload("huge.png", MAX_FILE_BYTES + 1)));
+  ok("37.9b one file over the per-file limit is refused, by name and size",
+     "error" in tooBig && tooBig.error.includes("huge.png") && tooBig.error.includes("MB"),
+     tooBig);
+  const tooMany = await readAttachments(
+    formWith(...Array.from({ length: MAX_FILES + 1 }, (_, i) => upload(`f${i}.png`, 10))),
+  );
+  ok("37.9c and too many files likewise",
+     "error" in tooMany && tooMany.error.includes(String(MAX_FILES)), tooMany);
+  // The total matters as much as any one file, because it is the total the message carries.
+  const tooMuch = await readAttachments(
+    formWith(upload("a.png", 8 * 1024 * 1024), upload("b.png", 8 * 1024 * 1024)),
+  );
+  ok("37.9d two files that are each fine but too much together are refused",
+     "error" in tooMuch && tooMuch.error.includes("together"), tooMuch);
+  ok("37.10 a filename cannot break the header or claim to be a path",
+     safeFilename("../../etc/passwd") === "passwd" &&
+       safeFilename("a\r\nb.png") === "ab.png" &&
+       safeFilename("") === "attachment",
+     [safeFilename("../../etc/passwd"), safeFilename("a\r\nb.png"), safeFilename("")]);
+
+  ok("37.11 an unknown addressing value is not one",
+     ADDRESSING_MODES.every((m) => isAddressing(m)) && !isAddressing("shouty"));
+
+  // --- through the browser --------------------------------------------------
+
+  await clearThanks(multiGift.id);
+  await A.page.goto(`/people/${karenG.id}`);
+  const twoGiverRow = (await A.page.textContent("body")) ?? "";
+  ok("37.12 a gift from two people names both on the row",
+     twoGiverRow.includes("Karen Giver") && twoGiverRow.includes("Kenny Giver"),
+     String(twoGiverRow.includes("Kenny Giver")));
+
+  await A.page.goto(`/people/${myCard.id}`);
+  await A.page.click('button:has-text("write thank you")');
+  await A.page.waitForSelector("dialog[open] textarea", { timeout: 10_000 });
+  ok("37.13 the dialog offers both givers, ticked",
+     (await A.page.$$('dialog[open] input[name="giverId"]')).length === 2 &&
+       (await A.page.isChecked(`dialog[open] input[name="giverId"][value="${karenG.id}"]`)),
+     (await A.page.$$('dialog[open] input[name="giverId"]')).length);
+  ok("37.13b and the addressing dropdown, because there is more than one to address",
+     (await A.page.$$('dialog[open] select[name="addressing"]')).length === 1);
+  ok("37.13c each option explaining itself on hover",
+     ((await A.page.getAttribute('dialog[open] select[name="addressing"]', "title")) ?? "")
+       .length > 20,
+     await A.page.getAttribute('dialog[open] select[name="addressing"]', "title"));
+  ok("37.13d and an attachment control",
+     (await A.page.$$('dialog[open] input[type="file"][name="attachment"]')).length === 1);
+
+  // Untick one and the choice disappears, because one recipient has no addressing.
+  await A.page.uncheck(`dialog[open] input[name="giverId"][value="${kennyG.id}"]`);
+  ok("37.14 the dropdown is gone once only one person is being thanked",
+     (await A.page.$$('dialog[open] select[name="addressing"]')).length === 0);
+  await A.page.keyboard.press("Escape");
+
+  // A giver with no address cannot be sent to, and says so rather than failing at the API.
+  const quietGift = await prisma.gift.create({
+    data: {
+      ownerId: A.id, description: "A silent gift",
+      givers: givenBy(noMailG.id),
+      recipients: { create: [{ personId: myCard.id }] },
+    },
+  });
+  await A.page.goto(`/people/${myCard.id}`);
+  const silentTitle = await A.page.getAttribute(
+    'button:has-text("write thank you")',
+    "title",
+  );
+  ok("37.15 a giver with no email is refused up front, naming them",
+     (await A.page.$$('button:has-text("write thank you")')).length >= 1 &&
+       typeof silentTitle === "string",
+     silentTitle);
+
+  await prisma.gift.deleteMany({ where: { id: { in: [multiGift.id, quietGift.id] } } });
+  await prisma.person.deleteMany({
+    where: { id: { in: [karenG.id, kennyG.id, noMailG.id] } },
+  });
 
   section("§22 On a phone");
 

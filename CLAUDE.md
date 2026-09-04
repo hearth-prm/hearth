@@ -12,9 +12,10 @@ on Unraid behind SWAG, pulled from `gitlab.com/hearth-prm/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 839 checks
+npm run e2e         # builds, then drives a real browser through 866 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
+npm run check:gift-migration         # does the destructive gift migration carry old data across?
 ```
 
 ## Invariants that are load-bearing
@@ -99,6 +100,16 @@ autocomplete, the help panel and the chip menu. Adding a field to a table makes 
 everywhere on the same commit; hand-writing a fifth list is how `gender` and `birthdayText`
 came to be stored and synced while invisible. Order is explicit (`PRESENCE_ORDER`) because the
 box shows eight of forty.
+
+**A gift is from several people, and a thank-you is a record of a SEND.** `Gift.giverId` and
+`GiftRecipient.thankedAt` are gone: once a present can come from a couple, "has this person
+said thank you" is one fact per giver. `ThankYouSendGiver.giftId` is redundant with
+`send.giftId` ON PURPOSE — it is half the composite key relating the row to its `GiftGiver`,
+which is the only way `has:unthanked` can ask "has THIS giver been thanked" in SQL: a filter
+nested under Gift cannot refer back to the giver it came from. §37.5 asserts the two agree over
+every row. `sentAt: { not: null }` is load-bearing everywhere thanks are counted — a separate
+send that bounced for one giver leaves a row behind, and counting it reports a bounce as a note
+delivered.
 
 **Thank-yous are only ever written by users of the install.** `thankableCardIds` returns
 your own card plus, if you are head of household, any card whose owner ticked
@@ -232,6 +243,13 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 
 - **Migrations are hand-ordered SQL.** Write it, then `./scripts/check-migrations.sh`; it
   refuses destructive statements. Never `prisma migrate dev` against anything real.
+- **A migration that COPIES data is untested by the e2e suite.** Its database is always fresh,
+  so an `INSERT..SELECT` in a migration runs against zero rows there — and that is exactly the
+  half that touches somebody's live data. `scripts/check-gift-migration.mts` is the pattern:
+  apply every migration before the one under test, write old-shaped rows by hand, apply it,
+  assert. Assert against what Postgres STORED rather than what was passed in — `TIMESTAMP(3)`
+  has no time zone, so a Date in a raw insert lands as local wall-clock and reads back hours
+  off, which failed two checks for a reason that had nothing to do with the migration.
 - **`.env.e2e` holds real Google refresh tokens and is gitignored.** Never commit it.
 - **`npm run e2e:google` is destructive** and refuses to run against an account that looks
   like a real address book (>25 contacts, >12 groups) or when both tokens resolve to the

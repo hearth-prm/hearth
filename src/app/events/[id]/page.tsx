@@ -317,14 +317,22 @@ export default async function EventPage({
                                     from
                                   </span>{" "}
                                   {/* Writing a thank-you starts with looking up who to
-                                      thank, so the giver is the one name on this row
-                                      worth being a way to their details. */}
-                                  <Link
-                                    href={`/people/${gift.giver.id}`}
-                                    className="text-accent-700 hover:underline dark:text-accent-400"
-                                  >
-                                    {gift.giver.displayName}
-                                  </Link>
+                                      thank, so the givers are the names on this row
+                                      worth being a way to their details. Several of them,
+                                      because a present from a couple is one present. */}
+                                  {gift.givers.map((giver, i) => (
+                                    <span key={giver.id}>
+                                      {i > 0 ? (
+                                        <span className="text-neutral-400">{", "}</span>
+                                      ) : null}
+                                      <Link
+                                        href={`/people/${giver.id}`}
+                                        className="text-accent-700 hover:underline dark:text-accent-400"
+                                      >
+                                        {giver.displayName}
+                                      </Link>
+                                    </span>
+                                  ))}
                                   {gift.notes ? (
                                     <span className="block text-xs text-neutral-500 dark:text-neutral-400">
                                       {gift.notes}
@@ -344,10 +352,13 @@ export default async function EventPage({
                                         giftId={gift.id}
                                         recipientId={mine.id}
                                         giftDescription={gift.description}
-                                        giverName={gift.giver.displayName}
-                                        giverEmail={gift.giver.email}
-                                        thanked={Boolean(mine.thankedAt)}
-                                        thankYouNote={mine.thankYouNote}
+                                        givers={gift.givers.map((g) => ({
+                                          id: g.id,
+                                          displayName: g.displayName,
+                                          email: g.email,
+                                          thanked: !mine.outstandingGiverIds.includes(g.id),
+                                        }))}
+                                        lastNote={mine.thankYous[0]?.message ?? null}
                                         canSend={mailAllowed}
                                         yours={mine.canThank}
                                       />

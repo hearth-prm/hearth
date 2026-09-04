@@ -56,6 +56,7 @@ model User {
   sharesGiven       Share[]            @relation("SharesGiven")
   savedFilters      SavedFilter[]
   labelShares       LabelShare[]
+  thankYousSent     ThankYouSend[]
   sharesReceived    Share[]            @relation("SharesReceived")
   personSyncs       PersonSync[]
   labels            Label[]
@@ -417,7 +418,11 @@ model Person {
   versions          PersonVersion[]
   googleEvents      PersonGoogleEvent[]
   googleRelations   PersonGoogleRelation[]
-  giftsGiven        Gift[]                 @relation("GiftGiver")
+  giftsGiven        GiftGiver[]            @relation("GiftGiver")
+  /// Thank-yous written as this person — their card is the one signing.
+  thankYousFrom     ThankYouSend[]         @relation("ThankYouFrom")
+  /// Thank-yous sent TO this person, as one of a gift's givers.
+  thankYousTo       ThankYouSendGiver[]    @relation("ThankYouTo")
   giftsReceived     GiftRecipient[]        @relation("GiftRecipient")
   giftEvents        EventGiftRecipient[]
   embedding         PersonEmbedding?
@@ -980,7 +985,6 @@ model Gift {
   ownerId String
 
   eventId String?
-  giverId String
 
   description String
   notes       String?   @db.Text
@@ -991,14 +995,15 @@ model Gift {
 
   owner      User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   event      Event?          @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  giver      Person          @relation("GiftGiver", fields: [giverId], references: [id], onDelete: Cascade)
+  /// Who it was from. More than one, because a present from a couple is one present.
+  givers     GiftGiver[]
   /// Who it was for. More than one, because a big present is often given to several
-  /// people at once — a holiday for the children is one gift and one thank-you, not one
-  /// per child.
+  /// people at once — a holiday for the children is one gift, not one per child.
   recipients GiftRecipient[]
+  /// Every thank-you written for it. See ThankYouSend.
+  thankYous  ThankYouSend[]
 
   @@index([eventId])
-  @@index([giverId])
   @@index([ownerId])
 }
 
@@ -1012,13 +1017,13 @@ model GiftRecipient {
   giftId   String
   personId String
 
-  /// Set when THIS person's thank-you was sent to the giver, from here.
+  /// The thanks used to live here, as thankedAt and thankYouNote.
   ///
-  /// Hearth can be certain of it because it did the sending, which is why there is no
-  /// checkbox and nothing to remember to tick. Writing the note is the record.
-  thankedAt    DateTime?
-  /// What they said, kept so the record is a thank-you rather than only a date.
-  thankYouNote String?   @db.Text
+  /// They moved to ThankYouSend when a gift gained several givers: "has this person said
+  /// thank you" stopped being one fact, because you may have written to Karen and not to
+  /// Kenny. Writing the note is still the record — there is still no checkbox — the record
+  /// is just per note sent now rather than per recipient.
+  thankYous ThankYouSend[]
 
   gift   Gift   @relation(fields: [giftId], references: [id], onDelete: Cascade)
   person Person @relation("GiftRecipient", fields: [personId], references: [id], onDelete: Cascade)
@@ -1203,4 +1208,121 @@ model LabelShare {
   /// Drives "which sticky labels am I a participant in", which widens somebody's label list
   /// beyond the ones they own.
   @@index([withUserId])
+}
+
+/// One of a gift's givers.
+///
+/// A present from a couple is one present, not two — so the givers are a set, and a thank-you
+/// can go to all of them together or to each of them separately.
+model GiftGiver {
+  giftId   String
+  personId String
+
+  createdAt DateTime @default(now())
+
+  gift   Gift                @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  person Person              @relation("GiftGiver", fields: [personId], references: [id], onDelete: Cascade)
+  /// Notes sent to THIS giver for THIS gift.
+  ///
+  /// Hung off the giver row rather than only off the send, and that is what makes
+  /// `has:unthanked` exact: "somebody I write for has not thanked this giver" needs to
+  /// correlate a giver with the notes that reached them, and a filter nested under Gift
+  /// cannot refer back to the giver it came from. Structurally it can.
+  thanks ThankYouSendGiver[]
+
+  @@id([giftId, personId])
+  /// "What did this person give", the mirror of GiftRecipient's index.
+  @@index([personId])
+}
+
+/// One thank-you, as sent.
+///
+/// The record IS the send. Hearth can be certain a thank-you went because it did the sending,
+/// which is why there is no checkbox and nothing to remember to tick — and once a gift can
+/// have several givers, the unit of that certainty is a note rather than a recipient.
+model ThankYouSend {
+  id     String @id @default(cuid())
+  giftId String
+
+  /// Which recipient is thanking. A present shared between two children earns two notes.
+  fromPersonId String
+
+  /// Who pressed send. Null for notes that predate this table, which recorded when a
+  /// thank-you was sent but never who sent it.
+  sentByUserId String?
+
+  message String @db.Text
+
+  /// How it was addressed: `together`, `separate` or `bcc`.
+  ///
+  /// On the record rather than read from a setting, because a setting describes what happens
+  /// next and a record has to describe what happened then.
+  addressing String @default("together")
+
+  createdAt DateTime @default(now())
+
+  gift        Gift                 @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  fromPerson  Person               @relation("ThankYouFrom", fields: [fromPersonId], references: [id], onDelete: Cascade)
+  /// The recipient row this note was written from — a composite relation over columns that
+  /// already exist, so it costs nothing and lets a recipient's notes be reached directly.
+  recipient   GiftRecipient        @relation(fields: [giftId, fromPersonId], references: [giftId, personId], onDelete: Cascade)
+  sentBy      User?                @relation(fields: [sentByUserId], references: [id], onDelete: SetNull)
+  givers      ThankYouSendGiver[]
+  attachments ThankYouAttachment[]
+
+  @@index([giftId, fromPersonId])
+}
+
+/// One giver a thank-you went to, and whether it arrived.
+model ThankYouSendGiver {
+  sendId        String
+  giverPersonId String
+
+  /// The gift, duplicated from the send.
+  ///
+  /// Redundant on purpose: it is the second half of the composite key that relates this row to
+  /// its GiftGiver, and that relation is what lets `has:unthanked` ask "has this giver been
+  /// thanked" in SQL instead of in application code. It must always equal `send.giftId`, which
+  /// only this file's writers can guarantee — §16.31 asserts it over every row.
+  giftId String
+
+  /// The address it actually went to. Null for notes that predate this table.
+  emailUsed String?
+
+  /// Null until this one has gone.
+  ///
+  /// Separate addressing sends several messages, so two succeeding and the third bouncing is
+  /// a real outcome — and one `has:unthanked` must still report, or a failed send would read
+  /// as a note delivered.
+  sentAt DateTime?
+  error  String?
+
+  send      ThankYouSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+  person    Person       @relation("ThankYouTo", fields: [giverPersonId], references: [id], onDelete: Cascade)
+  giftGiver GiftGiver    @relation(fields: [giftId, giverPersonId], references: [giftId, personId], onDelete: Cascade)
+
+  @@id([sendId, giverPersonId])
+  @@index([giverPersonId])
+  @@index([giftId, giverPersonId])
+}
+
+/// A file sent with a thank-you.
+///
+/// On the send rather than on each giver: a group note carries one copy of a photograph, not
+/// three. Bytes in the database, like contact photos, which keeps the database the whole
+/// install — there is no file store to back up separately, and a dump is everything.
+model ThankYouAttachment {
+  id     String @id @default(cuid())
+  sendId String
+
+  filename String
+  mimeType String
+  size     Int
+  bytes    Bytes
+
+  createdAt DateTime @default(now())
+
+  send ThankYouSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+
+  @@index([sendId])
 }

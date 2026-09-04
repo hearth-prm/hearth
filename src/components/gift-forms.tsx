@@ -11,6 +11,13 @@ import {
   inputClass,
   labelClass,
 } from "@/components/ui";
+import {
+  ADDRESSING_HELP,
+  ADDRESSING_LABELS,
+  ADDRESSING_MODES,
+  type Addressing,
+} from "@/lib/thank-you";
+import { MAX_FILES, MAX_TOTAL_BYTES } from "@/lib/attachments";
 
 export interface PickablePerson {
   id: string;
@@ -30,27 +37,37 @@ type Action = (state: ActionState, form: FormData) => Promise<ActionState>;
  * rather than staying available. Hearth did the sending, so it knows this for certain,
  * which is why nothing here has to be ticked by hand.
  */
+export interface ThankYouGiver {
+  id: string;
+  displayName: string;
+  email: string | null;
+  /** Whether a note has already reached this one from this recipient. */
+  thanked: boolean;
+}
+
 export function ThankYouControl({
   action,
   giftId,
   recipientId,
   giftDescription,
-  giverName,
-  giverEmail,
-  thanked,
-  thankYouNote,
+  givers,
   canSend,
   yours,
+  lastNote,
 }: {
   action: Action;
   giftId: string;
   /** Whose thanks these are. A shared present earns one note per recipient. */
   recipientId: string;
   giftDescription: string;
-  giverName: string;
-  giverEmail: string | null;
-  thanked: boolean;
-  thankYouNote: string | null;
+  /**
+   * Everyone who gave it, each with whether they have been thanked yet.
+   *
+   * A present from a couple is one present, and a note can go to all of them together or to
+   * each of them separately — so this is a list, and the ones already thanked are offered
+   * unticked rather than hidden. Thanking somebody twice is a thing a person may want to do.
+   */
+  givers: readonly ThankYouGiver[];
   canSend: boolean;
   /**
    * Whether this gift was given to the person reading.
@@ -60,6 +77,8 @@ export function ThankYouControl({
    * person. Being able to edit a contact is not licence to speak as them.
    */
   yours: boolean;
+  /** The most recent note sent for this gift by this recipient, for the hover text. */
+  lastNote: string | null;
 }) {
   const [state, formAction] = useActionState(action, EMPTY_ACTION_STATE);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -68,9 +87,14 @@ export function ThankYouControl({
   // the note and leave an empty box. Holding the text here means a retry starts from
   // what was written rather than from nothing.
   const [message, setMessage] = useState("");
+  // Who to thank. Defaults to everyone not yet thanked, which is the common case — and to
+  // everyone if they all have been, since the alternative is a dialog with nothing ticked.
+  const outstanding = givers.filter((g) => !g.thanked && g.email);
+  const [chosen, setChosen] = useState<string[]>(
+    (outstanding.length > 0 ? outstanding : givers.filter((g) => g.email)).map((g) => g.id),
+  );
+  const [addressing, setAddressing] = useState<Addressing>("together");
 
-  // Close once the send has reported success. Watching state rather than the click
-  // means the dialog stays open, with the message still in it, if the send failed.
   useEffect(() => {
     if (state.ok) {
       dialog.current?.close();
@@ -78,11 +102,15 @@ export function ThankYouControl({
     }
   }, [state.ok]);
 
-  if (thanked) {
+  const reachable = givers.filter((g) => g.email);
+  const owed = givers.filter((g) => !g.thanked);
+  const allThanked = owed.length === 0;
+
+  if (allThanked) {
     return (
       <span
         className="ml-1 text-xs text-emerald-700 dark:text-emerald-400"
-        title={thankYouNote ?? undefined}
+        title={lastNote ?? undefined}
       >
         thanked
       </span>
@@ -91,11 +119,15 @@ export function ThankYouControl({
 
   if (!yours) return null;
 
-  const blocked = !giverEmail
-    ? `${giverName} has no email address.`
+  const blocked = reachable.length === 0
+    ? `${givers.map((g) => g.displayName).join(", ")} ${givers.length === 1 ? "has" : "have"} no email address.`
     : !canSend
       ? "Reconnect Google in Settings to allow Hearth to send mail."
       : null;
+
+  const picked = givers.filter((g) => chosen.includes(g.id) && g.email);
+  // The choice only exists when there is a choice to make: one giver has no addressing.
+  const showAddressing = picked.length > 1;
 
   return (
     <>
@@ -103,10 +135,13 @@ export function ThankYouControl({
         type="button"
         onClick={() => dialog.current?.showModal()}
         disabled={Boolean(blocked)}
-        title={blocked ?? `Sends to ${giverEmail}, from your own address.`}
+        title={
+          blocked ??
+          `Sends from your own address to ${reachable.map((g) => g.email).join(", ")}.`
+        }
         className="ml-1 text-xs text-accent-700 underline hover:text-accent-800 disabled:no-underline disabled:opacity-50 dark:text-accent-400"
       >
-        write thank you
+        {owed.length < givers.length ? "thank the rest" : "write thank you"}
       </button>
 
       <dialog
@@ -119,11 +154,27 @@ export function ThankYouControl({
         }}
         className="w-full max-w-lg rounded-xl border border-neutral-200 bg-white p-0 text-neutral-900 shadow-xl backdrop:bg-black/40 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
       >
-        <form action={formAction} className="space-y-3 p-5">
+        <form
+          action={formAction}
+          // Attachments mean the browser must send the form as multipart, or the files
+          // arrive as filenames and nothing else.
+          encType="multipart/form-data"
+          className="space-y-3 p-5"
+        >
           <div>
-            <h2 className="text-sm font-semibold">Thank {giverName}</h2>
+            <h2 className="text-sm font-semibold">
+              Thank {picked.length === 1 ? picked[0]!.displayName : `${picked.length} people`}
+            </h2>
+            {/* Naming the addresses, not just the people. With several givers it matters
+                MORE than it did with one: "sent to Karen" does not tell you which of her
+                three addresses, and a thank-you to the wrong one is a thank-you nobody
+                receives. */}
             <p className={helpClass}>
-              For {giftDescription}. Sent from your own address to {giverEmail}.
+              For {giftDescription}. Sent from your own address to{" "}
+              {picked.length > 0
+                ? picked.map((g) => g.email).join(", ")
+                : "whoever you tick above"}
+              .
             </p>
           </div>
 
@@ -134,6 +185,64 @@ export function ThankYouControl({
               waiting for whoever writes the next selector. */}
           <input type="hidden" name="thankAs" value={recipientId} />
 
+          {givers.length > 1 ? (
+            <fieldset className="space-y-1">
+              <legend className={labelClass}>Who to thank</legend>
+              {givers.map((g) => (
+                <label
+                  key={g.id}
+                  className="flex items-center gap-2 text-sm"
+                  title={g.email ?? "No email address, so this one cannot be sent"}
+                >
+                  <input
+                    type="checkbox"
+                    name="giverId"
+                    value={g.id}
+                    checked={chosen.includes(g.id)}
+                    disabled={!g.email}
+                    onChange={(e) =>
+                      setChosen((prev) =>
+                        e.target.checked ? [...prev, g.id] : prev.filter((id) => id !== g.id),
+                      )
+                    }
+                    className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
+                  />
+                  <span className={g.email ? "" : "text-neutral-400"}>{g.displayName}</span>
+                  {g.thanked ? (
+                    <span className="text-xs text-emerald-700 dark:text-emerald-400">
+                      already thanked
+                    </span>
+                  ) : null}
+                </label>
+              ))}
+            </fieldset>
+          ) : (
+            // One giver: still submitted, so the action never has to guess.
+            picked[0] ? <input type="hidden" name="giverId" value={picked[0].id} /> : null
+          )}
+
+          {showAddressing ? (
+            <label className="block">
+              <span className={labelClass}>How to send it</span>
+              <select
+                name="addressing"
+                value={addressing}
+                onChange={(e) => setAddressing(e.target.value as Addressing)}
+                // The explanation of the CHOSEN option, on the control itself, so it is one
+                // hover away rather than three lines of prose nobody reads twice.
+                title={ADDRESSING_HELP[addressing]}
+                className={`${inputClass} mt-1`}
+              >
+                {ADDRESSING_MODES.map((mode) => (
+                  <option key={mode} value={mode} title={ADDRESSING_HELP[mode]}>
+                    {ADDRESSING_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+              <span className={helpClass}>{ADDRESSING_HELP[addressing]}</span>
+            </label>
+          ) : null}
+
           <textarea
             name="message"
             rows={8}
@@ -142,15 +251,32 @@ export function ThankYouControl({
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             aria-label="Your thank-you"
-            placeholder={`Dear ${giverName},\n\nThank you so much for the ${giftDescription}…`}
+            placeholder={`Dear ${picked[0]?.displayName ?? "friend"},\n\nThank you so much for the ${giftDescription}…`}
             className={inputClass}
           />
           {/* A placeholder, not a prefilled draft: whatever is in the box can be sent
               unread, and words Hearth put there are not the sender's. */}
 
+          <label className="block">
+            <span className={labelClass}>Attachments</span>
+            <input
+              type="file"
+              name="attachment"
+              multiple
+              className="mt-1 block w-full text-xs text-neutral-600 file:mr-3 file:rounded file:border-0 file:bg-neutral-100 file:px-2 file:py-1 file:text-xs dark:text-neutral-400 dark:file:bg-neutral-800"
+            />
+            <span className={helpClass}>
+              Up to {MAX_FILES} files, {Math.round(MAX_TOTAL_BYTES / (1024 * 1024))}MB in
+              total — a photograph of the present being used, usually. A group note carries one
+              copy, however many people it goes to.
+            </span>
+          </label>
+
           <div className="flex items-center gap-2">
             <SubmitButton className={btnPrimary} pendingLabel="Sending…">
-              Send thank you
+              {picked.length > 1 && addressing === "separate"
+                ? `Send ${picked.length} notes`
+                : "Send thank you"}
             </SubmitButton>
             <button
               type="button"
@@ -191,7 +317,7 @@ export function GiftForm({
    * Prefilled sides, not fixed ones.
    *
    * On a contact page the giver defaults to whoever's page it is, because the reason
-   * to record a gift there is usually that they gave you something. Both selects stay
+   * to record a gift there is usually that they gave you something. Both sides stay
    * editable, though: an earlier version pinned the recipient to the page's contact,
    * which made the one case the feature exists for — a present to say thank you FOR —
    * the one case it could not record.
@@ -228,23 +354,27 @@ export function GiftForm({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label htmlFor="gift-giver" className={labelClass}>
-            From
-          </label>
-          <select
-            id="gift-giver"
-            name="giverId"
-            className={`${inputClass} mt-1.5`}
-            defaultValue={defaultGiverId ?? ""}
-            required
-          >
-            <option value="">Who gave it…</option>
+          <span className={labelClass}>From</span>
+          {/* Checkboxes on this side too, now that a present from a couple is one present
+              rather than two. Same shape as the recipients beside it, which also means the
+              two sides read the same and neither needs explaining twice. */}
+          <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 p-2 dark:border-neutral-700">
             {givers.map((p) => (
-              <option key={p.id} value={p.id}>
+              <label
+                key={p.id}
+                className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
+              >
+                <input
+                  type="checkbox"
+                  name="giverId"
+                  value={p.id}
+                  defaultChecked={p.id === defaultGiverId}
+                  className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
+                />
                 {p.displayName}
-              </option>
+              </label>
             ))}
-          </select>
+          </div>
         </div>
 
         <div>

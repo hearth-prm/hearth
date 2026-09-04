@@ -80,7 +80,7 @@ also means the database is the whole install.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 839 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 866 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -122,6 +122,8 @@ over to, other users on the same install.
 | ✅ | `semantic:` — finding contacts by meaning rather than spelling | Done |
 | ✅ | Chips, saved filters, and asking through events, relationships and gifts | Done |
 | ✅ | Shared labels — filing a contact shares it, both ways | Done |
+| ✅ | Gifts from several people, with thank-yous together or separately | Done |
+| ✅ | Attachments on a thank-you | Done |
 
 [Search and filtering](docs/design-search.md) is built out: a query language with chips and
 saved filters, autocomplete, a sentence turned into a query by a model on your own network,
@@ -131,7 +133,7 @@ another record. One piece of work is designed and queued rather than built —
 intentions — now built.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 839 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 866 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 
@@ -964,6 +966,45 @@ Changing `OLLAMA_EMBED_MODEL` re-embeds every contact, automatically and in the 
 vector is only comparable to others from the same model, so the model name is stored beside
 each one and a change invalidates rather than silently mixes two spaces. Changing the *chat*
 model costs nothing — the two are independent.
+
+#### Gifts from more than one person
+
+A present from a couple is one present, so both ends of a gift are lists: several givers,
+several recipients. A holiday for the children is one gift with two names on each side, not four
+records.
+
+That makes thanking a per-person question. Thank Karen and Kenny stays on your list — the note
+is a record of what was actually sent, per giver, so nothing disappears because something else
+was dealt with.
+
+When a gift has more than one giver, the thank-you box grows a **how to send it** dropdown, and
+each option says what it does when you hover over it:
+
+| | |
+|---|---|
+| **One email to everyone** | Everyone in the To line, so it reads as a shared note. The default, and right for a couple or a family who know each other. |
+| **A separate email to each** | The same words, sent individually — nobody sees the others' addresses. Right for people who do not know each other. |
+| **One email, addresses hidden** | Bcc, addressed to you. Private, though it reads a little oddly to whoever opens it. |
+
+The choice is made at the moment of sending rather than in settings, because the right answer
+depends on who the givers are, and that changes from gift to gift. What you picked is stored
+with the note, so the record says how it actually went even after you have changed your mind
+about the next one.
+
+If a send fails for one person and works for the others — which only separate sending can do —
+Hearth says so plainly, and the one that failed stays owed a note.
+
+#### Attachments
+
+A thank-you can carry files: up to five, 15MB in total, usually a photograph of the present
+being used. A group note carries one copy however many people it goes to.
+
+The limit is what an email can actually hold — Gmail refuses a message over 25MB and base64
+adds a third on the way out — and Hearth refuses over-large files itself, naming the file and
+its size, rather than letting the same problem come back from Google as an unreadable error.
+
+Attachments live in the database with everything else, so a database dump is still the whole
+install.
 
 #### Thank-yous still to write
 

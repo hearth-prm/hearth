@@ -16,6 +16,7 @@
     "db:studio": "prisma studio",
     "docker:up": "sh scripts/docker-up.sh",
     "preversion": "npm run typecheck",
+    "check:gift-migration": "tsx scripts/check-gift-migration.mts",
     "version": "node scripts/release-changelog.mjs && git add CHANGELOG.md",
     "e2e": "NODE_OPTIONS=--max-old-space-size=4096 next build && tsx scripts/e2e/verify.mts",
     "token": "tsx scripts/e2e/get-token.mts",

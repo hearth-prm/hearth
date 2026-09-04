@@ -10,7 +10,8 @@ import {
   requireWritablePerson,
   writableGiftsWhere,
 } from "@/lib/access";
-import { buildThankYouMail } from "@/lib/thank-you";
+import { buildThankYouMail, isAddressing, type Addressing } from "@/lib/thank-you";
+import { readAttachments } from "@/lib/attachments";
 import { canSendMail, sendMail } from "@/lib/google/mail";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
 import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
@@ -29,20 +30,25 @@ import { inputToDateOnly } from "@/lib/time";
 async function checkPair(
   userId: string,
   recipientIds: string[],
-  giverId: string,
+  giverIds: string[],
 ): Promise<ActionState | null> {
   if (recipientIds.length === 0) return actionError("Choose who received it.");
-  if (!giverId) return actionError("Choose who gave it.");
-  if (recipientIds.includes(giverId)) {
-    return actionError("A gift needs two different people.");
+  if (giverIds.length === 0) return actionError("Choose who gave it.");
+  const overlap = giverIds.filter((id) => recipientIds.includes(id));
+  if (overlap.length > 0) {
+    return actionError("Somebody cannot be both a giver and a recipient of the same gift.");
   }
   // Every recipient, not merely one: the gift is written onto all of their records, so
   // permission for one is not permission for the rest. Throws if any is not writable.
   for (const recipientId of recipientIds) {
     await requireWritablePerson(userId, recipientId);
   }
-  const seen = await filterReadablePeopleIds(userId, [giverId]);
-  if (seen.length !== 1) return actionError("That person was not found.");
+  // Every giver, and only readability: recording that somebody gave a present is a change to
+  // the RECIPIENT's record, so the giver need only be someone you can see.
+  const seen = await filterReadablePeopleIds(userId, giverIds);
+  if (seen.length !== giverIds.length) {
+    return actionError("One of those people was not found.");
+  }
   return null;
 }
 
@@ -52,8 +58,9 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
 
     // Several checkboxes share the name, so read them all.
     const recipientIds = [...new Set(form.getAll("recipientId").map(String).filter(Boolean))];
-    const giverId = readString(form, "giverId");
-    const bad = await checkPair(user.id, recipientIds, giverId);
+    // Several givers, the same way: a present from a couple is one present.
+    const giverIds = [...new Set(form.getAll("giverId").map(String).filter(Boolean))];
+    const bad = await checkPair(user.id, recipientIds, giverIds);
     if (bad) return bad;
 
     const description = readString(form, "description");
@@ -66,7 +73,7 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
       data: {
         ownerId: user.id,
         eventId,
-        giverId,
+        givers: { create: giverIds.map((personId) => ({ personId })) },
         recipients: { create: recipientIds.map((personId) => ({ personId })) },
         description,
         notes: readString(form, "notes") || null,
@@ -77,8 +84,9 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
     });
 
     if (eventId) revalidatePath(`/events/${eventId}`);
-    for (const personId of recipientIds) revalidatePath(`/people/${personId}`);
-    revalidatePath(`/people/${giverId}`);
+    for (const personId of [...recipientIds, ...giverIds]) {
+      revalidatePath(`/people/${personId}`);
+    }
     return actionOk("Gift recorded.");
   } catch (err) {
     if (isFrameworkError(err)) throw err;
@@ -96,8 +104,8 @@ export async function updateGift(_prev: ActionState, form: FormData): Promise<Ac
       select: {
         id: true,
         eventId: true,
-        giverId: true,
-        recipients: { select: { personId: true, thankedAt: true } },
+        givers: { select: { personId: true } },
+        recipients: { select: { personId: true } },
       },
     });
     if (!existing) return actionError("That gift was not found.");
@@ -133,7 +141,7 @@ export async function removeGift(form: FormData): Promise<void> {
     select: {
       id: true,
       eventId: true,
-      giverId: true,
+      givers: { select: { personId: true } },
       recipients: { select: { personId: true } },
     },
   });
@@ -143,14 +151,14 @@ export async function removeGift(form: FormData): Promise<void> {
   revalidateGift(existing);
 }
 
-/** Every page a gift appears on: its event, its giver, and each of its recipients. */
+/** Every page a gift appears on: its event, each of its givers, and each of its recipients. */
 function revalidateGift(gift: {
   eventId: string | null;
-  giverId: string;
+  givers: { personId: string }[];
   recipients: { personId: string }[];
 }): void {
   if (gift.eventId) revalidatePath(`/events/${gift.eventId}`);
-  revalidatePath(`/people/${gift.giverId}`);
+  for (const g of gift.givers) revalidatePath(`/people/${g.personId}`);
   for (const r of gift.recipients) revalidatePath(`/people/${r.personId}`);
 }
 
@@ -206,8 +214,13 @@ export async function sendThankYouNote(
     // "thank you for this gift" is not a complete instruction on its own.
     const recipientId = readString(form, "thankAs");
     const message = readString(form, "message").trim();
-
     if (!message) return actionError("Write something first.");
+
+    // Which givers this note is for. Absent means all of them, which is what the form sends
+    // when there is only one and therefore no choice to make.
+    const askedGiverIds = [...new Set(form.getAll("giverId").map(String).filter(Boolean))];
+    const addressingRaw = readString(form, "addressing");
+    const addressing: Addressing = isAddressing(addressingRaw) ? addressingRaw : "together";
 
     const gift = await prisma.gift.findFirst({
       where: { AND: [{ id: giftId }, writableGiftsWhere(user.id)] },
@@ -215,19 +228,24 @@ export async function sendThankYouNote(
         id: true,
         description: true,
         eventId: true,
-        recipients: { select: { personId: true } },
-        giver: {
+        givers: {
           select: {
-            id: true,
-            displayName: true,
-            contactPoints: {
-              where: { kind: "EMAIL" },
-              orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
-              take: 1,
-              select: { value: true },
+            personId: true,
+            person: {
+              select: {
+                id: true,
+                displayName: true,
+                contactPoints: {
+                  where: { kind: "EMAIL" },
+                  orderBy: [{ isPrimary: "desc" }, { order: "asc" }],
+                  take: 1,
+                  select: { value: true },
+                },
+              },
             },
           },
         },
+        recipients: { select: { personId: true } },
       },
     });
     if (!gift) return actionError("That gift was not found.");
@@ -246,10 +264,20 @@ export async function sendThankYouNote(
       );
     }
 
-    const to = gift.giver.contactPoints[0]?.value;
-    if (!to) {
+    const wanted = gift.givers.filter(
+      (g) => askedGiverIds.length === 0 || askedGiverIds.includes(g.personId),
+    );
+    if (wanted.length === 0) return actionError("Choose who to thank.");
+
+    // Everybody being thanked needs somewhere to send it. Refused as a whole rather than
+    // sending to the reachable ones and silently dropping the rest, because a note that went
+    // to two of three people while the record says all three is worse than one nobody sent.
+    const unreachable = wanted.filter((g) => !g.person.contactPoints[0]?.value);
+    if (unreachable.length > 0) {
       return actionError(
-        `${gift.giver.displayName} has no email address, so there is nowhere to send it.`,
+        `${unreachable.map((g) => g.person.displayName).join(", ")} ${
+          unreachable.length === 1 ? "has" : "have"
+        } no email address, so there is nowhere to send it.`,
       );
     }
 
@@ -259,22 +287,150 @@ export async function sendThankYouNote(
       );
     }
 
-    await sendMail(
-      user.id,
-      buildThankYouMail({ to, giftDescription: gift.description, message }),
-    );
+    const attachments = await readAttachments(form);
+    if ("error" in attachments) return actionError(attachments.error);
 
-    await prisma.giftRecipient.update({
-      where: { giftId_personId: { giftId: gift.id, personId: recipientId } },
-      data: { thankedAt: new Date(), thankYouNote: message },
+    const targets = wanted.map((g) => ({
+      personId: g.personId,
+      displayName: g.person.displayName,
+      email: g.person.contactPoints[0]!.value,
+    }));
+
+    // The record is created BEFORE the send, with sentAt null on every giver, and stamped as
+    // each message actually goes. A send that dies halfway then leaves a truthful record —
+    // two thanked, one not — instead of a note that either claims everybody or nobody. It is
+    // also what makes `has:unthanked` right about a partial failure.
+    const send = await prisma.thankYouSend.create({
+      data: {
+        giftId: gift.id,
+        fromPersonId: recipientId,
+        sentByUserId: user.id,
+        message,
+        addressing: targets.length > 1 ? addressing : "together",
+        givers: {
+          create: targets.map((t) => ({
+            giverPersonId: t.personId,
+            giftId: gift.id,
+            emailUsed: t.email,
+          })),
+        },
+        ...(attachments.files.length > 0
+          ? { attachments: { create: attachments.files } }
+          : {}),
+      },
+      select: { id: true },
     });
 
-    revalidateGift({ ...gift, giverId: gift.giver.id });
-    return actionOk(`Sent to ${to}.`);
+    const mailAttachments = attachments.files.map((f) => ({
+      filename: f.filename,
+      mimeType: f.mimeType,
+      bytes: f.bytes,
+    }));
+
+    const sent: string[] = [];
+    const failed: { name: string; message: string }[] = [];
+
+    const stamp = async (personIds: string[], error?: string) => {
+      await prisma.thankYouSendGiver.updateMany({
+        where: { sendId: send.id, giverPersonId: { in: personIds } },
+        data: error ? { error } : { sentAt: new Date() },
+      });
+    };
+
+    if (targets.length === 1 || addressing === "together" || addressing === "bcc") {
+      // One message. `together` puts everyone in To, which is what makes it read as a shared
+      // note; `bcc` hides them from each other and addresses it to the sender, because Gmail
+      // requires a visible recipient and a note addressed to nobody looks like spam.
+      const me = await ownEmail(user.id);
+      const asBcc = addressing === "bcc" && targets.length > 1;
+      if (asBcc && !me) {
+        return actionError(
+          "Hiding the addresses needs an email address of your own to send it to, and your account has none.",
+        );
+      }
+      try {
+        await sendMail(
+          user.id,
+          buildThankYouMail({
+            to: asBcc ? [me!] : targets.map((t) => t.email),
+            bcc: asBcc ? targets.map((t) => t.email) : undefined,
+            giftDescription: gift.description,
+            message,
+            attachments: mailAttachments,
+          }),
+        );
+        await stamp(targets.map((t) => t.personId));
+        sent.push(...targets.map((t) => t.displayName));
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : "the send failed";
+        await stamp(targets.map((t) => t.personId), detail);
+        failed.push(...targets.map((t) => ({ name: t.displayName, message: detail })));
+      }
+    } else {
+      // Separate: the same words, one message each, so nobody sees the others' addresses.
+      // One at a time, and each stamped as it goes, so a bounce on the second does not
+      // discard the first.
+      for (const t of targets) {
+        try {
+          await sendMail(
+            user.id,
+            buildThankYouMail({
+              to: [t.email],
+              giftDescription: gift.description,
+              message,
+              attachments: mailAttachments,
+            }),
+          );
+          await stamp([t.personId]);
+          sent.push(t.displayName);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : "the send failed";
+          await stamp([t.personId], detail);
+          failed.push({ name: t.displayName, message: detail });
+        }
+      }
+    }
+
+    revalidateGift({
+      eventId: gift.eventId,
+      givers: gift.givers.map((g) => ({ personId: g.personId })),
+      recipients: gift.recipients,
+    });
+
+    if (sent.length === 0) {
+      return actionError(
+        `Nothing was sent. ${failed[0]?.message ?? "The send failed."}`,
+      );
+    }
+    if (failed.length > 0) {
+      // Said plainly rather than reported as success: the ones that failed are still owed a
+      // note, and `has:unthanked` will keep saying so.
+      return actionError(
+        `Sent to ${sent.join(", ")}, but not to ${failed
+          .map((f) => f.name)
+          .join(", ")} — ${failed[0]!.message}`,
+      );
+    }
+    return actionOk(
+      attachments.files.length > 0
+        ? `Sent to ${sent.join(", ")} with ${attachments.files.length} attachment${
+            attachments.files.length === 1 ? "" : "s"
+          }.`
+        : `Sent to ${sent.join(", ")}.`,
+    );
   } catch (err) {
     if (isFrameworkError(err)) throw err;
     return toActionError(err);
   }
+}
+
+/** The signed-in user's own address, for a bcc note that needs a visible recipient. */
+async function ownEmail(userId: string): Promise<string | null> {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  return row?.email ?? null;
 }
 
 export async function removeGiftRecipient(form: FormData): Promise<void> {

@@ -330,7 +330,9 @@ function presentPart(column: string): Prisma.ContactPointWhereInput {
  * "has given a gift" means "has given a gift I could already see on her page".
  */
 function giftGiven(viewer: Viewer): Prisma.PersonWhereInput {
-  return { giftsGiven: { some: { recipients: { some: { person: viewer.readablePeople } } } } };
+  return {
+    giftsGiven: { some: { gift: { recipients: { some: { person: viewer.readablePeople } } } } },
+  };
 }
 
 /**
@@ -357,7 +359,23 @@ function giftReceived(): Prisma.PersonWhereInput {
 function unthanked(viewer: Viewer): Prisma.PersonWhereInput {
   return {
     giftsGiven: {
-      some: { recipients: { some: { thankedAt: null, person: viewer.thankableCards } } },
+      some: {
+        // Somebody the viewer may write for received it...
+        gift: { recipients: { some: { person: viewer.thankableCards } } },
+        // ...and no note has actually reached THIS giver from such a person.
+        //
+        // Hung off the giver row, which is the only way to ask this: a filter nested under
+        // Gift cannot refer back to the giver it came from, so "has this giver been thanked"
+        // would otherwise have to be computed outside SQL. `sentAt: { not: null }` is
+        // load-bearing — a send that failed for one giver leaves a row behind, and counting it
+        // would report a bounced email as a note delivered.
+        thanks: {
+          none: {
+            sentAt: { not: null },
+            send: { fromPerson: viewer.thankableCards },
+          },
+        },
+      },
     },
   };
 }
@@ -763,7 +781,9 @@ export function giftClause(
       {
         giftsGiven: {
           some: {
-            AND: [gift, { recipients: { some: { person: viewer.readablePeople } } }],
+            gift: {
+              AND: [gift, { recipients: { some: { person: viewer.readablePeople } } }],
+            },
           },
         },
       },
