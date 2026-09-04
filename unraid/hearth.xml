@@ -14,8 +14,9 @@
   is no appdata directory to map, and nothing is lost by recreating the container. Back up the
   database, not this.
 
-  REPLACE_ME markers below need the GitHub repository and the Unraid support thread, neither of
-  which can be filled in before those exist. See unraid/README.md.
+  One REPLACE_ME marker remains: the Unraid support thread, which has to exist before it can be
+  linked. Everything else is live — the image pulls anonymously and both raw URLs resolve. See
+  unraid/README.md.
 -->
 <Container version="2">
   <Name>Hearth</Name>
@@ -50,8 +51,8 @@
   </Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
-  <TemplateURL>REPLACE_ME_RAW_GITHUB_URL/unraid/hearth.xml</TemplateURL>
-  <Icon>REPLACE_ME_RAW_GITHUB_URL/unraid/hearth-icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/hearth-prm/hearth/main/unraid/hearth.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/hearth-prm/hearth/main/unraid/hearth-icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <PostArgs/>
   <DonateText/>

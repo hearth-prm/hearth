@@ -8,22 +8,27 @@ themes (the app's own favicon switches colour by media query, which a PNG cannot
 
 CA's policies require a few things that only a human with accounts can do.
 
-1. **A GitHub repository, on an account with two-factor authentication enabled.** CA reads
-   templates from GitHub and the policy is explicit about 2FA. The simplest arrangement is to
-   mirror this GitLab repository to GitHub (GitLab → Settings → Repository → Mirroring
-   repositories) so the template travels with the code and cannot drift from it.
+1. ~~**A GitHub repository, on an account with two-factor authentication enabled.**~~ **Done** —
+   `github.com/hearth-prm/hearth`, a push mirror of this repository, so the template travels
+   with the code and cannot drift from it. CA reads templates from GitHub and its policy is
+   explicit about 2FA, which the organisation enforces.
 
 2. **A support thread on the Unraid forums.** The template's `Support` field must point at it,
    and CA expects that to be where users go — so it has to exist before submission.
 
-3. **A publicly pullable image.** Make the GitLab project public so
-   `registry.gitlab.com/hearth-prm/hearth:latest` can be pulled anonymously, and check the
-   Container Registry's own visibility setting as well as the project's.
+3. ~~**A publicly pullable image.**~~ **Done and verified** —
+   `registry.gitlab.com/hearth-prm/hearth:latest` pulls anonymously (token issued and manifest
+   returned with no credentials), and the image has been run end to end against a fresh
+   Postgres: 29 migrations applied, server up, sign-in page served.
 
-4. **Fill in the two `REPLACE_ME` markers** in `hearth.xml`:
+4. **Fill in the remaining `REPLACE_ME` marker** in `hearth.xml`:
    - `REPLACE_ME_UNRAID_FORUM_THREAD` → the support thread URL
-   - `REPLACE_ME_RAW_GITHUB_URL` → e.g.
-     `https://raw.githubusercontent.com/<user>/hearth/main` (both `TemplateURL` and `Icon`)
+
+   The GitHub raw URLs are already filled in and verified to resolve:
+   `https://raw.githubusercontent.com/hearth-prm/hearth/main/unraid/hearth.xml` and
+   `.../unraid/hearth-icon.png`. They are served from the GitHub mirror, which GitLab
+   force-pushes on every commit — so editing the template here updates what CA reads, with no
+   second place to remember.
 
 5. **Submit the template repository through the form on the Unraid forums**, not by messaging a
    moderator — the policy asks for the form, and says responses usually come within 48 hours.
