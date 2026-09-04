@@ -80,7 +80,7 @@ also means the database is the whole install.
 
 **v1.0.0 — every milestone shipped, and the Google round trip verified in both
 directions against a real address book.** 330 contacts read and pushed back with
-nothing lost; 828 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
+nothing lost; 839 automated checks. See [CHANGELOG.md](CHANGELOG.md) for what landed.
 
 | | Feature | State |
 |---|---|---|
@@ -131,7 +131,7 @@ another record. One piece of work is designed and queued rather than built —
 intentions — now built.
 
 Verification is largely automated: `npm run e2e` drives a real browser against the
-built app through 828 checks, and `npm run e2e:google` runs the Google-facing half
+built app through 839 checks, and `npm run e2e:google` runs the Google-facing half
 against throwaway accounts. See [docs/](docs/) for the checklists and what is left to do
 by hand.
 

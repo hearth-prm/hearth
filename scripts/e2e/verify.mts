@@ -1939,10 +1939,18 @@ try {
      !guestsQuiet.includes("Invite in Google") && guestsQuiet.includes("Gift Auntie"),
      true);
   await A.page.click('button[aria-label="Edit guests"]');
-  await A.page.waitForSelector('select[name="rsvp"]', { timeout: 10_000 });
+  // Role, not RSVP. This fixture never goes to Google — Event.addToGoogle defaults to false —
+  // so it has no RSVP control to wait for any more, which §36 is about. The check was using
+  // the RSVP dropdown as its probe for "the controls are showing", and the probe stopped
+  // existing while the behaviour it was testing did not change.
+  await A.page.waitForSelector('select[name="role"]', { timeout: 10_000 });
   const guestsEditing = (await A.page.textContent("body")) ?? "";
-  ok("16.16b and shows role, RSVP and the invite box when it is",
-     guestsEditing.includes("Invite in Google") && guestsEditing.includes("Role"));
+  ok("16.16b and shows the role control when it is",
+     guestsEditing.includes("Role"), guestsEditing.includes("Role"));
+  ok("16.16c but no RSVP or invite box, because this event does not go to Google — see §36",
+     (await A.page.$$('select[name="rsvp"]')).length === 0 &&
+       !guestsEditing.includes("Invite in Google"),
+     [(await A.page.$$('select[name="rsvp"]')).length, guestsEditing.includes("Invite in Google")]);
 
   // A big present is one gift for several people, not one gift each — so it earns one
   // thank-you and shows on every recipient's page.
@@ -6369,6 +6377,93 @@ try {
      !promised.includes("Send mail as you"),
      String(promised.includes("Send mail as you")));
   await anonScopes.close();
+
+  section("§36 An event that stays here has no RSVPs")
+
+  // An RSVP is an answer to an invitation, and an invitation is something Google sends. On an
+  // event Hearth keeps to itself there is nobody to ask, so a permanent "No reply" against
+  // people who were in the room is worse than nothing: whoever is on the list was there. That
+  // is also what `attended:` has always taken the list to mean, so this makes the page agree
+  // with the search rather than changing what either means.
+  const rsvpKeep = await prisma.person.create({
+    data: { ownerId: A.id, displayName: "Rsvp Keeper", givenName: "Rsvp", familyName: "Keeper" },
+  });
+  const quietEvent = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Quiet Kitchen Supper", addToGoogle: false,
+      startAt: new Date("2026-05-02T18:00:00Z"),
+      attendees: {
+        create: [{ personId: rsvpKeep.id, role: "REQUIRED", rsvp: "ACCEPTED", inviteToGoogle: true }],
+      },
+    },
+  });
+  const loudEvent = await prisma.event.create({
+    data: {
+      ownerId: A.id, title: "Loud Google Party", addToGoogle: true,
+      startAt: new Date("2026-05-03T18:00:00Z"),
+      attendees: {
+        create: [{ personId: rsvpKeep.id, role: "REQUIRED", rsvp: "ACCEPTED", inviteToGoogle: true }],
+      },
+    },
+  });
+
+  await A.page.goto(`/events/${quietEvent.id}`);
+  const quietBody = (await A.page.textContent("body")) ?? "";
+  ok("36.1 a guest list with no Google shows the person",
+     quietBody.includes("Rsvp Keeper"), String(quietBody.includes("Rsvp Keeper")));
+  // Playwright's text= engine, not textContent("body") — which sees the RSVP flight payload
+  // inlined in a <script> and would find "Accepted" in it whatever the page rendered.
+  ok("36.1b and no RSVP badge, since there is nothing anybody replied to",
+     (await A.page.$$('text="No reply"')).length === 0 &&
+       (await A.page.$$('text="Going"')).length === 0,
+     [(await A.page.$$('text="No reply"')).length, (await A.page.$$('text="Going"')).length]);
+
+  await A.page.click('button:has-text("Edit")');
+  ok("36.2 and no RSVP control while editing",
+     (await A.page.$$('select[name="rsvp"]')).length === 0);
+  ok("36.2b nor an invite-in-Google checkbox, which would invite nobody",
+     (await A.page.$$('input[name="inviteToGoogle"][type="checkbox"]')).length === 0);
+  ok("36.2c the role control is still there — that is about the event, not about Google",
+     (await A.page.$$('select[name="role"]')).length === 1);
+
+  // The regression this needs a guard for. updateAttendee writes
+  // `rsvp: parseRsvp(readString(form, "rsvp"))` unconditionally, and parseRsvp falls back to
+  // NEEDS_ACTION — so a form that simply omitted the field would reset a real RSVP, and
+  // untick inviteToGoogle, every time somebody changed a role. Hidden inputs carry the
+  // current values instead.
+  await A.page.selectOption('select[name="role"]', "OPTIONAL");
+  // "Update", not "Save" — the button says what it does to a row that already exists.
+  await A.page.click('button:text-is("Update")');
+  await waitForDb("the role change landed", async () =>
+    (await prisma.eventAttendee.findFirstOrThrow({
+      where: { eventId: quietEvent.id, personId: rsvpKeep.id },
+    })).role === "OPTIONAL");
+  const afterEdit = await prisma.eventAttendee.findFirstOrThrow({
+    where: { eventId: quietEvent.id, personId: rsvpKeep.id },
+  });
+  ok("36.3 editing a role on such an event does not reset the stored RSVP",
+     afterEdit.rsvp === "ACCEPTED", afterEdit.rsvp);
+  ok("36.3b nor turn off the Google invite flag",
+     afterEdit.inviteToGoogle === true, afterEdit.inviteToGoogle);
+
+  // The column is interpreted, not rewritten: switch the event to Google later and it tells
+  // the truth about who has actually replied instead of claiming a roomful of confirmations.
+  await A.page.goto(`/events/${loudEvent.id}`);
+  ok("36.4 an event that does go to Google keeps its RSVP badge",
+     (await A.page.$$('text="Going"')).length >= 1,
+     (await A.page.$$('text="Going"')).length);
+  await A.page.click('button:has-text("Edit")');
+  ok("36.4b and its RSVP control",
+     (await A.page.$$('select[name="rsvp"]')).length === 1 &&
+       (await A.page.$$('input[name="inviteToGoogle"][type="checkbox"]')).length === 1);
+
+  ok("36.5 and attended: counts the guest either way, which it always did",
+     (await xNames(`attended:"Quiet Kitchen Supper"`)).includes("Rsvp Keeper") &&
+       (await xNames(`attended:"Loud Google Party"`)).includes("Rsvp Keeper"),
+     await xNames(`attended:"Quiet Kitchen Supper"`));
+
+  await prisma.event.deleteMany({ where: { id: { in: [quietEvent.id, loudEvent.id] } } });
+  await prisma.person.delete({ where: { id: rsvpKeep.id } });
 
   section("§22 On a phone");
 

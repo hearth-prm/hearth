@@ -234,6 +234,9 @@ export default async function EventPage({
               rsvpFromGoogle: Boolean(a.rsvpFromGoogleAt),
             }))}
             canEdit={canEdit}
+            // No Google, no invitations, so no RSVPs to collect or display: whoever is on
+            // the list was there.
+            sendsToGoogle={event.addToGoogle}
             updateAction={updateAttendee}
             removeAction={removeAttendee}
             addForm={

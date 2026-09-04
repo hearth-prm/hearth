@@ -36,16 +36,35 @@ export interface AttendeeView {
  * There is no rule between guests while reading, either: a line per person on a list of
  * one-line rows is more ink than the rows themselves. The rules come back while editing,
  * where every row grows a form and genuinely needs separating from the next.
+ *
+ * ## An event that does not go to Google has no RSVPs
+ *
+ * An RSVP is an answer to an invitation, and an invitation is a thing Google sends. On an
+ * event Hearth keeps to itself there is nobody to ask and nothing to answer, so the RSVP
+ * badge, the RSVP dropdown and the "invite in Google" checkbox are all absent rather than
+ * showing a permanent "no reply" against people who were in the room. Whoever is on the
+ * list was there — that is what the list means for such an event, and it is already what
+ * `attended:` has always taken it to mean.
+ *
+ * The stored `rsvp` column is left alone rather than being written to ACCEPTED. Interpreting
+ * it costs nothing and stays honest: switch the event to Google later and it starts from
+ * "no reply" truthfully, instead of claiming a roomful of confirmations nobody gave.
  */
 export function AttendeesCard({
   attendees,
   canEdit,
+  sendsToGoogle,
   updateAction,
   removeAction,
   addForm,
 }: {
   attendees: readonly AttendeeView[];
   canEdit: boolean;
+  /**
+   * Whether this event reaches Google. False means no invitations exist, so no RSVP can,
+   * and everyone listed is taken to have been there.
+   */
+  sendsToGoogle: boolean;
   updateAction: (form: FormData) => Promise<void>;
   removeAction: (form: FormData) => Promise<void>;
   /**
@@ -105,24 +124,26 @@ export function AttendeesCard({
                     {" - "}
                     {a.email ?? "no email on file"}
                   </span>
-                  {a.rsvpFromGoogle ? (
+                  {sendsToGoogle && a.rsvpFromGoogle ? (
                     <span className="ml-2 text-xs text-accent-600 dark:text-accent-400">
                       RSVP from Google
                     </span>
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge
-                    tone={
-                      a.rsvp === "ACCEPTED"
-                        ? "accent"
-                        : a.rsvp === "DECLINED"
-                          ? "rose"
-                          : "neutral"
-                    }
-                  >
-                    {RSVP_LABELS[a.rsvp]}
-                  </Badge>
+                  {sendsToGoogle ? (
+                    <Badge
+                      tone={
+                        a.rsvp === "ACCEPTED"
+                          ? "accent"
+                          : a.rsvp === "DECLINED"
+                            ? "rose"
+                            : "neutral"
+                      }
+                    >
+                      {RSVP_LABELS[a.rsvp]}
+                    </Badge>
+                  ) : null}
                   {showControls ? (
                     <DeleteForm
                       action={removeAction}
@@ -154,29 +175,45 @@ export function AttendeesCard({
                       ))}
                     </select>
                   </label>
-                  <label className="text-xs text-neutral-500 dark:text-neutral-400">
-                    RSVP
-                    <select
-                      name="rsvp"
-                      defaultValue={a.rsvp}
-                      className={`${inputClass} mt-1 py-1.5`}
-                    >
-                      {RSVP_STATUSES.map((r) => (
-                        <option key={r} value={r}>
-                          {RSVP_LABELS[r]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-1.5 pb-2 text-xs text-neutral-500 dark:text-neutral-400">
-                    <input
-                      type="checkbox"
-                      name="inviteToGoogle"
-                      defaultChecked={a.inviteToGoogle}
-                      className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
-                    />
-                    Invite in Google
-                  </label>
+                  {sendsToGoogle ? (
+                    <>
+                      <label className="text-xs text-neutral-500 dark:text-neutral-400">
+                        RSVP
+                        <select
+                          name="rsvp"
+                          defaultValue={a.rsvp}
+                          className={`${inputClass} mt-1 py-1.5`}
+                        >
+                          {RSVP_STATUSES.map((r) => (
+                            <option key={r} value={r}>
+                              {RSVP_LABELS[r]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1.5 pb-2 text-xs text-neutral-500 dark:text-neutral-400">
+                        <input
+                          type="checkbox"
+                          name="inviteToGoogle"
+                          defaultChecked={a.inviteToGoogle}
+                          className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
+                        />
+                        Invite in Google
+                      </label>
+                    </>
+                  ) : (
+                    // The form still has to SAY what these are, or the update action reads a
+                    // form with no rsvp field and writes the enum's default over whatever was
+                    // there. Hidden inputs carrying the current values keep an edit to
+                    // somebody's role from silently resetting their RSVP — which matters
+                    // because this event may be sent to Google later.
+                    <>
+                      <input type="hidden" name="rsvp" value={a.rsvp} />
+                      {a.inviteToGoogle ? (
+                        <input type="hidden" name="inviteToGoogle" value="on" />
+                      ) : null}
+                    </>
+                  )}
                   <SubmitButton className={`${btnSecondary} py-1.5`} pendingLabel="Saving…">
                     Update
                   </SubmitButton>

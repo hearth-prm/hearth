@@ -26,6 +26,26 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Changed
+
+- **An event that does not go to Google no longer asks about RSVPs.** No Google means no
+  invitations, and no invitations means nothing anybody could have replied to — so the RSVP
+  badge, the RSVP dropdown and the "invite in Google" checkbox are gone from such events, and
+  whoever is on the guest list is taken to have been there.
+  - This is the *majority* case, not an edge one: `Event.addToGoogle` defaults to **false**,
+    precisely because "most of what Hearth records is history — who was at a gathering — and
+    history does not belong on a calendar". So a permanent "No reply" has been showing against
+    people who were in the room on nearly every event.
+  - It also makes the page agree with the search rather than changing what either means:
+    `attended:` has always counted anyone on the guest list, regardless of RSVP.
+  - The stored `rsvp` column is **interpreted, not rewritten** — nothing is set to "Going".
+    Switch such an event to Google later and it starts from "No reply" honestly, instead of
+    claiming a roomful of confirmations nobody gave.
+  - Hidden inputs carry the current RSVP and invite flag through the edit form, because
+    `updateAttendee` writes `rsvp: parseRsvp(readString(form, "rsvp"))` unconditionally and
+    `parseRsvp` falls back to `NEEDS_ACTION`. Without them, changing somebody's *role* would
+    have silently reset their RSVP and unticked their invite. §36.3 is that guard.
+
 ## [1.2.0] — 2026-09-03
 
 ### Added
