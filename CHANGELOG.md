@@ -26,6 +26,21 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Added
+
+- **`try-hearth.sh` — a throwaway Hearth beside the real one**, for testing a build without
+  releasing it. Dumps production read-only, clones the commit matching the image you asked for,
+  writes an `.env` with its own port and data directory, restores the dump, and starts the app
+  so its migrations run against real rows. `--status`, `--down`, `--empty`, `--dump`.
+  - It exists because `docker-compose.yml` pins `name: hearth`: a second checkout on one host is
+    the *same Compose project*, and one forgotten `-p` recreates production with the test
+    configuration. That has happened here. Every compose command the script issues carries the
+    project name, and it refuses to start if the project, port or data directory would collide —
+    each guard exercised, along with the `.env` rewriting against passwords containing `/`, `&`,
+    `$` and `=`.
+  - Google sync is off in the test stack, since it inherits production's grant and pushing to
+    the same account would be indistinguishable from the real install doing it.
+
 ### Fixed
 
 - **The time zone picker could not display its own default, and saving Settings overwrote it.**

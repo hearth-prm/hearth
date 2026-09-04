@@ -270,6 +270,11 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **`npm run e2e:google` is destructive** and refuses to run against an account that looks
   like a real address book (>25 contacts, >12 groups) or when both tokens resolve to the
   same account.
+- **A release is not the unit of testing.** CI publishes `:edge` and `:sha-<commit>` for every
+  commit, and `try-hearth.sh` stands a throwaway stack up beside production on a dump of the
+  real data — which is the only way to exercise a data migration, since the e2e database is
+  always empty. It refuses to run if the project name, port or data directory would collide
+  with production, because `name: hearth` makes a second checkout the same Compose project.
 - **Deployment is pull-based, so "pushed" is part of "done".** Reporting a feature
   complete while the commit sits local is a false report.
 - **Commit messages**: a short imperative title, then prose explaining *why* and what was
