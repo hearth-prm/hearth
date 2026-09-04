@@ -271,10 +271,14 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   like a real address book (>25 contacts, >12 groups) or when both tokens resolve to the
   same account.
 - **A release is not the unit of testing.** CI publishes `:edge` and `:sha-<commit>` for every
-  commit, and `try-hearth.sh` stands a throwaway stack up beside production on a dump of the
-  real data — which is the only way to exercise a data migration, since the e2e database is
-  always empty. It refuses to run if the project name, port or data directory would collide
-  with production, because `name: hearth` makes a second checkout the same Compose project.
+  commit. Clone into a temp directory and run `try-hearth.sh` from that clone: it uses the
+  checkout it sits in and defaults the image tag to `sha-<HEAD>`, so the compose file and the
+  running image cannot describe different builds. It stands a stack up beside production on a
+  dump of the real data — the only way to exercise a migration that COPIES data, since the e2e
+  database is always empty. It refuses to run from the production checkout, or if the project
+  name, port or data directory would collide, because `name: hearth` makes a second checkout the
+  same Compose project. It writes `.env.try`, never `.env`. And it lists the migrations a build
+  will apply, flagging destructive ones, BEFORE starting the app.
 - **Deployment is pull-based, so "pushed" is part of "done".** Reporting a feature
   complete while the commit sits local is a false report.
 - **Commit messages**: a short imperative title, then prose explaining *why* and what was

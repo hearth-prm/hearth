@@ -29,9 +29,16 @@ of a green test suite alone where a real address book can be asked instead.
 ### Added
 
 - **`try-hearth.sh` — a throwaway Hearth beside the real one**, for testing a build without
-  releasing it. Dumps production read-only, clones the commit matching the image you asked for,
-  writes an `.env` with its own port and data directory, restores the dump, and starts the app
-  so its migrations run against real rows. `--status`, `--down`, `--empty`, `--dump`.
+  releasing it. Clone into a temp directory, run it from that clone, try things, `--down`,
+  delete the directory. Production's checkout, `.env` and containers are never touched.
+  - It uses the checkout it sits in and defaults the image to `sha-<HEAD>`, so cloning at a ref
+    tests exactly that commit and the compose file cannot describe a different build than the
+    one running.
+  - **It reports the schema.** Before starting the app it lists every migration the build will
+    apply to the test database and names any marked destructive; afterwards it confirms each one
+    landed. That is the whole reason to test on a copy of real data: a migration that *copies*
+    data is invisible to the automated suite, whose database is always empty.
+  - `--status`, `--down`, `--empty`, `--dump`, `--data`, `--port`, `--project`, `--from`.
   - It exists because `docker-compose.yml` pins `name: hearth`: a second checkout on one host is
     the *same Compose project*, and one forgotten `-p` recreates production with the test
     configuration. That has happened here. Every compose command the script issues carries the

@@ -323,40 +323,56 @@ scope later is fine, but it re-prompts for consent, which is the intended behavi
 
 ## Trying a build before releasing it
 
-Every commit to `main` is published as an image — `:edge`, and `:sha-<commit>` — so testing
-something does not need a release. `try-hearth.sh` stands up a throwaway Hearth beside the real
-one, on a copy of your real data:
+Every commit to `main` is published as an image — `:edge` and `:sha-<commit>` — so testing a
+build needs no release. Six steps, and production is never modified:
 
 ```bash
-sh try-hearth.sh --tag sha-e50319f3      # or --tag edge for the newest commit
-sh try-hearth.sh --status
-sh try-hearth.sh --down                  # stops it and deletes its data
+mkdir -p /tmp/hearth-try && cd /tmp/hearth-try
+git clone https://gitlab.com/hearth-prm/hearth.git .
+
+sh try-hearth.sh                # runs the image for THIS checkout's HEAD
+
+# ...try things out...
+
+sh try-hearth.sh --down         # before deleting the directory
+cd / && rm -rf /tmp/hearth-try
 ```
 
-It dumps production (read-only, and production stays up), clones the repository at the commit
-matching the image, writes an `.env` of its own with a different port and its own data
-directory, restores the dump, and starts the app so its migrations run against real rows.
-`--empty` skips the data for a quick look; `--dump <file>` uses a dump you already have.
+The tag defaults to `sha-<HEAD>`, so cloning at a ref and running the script tests exactly that
+commit — the compose file and the running image cannot describe different builds. Clone at a
+tag or a branch to test something else, or pass `--tag edge`.
 
-**Why a script rather than instructions.** `docker-compose.yml` pins `name: hearth`, so a
-second checkout on the same host is the *same Compose project* as production — one forgotten
-`-p` recreates your live containers with the test configuration. Every compose command the
-script issues carries the project name, and it refuses to start at all if the project name, the
-port or the data directory would collide with production.
+What it does: dumps production (read-only, and production stays up), writes an `.env.try` of
+its own, restores the dump into a Postgres of its own under `./.try/postgres`, then starts the
+app so its migrations run against real rows. `--empty` skips the data, `--dump <file>` uses one
+you already have, and `--status` says what the stack is doing.
 
-Google sync is switched off in the test stack, because it inherits production's grant and a
+**Migrations are the point of testing on a copy.** Before starting the app the script lists
+every migration this build will apply to the test database, and names any marked destructive —
+so "does the new code change the schema" is answered before anything runs, not discovered
+afterwards. It then confirms each one landed. This matters because a migration that *copies*
+data is invisible to the automated suite: that database is always empty, so an `INSERT..SELECT`
+there runs against zero rows.
+
+**Why a script rather than instructions.** `docker-compose.yml` pins `name: hearth`, so a second
+checkout on the same host is the *same Compose project* as production — one forgotten `-p`
+recreates your live containers with the test configuration. Every compose command the script
+issues carries the project name, and it refuses to start if the project name, the port, or the
+data directory would collide with production, or if it is being run from the production checkout
+itself. The environment is written to `.env.try`, so an existing `.env` is never overwritten.
+
+Google sync is switched **off** in the test stack, because it inherits production's grant and a
 test install pushing to the same account would be indistinguishable from the real one doing it.
 
-To sign in you need a tunnel, because Google accepts an `http://` redirect URI only for
-localhost:
+To sign in you need a tunnel, since Google accepts an `http://` redirect URI only for localhost:
 
 ```bash
 ssh -L 3081:localhost:3081 root@your-server
 ```
 
 Then add `http://localhost:3081/api/auth/callback/google` to your OAuth client's authorised
-redirect URIs and open <http://localhost:3081>. Your own user is already in the restored dump,
-so the allowlist lets you straight in.
+redirect URIs and open <http://localhost:3081>. Your own user is in the restored dump, so the
+allowlist lets you straight in.
 
 ## Behind a reverse proxy
 

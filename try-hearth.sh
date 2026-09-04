@@ -1,82 +1,96 @@
 #!/bin/sh
 # ===========================================================================
-# try-hearth.sh — stand up a throwaway Hearth beside the real one
+# try-hearth.sh — stand up a throwaway Hearth from THIS checkout
 #
-# For trying a build before releasing it, on a copy of your real data, without any
-# possibility of touching the install you depend on.
+# The whole procedure:
 #
-#   sh try-hearth.sh --tag sha-e50319f3
+#   mkdir -p /tmp/hearth-try && cd /tmp/hearth-try
+#   git clone https://gitlab.com/hearth-prm/hearth.git .
+#   sh try-hearth.sh                  # tests the image for this checkout's HEAD
+#   ...try things out...
 #   sh try-hearth.sh --down
+#   cd / && rm -rf /tmp/hearth-try
 #
-# What it does: dumps your production database, clones the repository at the commit
-# matching the image you asked for, writes an .env of its own with a different port
-# and a different data directory, restores the dump into a fresh Postgres, and starts
-# the app so its migrations run against real rows.
+# Nothing in production is modified — not its checkout, not its .env, not its
+# containers. The only thing this reads from production is a database dump, and that
+# is read-only while it stays running.
 #
-# WHY A SCRIPT. Doing this by hand needs `-p` on every compose command, because
-# docker-compose.yml pins `name: hearth` — so a second checkout is the SAME COMPOSE
-# PROJECT as production, and one forgotten flag recreates your live containers with
-# the test configuration. That has happened. Every compose call here carries the
-# project name, and the guards below refuse to run at all if any of the paths, ports
-# or names would collide with production.
+# The image tag defaults to sha-<this checkout's HEAD>, so cloning at a ref and running
+# this tests exactly that commit: the compose file and the running image cannot
+# describe different builds. --tag overrides it.
 #
-# Assumes POSIX sh, docker and git. Nothing here shells out to node.
+# WHY A SCRIPT. docker-compose.yml pins `name: hearth`, so a second checkout on one
+# host is the SAME COMPOSE PROJECT as production — one forgotten `-p` recreates the
+# live containers with the test configuration. That has happened here. Every compose
+# command below carries the project name, the guards refuse to run if any path, port or
+# name would collide with production, and the environment is written to .env.try rather
+# than .env so an existing one is never overwritten.
+#
+# MIGRATIONS. The app image runs `prisma migrate deploy` on boot, so a build that needs
+# a migration applies it to the test database by itself. This says which ones are
+# pending BEFORE starting the app, names any marked destructive, and confirms afterwards
+# that every one landed — because a migration that copies data is invisible to the test
+# suite, whose database is always empty.
+#
+# Assumes POSIX sh and docker. Needs no git and no node.
 #
 # Options
-#   --tag <tag>        Image tag to run. Default edge (every commit to main).
-#                      A sha- tag also decides which commit is checked out, so the
-#                      compose file and the image cannot disagree.
-#   --ref <git-ref>    Override the commit to check out. Default: derived from --tag.
-#   --port <n>         Host port. Default 3081
-#   --root <path>      Where the test install lives. Default /mnt/user/appdata/hearth-test
-#   --from <path>      The production checkout to copy settings from.
-#                      Default /mnt/user/appdata/hearth/app
-#   --project <name>   Compose project name. Default hearth-test
-#   --dump <file>      Restore this dump instead of taking a fresh one.
-#   --empty            Start with no data at all. Fastest, but tests no migration.
-#   --keep-data        Reuse the test database already there; skip dump and restore.
-#   --yes              Do not ask before replacing an existing test install.
-#   --status           Say what the test stack is doing, then exit.
-#   --down             Stop it and delete its data, then exit.
+#   --tag <tag>       Image to run. Default sha-<HEAD>. Use `edge` for the newest
+#                     commit on main, or a version like 1.2.0.
+#   --port <n>        Host port. Default 3081
+#   --project <name>  Compose project. Default hearth-try
+#   --from <path>     Production checkout to dump and copy settings from.
+#                     Default /mnt/user/appdata/hearth/app
+#   --dump <file>     Restore this dump instead of taking a fresh one.
+#   --empty           No data at all. Fast, but exercises no migration.
+#   --keep-data       Reuse the test database already there.
+#   --data <path>     Where the test Postgres keeps its data. Default ./.try/postgres
+#   --yes             Do not ask before replacing an existing test database.
+#   --status          Say what the test stack is doing, then exit.
+#   --down            Stop it and delete its data, then exit.
 #   -h, --help
 # ===========================================================================
 set -eu
 
-TAG="edge"
-REF=""
+SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+TAG=""
 APP_PORT="3081"
-ROOT="/mnt/user/appdata/hearth-test"
+PROJECT="hearth-try"
 FROM="/mnt/user/appdata/hearth/app"
-PROJECT="hearth-test"
 DUMP=""
+DATA=""
+MODE="copy" # copy | empty | keep
+ASSUME_YES="no"
+ACTION="up"
 PROD_USER="hearth"
 PROD_DB="hearth"
-MODE="copy"     # copy | empty | keep
-ASSUME_YES="no"
-ACTION="up"     # up | status | down
 
 say() { printf '[try-hearth] %s\n' "$*"; }
-die() { printf '[try-hearth] %s\n' "$*" >&2; exit 1; }
-
-usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+warn() { printf '[try-hearth] !! %s\n' "$*"; }
+die() {
+  printf '[try-hearth] %s\n' "$*" >&2
+  exit 1
+}
+usage() {
+  sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
 need_arg() { [ -n "$2" ] || die "$1 needs a value"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
   --tag) need_arg "$1" "${2:-}" && TAG="$2" && shift 2 ;;
   --tag=*) TAG="${1#*=}" && shift ;;
-  --ref) need_arg "$1" "${2:-}" && REF="$2" && shift 2 ;;
-  --ref=*) REF="${1#*=}" && shift ;;
   --port) need_arg "$1" "${2:-}" && APP_PORT="$2" && shift 2 ;;
   --port=*) APP_PORT="${1#*=}" && shift ;;
-  --root) need_arg "$1" "${2:-}" && ROOT="$2" && shift 2 ;;
-  --root=*) ROOT="${1#*=}" && shift ;;
-  --from) need_arg "$1" "${2:-}" && FROM="$2" && shift 2 ;;
-  --from=*) FROM="${1#*=}" && shift ;;
   --project) need_arg "$1" "${2:-}" && PROJECT="$2" && shift 2 ;;
   --project=*) PROJECT="${1#*=}" && shift ;;
+  --from) need_arg "$1" "${2:-}" && FROM="$2" && shift 2 ;;
+  --from=*) FROM="${1#*=}" && shift ;;
   --dump) need_arg "$1" "${2:-}" && DUMP="$2" && shift 2 ;;
   --dump=*) DUMP="${1#*=}" && shift ;;
+  --data) need_arg "$1" "${2:-}" && DATA="$2" && shift 2 ;;
+  --data=*) DATA="${1#*=}" && shift ;;
   --empty) MODE="empty" && shift ;;
   --keep-data) MODE="keep" && shift ;;
   --yes | -y) ASSUME_YES="yes" && shift ;;
@@ -87,39 +101,44 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-APP_DIR="$ROOT/app"
-PGDATA="$ROOT/postgres"
-DUMPS="$ROOT/dumps"
-dc() { docker compose -p "$PROJECT" -f "$APP_DIR/docker-compose.yml" --env-file "$APP_DIR/.env" "$@"; }
+[ -n "$DATA" ] || DATA="$SELF_DIR/.try/postgres"
+ENV_FILE="$SELF_DIR/.env.try"
+COMPOSE="$SELF_DIR/docker-compose.yml"
+
+# Every compose call goes through here, so -p and --env-file cannot be forgotten.
+dc() { docker compose -p "$PROJECT" -f "$COMPOSE" --env-file "$ENV_FILE" "$@"; }
+psql_t() { dc exec -T db psql -tAq -U "$PROD_USER" -d "$PROD_DB" "$@"; }
 
 # --- guards ----------------------------------------------------------------
 #
-# Every one of these has a specific production accident behind it. They run before
-# anything is created, and before --down deletes anything.
+# Each one has a specific production accident behind it. They run before anything is
+# created and before --down deletes anything.
 
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
 docker compose version >/dev/null 2>&1 || die "this docker has no 'compose' subcommand"
 
 [ "$PROJECT" != "hearth" ] ||
-  die "--project hearth IS the production project. That is the collision this script exists to avoid."
+  die "--project hearth IS the production project. That collision is why this script exists."
 
-case "$ROOT" in
-"$FROM" | "$FROM"/*) die "--root is inside the production checkout ($FROM). Pick somewhere else." ;;
-esac
+[ "$SELF_DIR" != "$FROM" ] ||
+  die "this is the production checkout ($FROM). Clone somewhere else and run it from there."
 
 if [ -f "$FROM/.env" ]; then
-  # Read only the keys that matter, never the whole file: it holds AUTH_SECRET, the
-  # database password and the Google client secret.
+  # Only the keys that matter, never the whole file: it holds AUTH_SECRET, the database
+  # password and the Google client secret.
   PROD_PORT=$(sed -n 's/^APP_PORT=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
   PROD_PGDATA=$(sed -n 's/^PGDATA_PATH=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
-  PROD_USER=$(sed -n 's/^POSTGRES_USER=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
-  PROD_DB=$(sed -n 's/^POSTGRES_DB=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
+  PU=$(sed -n 's/^POSTGRES_USER=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
+  PD=$(sed -n 's/^POSTGRES_DB=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
+  [ -z "$PU" ] || PROD_USER="$PU"
+  [ -z "$PD" ] || PROD_DB="$PD"
   [ "$APP_PORT" != "${PROD_PORT:-3000}" ] ||
     die "--port $APP_PORT is the production port. Pick another."
   if [ -n "${PROD_PGDATA:-}" ]; then
-    case "$PGDATA" in
+    case "$DATA" in
     "$PROD_PGDATA" | "$PROD_PGDATA"/*)
-      die "the test database would land in the production data directory ($PROD_PGDATA)." ;;
+      die "the test database would land in production's data directory ($PROD_PGDATA)."
+      ;;
     esac
   fi
 fi
@@ -127,211 +146,261 @@ fi
 # --- status / down ---------------------------------------------------------
 
 if [ "$ACTION" = "status" ]; then
-  { [ -f "$APP_DIR/docker-compose.yml" ] && [ -f "$APP_DIR/.env" ]; } ||
-    die "no test install at $ROOT"
+  { [ -f "$COMPOSE" ] && [ -f "$ENV_FILE" ]; } || die "nothing set up here yet"
   dc ps
-  say "app: http://localhost:$APP_PORT (through an SSH tunnel — see below)"
-  sed -n 's/^HEARTH_TAG=\(.*\)/  image tag: \1/p' "$APP_DIR/.env"
+  sed -n 's/^HEARTH_TAG=\(.*\)/  image tag: \1/p' "$ENV_FILE"
+  applied=$(psql_t -c 'select count(*) from _prisma_migrations where finished_at is not null' 2>/dev/null || echo "?")
+  people=$(psql_t -c 'select count(*) from "Person"' 2>/dev/null || echo "?")
+  say "migrations applied: $applied · contacts: $people"
   exit 0
 fi
 
 if [ "$ACTION" = "down" ]; then
-  if [ -f "$APP_DIR/docker-compose.yml" ] && [ -f "$APP_DIR/.env" ]; then
-    say "stopping project '$PROJECT' and removing its volumes"
-    # -v is safe here ONLY because -p names the test project: it removes that project's
-    # volumes and nothing else, and the test data directory is its own bind mount.
+  if [ -f "$COMPOSE" ] && [ -f "$ENV_FILE" ]; then
+    say "stopping project '$PROJECT'"
+    # -v is safe ONLY because -p names the test project: it removes that project's
+    # volumes and nothing else.
     dc down -v || true
+  else
+    # The realistic mistake is deleting the directory first. The containers are still
+    # labelled with the project, so they can be found without the compose file.
+    say "no compose file here; removing anything labelled with project '$PROJECT'"
+    ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" || true)
+    [ -z "$ids" ] || docker rm -f $ids >/dev/null
   fi
-  if [ -d "$ROOT" ]; then
-    if [ "$ASSUME_YES" != "yes" ]; then
-      printf '[try-hearth] delete %s entirely? [y/N] ' "$ROOT"
-      read -r reply
-      case "$reply" in y | Y | yes) ;; *) die "left alone" ;; esac
-    fi
-    rm -rf "$ROOT"
-    say "removed $ROOT"
+  if [ -d "$(dirname "$DATA")" ] && [ "$DATA" = "$SELF_DIR/.try/postgres" ]; then
+    rm -rf "$SELF_DIR/.try"
+    say "removed $SELF_DIR/.try"
+  else
+    say "left $DATA alone — it is not the default location, so it may not be mine to delete"
   fi
+  rm -f "$ENV_FILE"
   say "done. Production was never referenced."
   exit 0
 fi
 
-# --- which commit goes with which image ------------------------------------
+# --- which image ------------------------------------------------------------
+
+[ -f "$COMPOSE" ] || die "no docker-compose.yml beside this script — is this a Hearth checkout?"
+grep -q 'HEARTH_TAG' "$COMPOSE" ||
+  die "this checkout's docker-compose.yml cannot pull a published image; it is too old"
+
+if [ -z "$TAG" ]; then
+  # From this checkout's HEAD, read without needing git: a clone has either a loose ref
+  # or an entry in packed-refs. Same approach as scripts/docker-up.sh.
+  head_sha=""
+  if command -v git >/dev/null 2>&1 &&
+    head_sha=$(cd "$SELF_DIR" && git rev-parse --short=8 HEAD 2>/dev/null); then
+    :
+  elif [ -f "$SELF_DIR/.git/HEAD" ]; then
+    h=$(cat "$SELF_DIR/.git/HEAD")
+    case "$h" in
+    "ref: "*)
+      r=${h#ref: }
+      if [ -f "$SELF_DIR/.git/$r" ]; then
+        head_sha=$(cut -c1-8 "$SELF_DIR/.git/$r")
+      elif [ -f "$SELF_DIR/.git/packed-refs" ]; then
+        head_sha=$(grep " $r\$" "$SELF_DIR/.git/packed-refs" | cut -c1-8)
+      fi
+      ;;
+    *) head_sha=$(printf '%s' "$h" | cut -c1-8) ;;
+    esac
+  fi
+  [ -n "$head_sha" ] ||
+    die "could not read this checkout's commit; pass --tag edge or --tag <version>"
+  TAG="sha-$head_sha"
+fi
+
+say "checkout $SELF_DIR"
+say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
+
+# --- the environment, in a file of its own ---------------------------------
 #
-# A sha- tag names its own commit, so the checkout follows it and the compose file
-# cannot describe a different build than the one running. Anything else falls back to
-# main, which is what :edge tracks.
-if [ -z "$REF" ]; then
-  case "$TAG" in
-  sha-*) REF="${TAG#sha-}" ;;
-  *) REF="main" ;;
-  esac
-fi
-
-say "tag $TAG, checkout $REF, port $APP_PORT, project $PROJECT"
-
-if [ -d "$ROOT" ] && [ "$MODE" != "keep" ] && [ "$ASSUME_YES" != "yes" ]; then
-  printf '[try-hearth] %s exists. Replace the checkout and rebuild the database? [y/N] ' "$ROOT"
-  read -r reply
-  case "$reply" in y | Y | yes) ;; *) die "left alone — use --keep-data to reuse it" ;; esac
-fi
-
-# --- 1. the dump -----------------------------------------------------------
-
-mkdir -p "$DUMPS"
-if [ "$MODE" = "copy" ] && [ -z "$DUMP" ]; then
-  [ -f "$FROM/docker-compose.yml" ] || die "no production install at $FROM (use --empty or --from)"
-  DUMP="$DUMPS/production-$(date -u +%Y%m%d-%H%M%S).sql.gz"
-  say "dumping production (it stays up throughout)"
-  # Read-only against production, and the ONLY command here that touches it.
-  ( cd "$FROM" && docker compose exec -T db \
-      pg_dump -U "$PROD_USER" -d "$PROD_DB" --clean --if-exists ) 2>/dev/null | gzip >"$DUMP" ||
-    die "the dump failed — is production running? (docker compose ps in $FROM)"
-  [ -s "$DUMP" ] || die "the dump came out empty; refusing to restore nothing over nothing"
-  say "dumped $(du -h "$DUMP" | cut -f1) to $DUMP"
-elif [ -n "$DUMP" ]; then
-  [ -f "$DUMP" ] || die "no such dump: $DUMP"
-  say "using the dump you gave me: $DUMP"
-fi
-
-# --- 2. the checkout -------------------------------------------------------
-
-command -v git >/dev/null 2>&1 || die "git is needed to fetch the code"
-REPO_URL="https://gitlab.com/hearth-prm/hearth.git"
-if [ -d "$APP_DIR/.git" ]; then
-  say "updating the existing checkout"
-  ( cd "$APP_DIR" && git fetch --quiet --tags origin && git checkout --quiet --force "$REF" &&
-    git reset --hard --quiet "$REF" 2>/dev/null || git reset --hard --quiet "origin/$REF" )
-else
-  say "cloning $REPO_URL"
-  mkdir -p "$ROOT"
-  git clone --quiet "$REPO_URL" "$APP_DIR"
-  ( cd "$APP_DIR" && git checkout --quiet --force "$REF" 2>/dev/null ||
-    git checkout --quiet --force "origin/$REF" )
-fi
-say "checkout is $(cd "$APP_DIR" && git rev-parse --short=8 HEAD)"
-
-grep -q 'HEARTH_TAG' "$APP_DIR/docker-compose.yml" ||
-  die "that commit's docker-compose.yml cannot pull a published image — pick a newer --ref"
-
-# --- 3. its own .env -------------------------------------------------------
-#
-# Copied from production so the Google credentials and the database password match
-# the dump, then overridden where it must differ. Written with 600 because it carries
-# the same secrets production does.
+# .env.try, never .env: an existing environment is never overwritten, so this cannot
+# damage a checkout that is also being used for something else.
 
 if [ -f "$FROM/.env" ]; then
-  cp "$FROM/.env" "$APP_DIR/.env"
+  cp "$FROM/.env" "$ENV_FILE"
+  say "settings copied from production (secrets included, so the dump will open)"
 else
-  [ -f "$APP_DIR/.env.example" ] && cp "$APP_DIR/.env.example" "$APP_DIR/.env"
+  [ -f "$SELF_DIR/.env.example" ] && cp "$SELF_DIR/.env.example" "$ENV_FILE"
+  say "no production settings at $FROM — starting from .env.example"
 fi
-chmod 600 "$APP_DIR/.env"
+chmod 600 "$ENV_FILE"
 
 set_env() {
-  key="$1"; value="$2"
-  if grep -q "^$key=" "$APP_DIR/.env"; then
-    # A literal replacement, so a value containing / or & cannot corrupt the file.
-    awk -v k="$key" -v v="$value" -F= '
-      $1 == k { print k "=" v; next } { print }
-    ' "$APP_DIR/.env" >"$APP_DIR/.env.tmp" && mv "$APP_DIR/.env.tmp" "$APP_DIR/.env"
+  key="$1"
+  value="$2"
+  if grep -q "^$key=" "$ENV_FILE"; then
+    # awk with literal fields rather than sed: a generated password contains / & and $,
+    # every one of which is meaningful in a sed replacement.
+    awk -v k="$key" -v v="$value" -F= '$1 == k { print k "=" v; next } { print }' \
+      "$ENV_FILE" >"$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
   else
-    printf '%s=%s\n' "$key" "$value" >>"$APP_DIR/.env"
+    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
   fi
-  chmod 600 "$APP_DIR/.env"
+  chmod 600 "$ENV_FILE"
 }
 
-# Anything the copied .env could not supply — which is the --empty case with no production
-# install to inherit from. Generated rather than left blank, because the compose file refuses
-# to start without them and a placeholder that looks like a secret is worse than a real one.
-if ! grep -q '^AUTH_SECRET=.\+' "$APP_DIR/.env" 2>/dev/null; then
+if ! grep -q '^AUTH_SECRET=.\+' "$ENV_FILE" 2>/dev/null; then
   command -v openssl >/dev/null 2>&1 || die "no AUTH_SECRET to inherit and no openssl to make one"
   set_env AUTH_SECRET "$(openssl rand -base64 32)"
-  say "generated an AUTH_SECRET for this stack"
 fi
-if ! grep -q '^POSTGRES_PASSWORD=.\+' "$APP_DIR/.env" 2>/dev/null; then
+if ! grep -q '^POSTGRES_PASSWORD=.\+' "$ENV_FILE" 2>/dev/null; then
   NEWPW="$(openssl rand -hex 16)"
   set_env POSTGRES_PASSWORD "$NEWPW"
   set_env DATABASE_URL "postgresql://$PROD_USER:$NEWPW@db:5432/$PROD_DB"
-  say "generated a database password for this stack"
 fi
-if ! grep -q '^AUTH_GOOGLE_ID=.\+' "$APP_DIR/.env" 2>/dev/null; then
-  # Enough to boot and serve the sign-in page; signing in needs real credentials.
+if ! grep -q '^AUTH_GOOGLE_ID=.\+' "$ENV_FILE" 2>/dev/null; then
   set_env AUTH_GOOGLE_ID "not-configured.apps.googleusercontent.com"
   set_env AUTH_GOOGLE_SECRET "not-configured"
-  say "no Google credentials to inherit — the app will start but sign-in will not work"
+  warn "no Google credentials to inherit — it will start, but sign-in will not work"
 fi
 
 set_env APP_PORT "$APP_PORT"
-set_env PGDATA_PATH "$PGDATA"
+set_env PGDATA_PATH "$DATA"
 set_env HEARTH_TAG "$TAG"
-# localhost, because Google accepts an http redirect URI only for localhost — so an
-# SSH tunnel is the only way to sign in to this without a certificate of its own.
+# localhost, because Google accepts an http redirect URI only for localhost — so a tunnel
+# is the only way to sign in to this without a certificate of its own.
 set_env AUTH_URL "http://localhost:$APP_PORT"
-# The background workers stay off: this stack shares production's Google grant, and a
-# test install pushing contacts and events to the same account would be indistinguishable
-# from production doing it.
+# Off deliberately: this stack inherits production's Google grant, and a test install
+# pushing contacts and events to the same account would be indistinguishable from the
+# real one doing it.
 set_env SYNC_ENABLED "false"
 set_env OLLAMA_URL ""
 
-mkdir -p "$PGDATA"
+mkdir -p "$DATA"
 
-# --- 4. database first, then the data, then the app -----------------------
+# --- the dump ---------------------------------------------------------------
+
+if [ "$MODE" = "copy" ] && [ -z "$DUMP" ]; then
+  [ -f "$FROM/docker-compose.yml" ] || die "no production install at $FROM (use --empty or --from)"
+  mkdir -p "$SELF_DIR/.try"
+  DUMP="$SELF_DIR/.try/production.sql.gz"
+  say "dumping production — read-only, and it stays up throughout"
+  (cd "$FROM" && docker compose exec -T db \
+    pg_dump -U "$PROD_USER" -d "$PROD_DB" --clean --if-exists) 2>/dev/null | gzip >"$DUMP" ||
+    die "the dump failed — is production running? (docker compose ps in $FROM)"
+  [ -s "$DUMP" ] || die "the dump came out empty; refusing to restore nothing"
+  say "dumped $(du -h "$DUMP" | cut -f1)"
+elif [ -n "$DUMP" ]; then
+  [ -f "$DUMP" ] || die "no such dump: $DUMP"
+fi
+
+if [ "$MODE" = "copy" ] && [ -d "$DATA" ] && [ -n "$(ls -A "$DATA" 2>/dev/null || true)" ] &&
+  [ "$ASSUME_YES" != "yes" ]; then
+  printf '[try-hearth] %s already holds a database. Replace it? [y/N] ' "$DATA"
+  read -r reply
+  case "$reply" in y | Y | yes) rm -rf "${DATA:?}"/* && mkdir -p "$DATA" ;;
+  *) die "left alone — use --keep-data to reuse it" ;; esac
+fi
+
+# --- database, then data, then the app -------------------------------------
 #
 # In that order deliberately: the app runs `prisma migrate deploy` on boot, so the
-# restore has to be in place before it starts or the migrations run against nothing
-# and prove nothing.
+# restore has to be in place first or the migrations run against nothing and prove
+# nothing.
 
 say "starting Postgres"
 dc up -d db
 i=0
 until dc exec -T db pg_isready -q 2>/dev/null; do
   i=$((i + 1))
-  [ "$i" -lt 60 ] || die "Postgres did not come up; try: docker compose -p $PROJECT logs db"
+  [ "$i" -lt 60 ] || die "Postgres did not come up: docker compose -p $PROJECT logs db"
   sleep 2
 done
-say "Postgres is ready"
 
 if [ "$MODE" = "copy" ] && [ -n "$DUMP" ]; then
-  say "restoring $(basename "$DUMP")"
-  gunzip -c "$DUMP" | dc exec -T db psql -q -U "$PROD_USER" -d "$PROD_DB" >/dev/null 2>&1 ||
-    say "psql reported problems; --clean --if-exists says a lot of that on a fresh database. Checking…"
-  COUNT=$(dc exec -T db psql -tAq -U "$PROD_USER" -d "$PROD_DB" \
-    -c 'select count(*) from "Person"' 2>/dev/null || echo 0)
-  [ "${COUNT:-0}" -gt 0 ] || die "the restore left no contacts; stopping before the migrations run"
-  say "restored — $COUNT contacts"
+  say "restoring"
+  gunzip -c "$DUMP" | dc exec -T db psql -q -U "$PROD_USER" -d "$PROD_DB" >/dev/null 2>&1 || true
+  people=$(psql_t -c 'select count(*) from "Person"' 2>/dev/null || echo 0)
+  [ "${people:-0}" -gt 0 ] || die "the restore left no contacts; stopping before migrations run"
+  say "restored — $people contacts"
 fi
 
-say "starting the app (its migrations run now)"
+# --- what this build will do to the schema --------------------------------
+#
+# Said BEFORE the app starts, because "does the new code need a migration" is the
+# question that matters when testing a build, and a migration that copies data is
+# invisible to the test suite — whose database is always empty, so its INSERT..SELECTs
+# run against zero rows.
+
+have=$(psql_t -c 'select migration_name from _prisma_migrations where finished_at is not null' 2>/dev/null || true)
+PENDING=""
+DESTRUCTIVE=""
+for d in "$SELF_DIR"/prisma/migrations/*/; do
+  [ -d "$d" ] || continue
+  name=$(basename "$d")
+  if ! printf '%s\n' "$have" | grep -qx "$name"; then
+    PENDING="$PENDING $name"
+    if grep -q 'hearth:allow-destructive' "$d/migration.sql" 2>/dev/null; then
+      DESTRUCTIVE="$DESTRUCTIVE $name"
+    fi
+  fi
+done
+
+if [ -z "${PENDING# }" ]; then
+  say "schema is already current — this build adds no migrations"
+else
+  n=$(printf '%s' "$PENDING" | wc -w | tr -d ' ')
+  say "this build will apply $n migration(s) to the TEST database:"
+  for m in $PENDING; do printf '        %s\n' "$m"; done
+  if [ -n "${DESTRUCTIVE# }" ]; then
+    warn "one or more of those is marked DESTRUCTIVE — it drops or rewrites columns:"
+    for m in $DESTRUCTIVE; do printf '        %s\n' "$m"; done
+    warn "harmless here (this is a copy) but it is what production would do too."
+  fi
+fi
+
+say "starting the app — migrations run now"
 dc up -d
 i=0
 until [ "$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://localhost:$APP_PORT/signin" 2>/dev/null)" = "200" ]; do
   i=$((i + 1))
-  [ "$i" -lt 60 ] || die "the app did not answer; try: docker compose -p $PROJECT logs app"
+  [ "$i" -lt 90 ] || die "the app did not answer: docker compose -p $PROJECT -f $COMPOSE logs app"
   sleep 2
 done
+
+# --- and confirm they landed ------------------------------------------------
+
+if [ -n "${PENDING# }" ]; then
+  missing=""
+  now=$(psql_t -c 'select migration_name from _prisma_migrations where finished_at is not null' 2>/dev/null || true)
+  for m in $PENDING; do
+    printf '%s\n' "$now" | grep -qx "$m" || missing="$missing $m"
+  done
+  if [ -n "${missing# }" ]; then
+    warn "these did NOT apply:$missing"
+    warn "look at: docker compose -p $PROJECT -f $COMPOSE logs app"
+  else
+    say "all $(printf '%s' "$PENDING" | wc -w | tr -d ' ') migration(s) applied"
+  fi
+fi
+say "contacts after migrating: $(psql_t -c 'select count(*) from "Person"' 2>/dev/null || echo '?')"
 
 cat <<EOF
 
 [try-hearth] up.
 
-  image      $TAG
-  commit     $(cd "$APP_DIR" && git rev-parse --short=8 HEAD)
-  project    $PROJECT   (pass -p $PROJECT to every compose command here)
-  data       $PGDATA
-  dump       ${DUMP:-none}
+  image     $TAG
+  project   $PROJECT
+  data      $DATA
+  env       $ENV_FILE   (production's .env was not touched)
 
-To reach it, tunnel — Google only accepts an http redirect for localhost:
+Reach it through a tunnel — Google accepts an http redirect only for localhost:
 
-  ssh -L $APP_PORT:localhost:$APP_PORT $(whoami)@\$(hostname)
+  ssh -L $APP_PORT:localhost:$APP_PORT root@\$(hostname)
 
-then add this to your OAuth client's authorised redirect URIs:
+add this to your OAuth client's authorised redirect URIs:
 
   http://localhost:$APP_PORT/api/auth/callback/google
 
-and open http://localhost:$APP_PORT
+then open http://localhost:$APP_PORT
 
-Logs:      docker compose -p $PROJECT -f $APP_DIR/docker-compose.yml logs -f app
-Tear down: sh $0 --down --root $ROOT --project $PROJECT
+  logs        docker compose -p $PROJECT -f $COMPOSE --env-file $ENV_FILE logs -f app
+  status      sh $0 --status
+  tear down   sh $0 --down        <- BEFORE deleting this directory
 
-Google sync is OFF in this stack: it shares production's grant, and a test install
+Google sync is off in this stack: it shares production's grant, and a test install
 pushing to the same account would be indistinguishable from the real one doing it.
 EOF
