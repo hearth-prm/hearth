@@ -65,6 +65,23 @@ Data survives (Postgres is a bind mount, and `down -v` only touches named volume
 containers come back on the wrong configuration, and a stale locally-built image can leave an
 old app running against a newer database. The version in the footer is what makes that visible.
 
+## raw.githubusercontent.com caches for five minutes
+
+An edit to `hearth.xml` reaches GitHub in seconds — GitLab's push mirror fired in about
+fifteen when this was measured — but the URL Community Applications reads is behind a CDN with
+`cache-control: max-age=300`. So for up to five minutes after a change, CA and any browser will
+still be served the previous version, and the branch URL will disagree with the repository.
+
+That is not a mirror failure, and it is worth not debugging as one. To see the truth
+immediately, ask for the commit rather than the branch:
+
+```bash
+git rev-parse HEAD    # then:
+curl -s https://raw.githubusercontent.com/hearth-prm/hearth/<sha>/unraid/hearth.xml
+```
+
+A by-SHA URL is immutable, so it is never stale.
+
 ## Testing the template before submitting
 
 Community Applications can install a template from a local file: put `hearth.xml` in
