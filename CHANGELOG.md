@@ -26,6 +26,32 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The time zone picker could not display its own default, and saving Settings overwrote it.**
+  `Intl.supportedValuesOf("timeZone")` offers 418 canonical zones and includes neither `UTC` nor
+  `Etc/UTC` — while the stored default *is* `UTC`. A `<select>` whose value matches no option
+  shows the first one, so every fresh install displayed **Africa/Abidjan** as its default zone,
+  and saving that page without touching the picker submitted Africa/Abidjan over the UTC that
+  was stored. `commonTimeZones()` now puts UTC back at the front. **Check your Settings** if you
+  have ever saved that page.
+- **A saved time zone snapped back to the old value.** React 19 resets a form once its action
+  returns, and for a controlled select that reset lands on the DOM with no re-render to correct
+  it. Re-asserting the value in an effect is not enough — the saved value usually equals what
+  state already holds, React bails out of a set with an equal value, and no render happens. A
+  counter used as the element's `key` changes every time by construction. Both fixes were proven
+  necessary by removing each in turn and watching its own check fail.
+
+### Added
+
+- **The footer shows the commit beside the version** — `v1.2.0 · cc5f8aef` — because the version
+  alone does not identify a build: two installs both reporting v1.2.0 may be running different
+  code, and a bug report has to be able to say which. The build time stays on hover.
+- **Settings offers the time zone your browser reports**, as a one-click suggestion when it
+  differs from what is stored. The setting already existed and already defaulted every new event;
+  what was missing was any way to find your own IANA name, which is how a setting goes unset for
+  months while every event gets its zone corrected by hand.
+
 ### Added
 
 - **A gift can be from several people**, because a present from a couple is one present. Both

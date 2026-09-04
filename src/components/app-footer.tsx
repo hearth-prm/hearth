@@ -1,11 +1,12 @@
-import { sourceUrl, versionDetail, versionLabel } from "@/lib/version";
+import { sourceUrl, versionDetail, versionStamp } from "@/lib/version";
 
 /**
  * Persistent build stamp.
  *
- * Shown on every page so "which version am I looking at?" never requires shell
- * access. The full detail — commit and build time — sits in the title attribute
- * to keep the footer quiet while staying one hover away.
+ * Shown on every page so "which version am I looking at?" never requires shell access, and
+ * showing the COMMIT beside the version rather than only on hover — because the version alone
+ * does not identify a build. Two installs both reporting v1.2.0 may be running different code,
+ * and a bug report has to be able to say which. The build time stays in the title.
  *
  * The copyright line and source link are here for the licence rather than for decoration: the
  * AGPL asks that anyone using the software over a network be offered its source, and that an
@@ -30,7 +31,7 @@ export function AppFooter() {
           · AGPL-3.0
         </span>
         <span title={versionDetail()} className="font-mono">
-          {versionLabel()}
+          {versionStamp()}
         </span>
       </div>
     </footer>

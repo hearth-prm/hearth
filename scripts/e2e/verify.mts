@@ -6773,6 +6773,84 @@ try {
     where: { id: { in: [karenG.id, kennyG.id, noMailG.id] } },
   });
 
+  section("§38 Build identity and the default time zone")
+
+  await A.page.goto("/people");
+  const stampText = (await A.page.textContent("footer")) ?? "";
+  // Asserted on the RENDERED shape, not against versionStamp() called from here: APP_VERSION
+  // and GIT_SHA are inlined at build time by next.config.ts, so this process reports v0.0.0
+  // and unknown however correct the running app is. The first version of this compared the two
+  // and failed on the difference between a build and a test runner.
+  ok("38.1 the footer shows a version and a commit beside it",
+     /v\d+\.\d+\.\d+ · [0-9a-f]{7,}/.test(stampText),
+     stampText.trim().slice(0, 90));
+  // Two installs both reporting v1.2.0 may be running different code, so the version alone
+  // cannot identify a build — which is the whole reason the commit is beside it rather than
+  // one hover away.
+  ok("38.1b which is more than the version alone",
+     !/v\d+\.\d+\.\d+\s*$/.test(stampText.trim()), stampText.trim().slice(-30));
+  ok("38.1c and the build time is still a hover away rather than in the way",
+     ((await A.page.getAttribute("footer span[title]", "title")) ?? "").includes("built"),
+     await A.page.getAttribute("footer span[title]", "title"));
+
+  // --- the default time zone -------------------------------------------------
+  //
+  // The setting already existed; what did not was any way to find your own IANA name. The
+  // stored default is UTC because a server has no business guessing, so without the offer
+  // below the setting goes unset and every event gets its zone corrected by hand.
+  const { commonTimeZones: zoneList } = await import("@/lib/time");
+  // The bug this section found. Intl.supportedValuesOf("timeZone") offers 418 canonical zones
+  // and includes neither "UTC" nor "Etc/UTC", while UserSettings.timeZone DEFAULTS to "UTC" —
+  // so the picker could not display its own default, showed the first zone alphabetically
+  // instead, and saving that page untouched submitted Africa/Abidjan over the stored UTC.
+  ok("38.2 the zone list can express the value it defaults to",
+     zoneList().includes("UTC") && zoneList()[0] === "UTC",
+     [zoneList().length, zoneList().slice(0, 2)]);
+
+  await A.page.goto("/settings");
+  ok("38.2a Settings offers a default time zone for new events",
+     (await A.page.$$('select[name="timeZone"]')).length === 1);
+  ok("38.2c and shows the stored value rather than the first option in the list",
+     (await A.page.inputValue('select[name="timeZone"]')) ===
+       (await prisma.userSettings.findFirstOrThrow({ where: { userId: A.id } })).timeZone,
+     [await A.page.inputValue('select[name="timeZone"]'),
+      (await prisma.userSettings.findFirstOrThrow({ where: { userId: A.id } })).timeZone]);
+  ok("38.2b saying that each event can still override it",
+     ((await A.page.textContent("body")) ?? "").includes("can still be changed as you"),
+     null);
+  // Playwright reports a real zone, so the offer should be on screen and should not be the
+  // value already selected.
+  const offer = await A.page.$('button:has-text("which is what this browser reports")');
+  ok("38.3 and offers what the browser reports, since nobody knows their own IANA name",
+     offer !== null);
+  if (offer) {
+    const offered = ((await offer.textContent()) ?? "").replace(/^Use /, "").split(",")[0]!;
+    await offer.click();
+    ok("38.3b clicking it selects that zone",
+       (await A.page.inputValue('select[name="timeZone"]')) === offered,
+       [await A.page.inputValue('select[name="timeZone"]'), offered]);
+    await A.page.click('button:has-text("Save settings")').catch(async () => {
+      await A.page.click('form button[type="submit"]');
+    });
+    await waitForDb("the zone to be saved", async () =>
+      (await prisma.userSettings.findFirstOrThrow({ where: { userId: A.id } })).timeZone ===
+      offered);
+    ok("38.3c and saving keeps it, rather than snapping back after the reset",
+       (await A.page.inputValue('select[name="timeZone"]')) === offered,
+       await A.page.inputValue('select[name="timeZone"]'));
+
+    // The point of the setting: a new event starts there without being told.
+    await A.page.goto("/events/new");
+    ok("38.4 a new event starts in that zone with nothing to choose",
+       (await A.page.inputValue('select[name="f_timeZone"]')) === offered,
+       await A.page.inputValue('select[name="f_timeZone"]'));
+    ok("38.4b and can still be changed on the event itself",
+       (await A.page.$$('select[name="f_timeZone"] option')).length > 1);
+
+    // Left as the suite found it: later sections format times against this setting.
+    await prisma.userSettings.updateMany({ where: { userId: A.id }, data: { timeZone: "UTC" } });
+  }
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

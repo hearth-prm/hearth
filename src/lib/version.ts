@@ -35,6 +35,19 @@ export function versionLabel(): string {
   return `v${APP_VERSION}`;
 }
 
+/**
+ * "v1.2.0 · cc5f8aef" — version and commit, for the footer.
+ *
+ * The commit shown rather than left to a hover, because it is the thing that actually
+ * identifies a build: two people on "v1.2.0" may be running different code if one of them
+ * built from a branch, and a bug report naming only the version cannot tell them apart. It
+ * drops out entirely on a build with no repository to ask, which is honest — a version with
+ * no commit beside it is a build nobody can locate.
+ */
+export function versionStamp(): string {
+  return GIT_SHA === "unknown" ? versionLabel() : `${versionLabel()} · ${GIT_SHA}`;
+}
+
 /** "v0.1.0 · c5f4a75 · built 7 Aug 2026" — the full form, for tooltips. */
 export function versionDetail(): string {
   const parts = [versionLabel()];

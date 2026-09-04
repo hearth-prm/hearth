@@ -12,7 +12,7 @@ on Unraid behind SWAG, pulled from `gitlab.com/hearth-prm/hearth`.
 ```bash
 npm run typecheck   # app + e2e suite. READ THE OUTPUT — never background it and assume
 npm run build       # needs the max-old-space flag it already carries
-npm run e2e         # builds, then drives a real browser through 866 checks
+npm run e2e         # builds, then drives a real browser through 878 checks
 npm run e2e:google  # Google-facing half. DESTRUCTIVE — see below
 npx tsx scripts/probe-semantic.mts   # does the REAL embedding model still rank? needs OLLAMA_URL
 npm run check:gift-migration         # does the destructive gift migration carry old data across?
@@ -140,13 +140,25 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **Auth.js's adapter writes `Account` once and never updates it.** Reconnect Google did
   nothing for weeks. `persistGoogleGrant` on `events.signIn` fixes it, and leaves a missing
   `refresh_token` alone.
+- **A picker that cannot express its own default shows the wrong value AND saves it.**
+  `Intl.supportedValuesOf("timeZone")` returns 418 zones and includes neither `UTC` nor
+  `Etc/UTC`, while `UserSettings.timeZone` DEFAULTS to `"UTC"` — so a select with no matching
+  option displayed `Africa/Abidjan`, and saving that page untouched wrote Africa/Abidjan over
+  the stored UTC. `commonTimeZones()` puts UTC back at the front. Check any list-plus-default
+  pair for this: the list came from the platform, the default came from the schema, and nothing
+  made them agree.
 - **React 19 resets a form after its action settles, and the reset lands AFTER the re-render
   the revalidation causes.** Two opposite consequences, both hit: a failed thank-you lost
   what was typed (so that textarea is *controlled*), and a saved mapping displayed the reset
   value with no later render to correct it (so that select is *uncontrolled*, remounted per
   submission, and the DOM's default is always what the server just said). Cancelling the
   reset via `onReset` does not work. When a form goes wrong after an action, first establish
-  whether the PROP or the DOM is stale — they look identical and need opposite fixes.
+  whether the PROP or the DOM is stale — they look identical and need opposite fixes. A third
+  variant needed a third fix: re-asserting a CONTROLLED select's value in an effect does not
+  work either, because the saved value usually equals what state already holds, React bails out
+  of a set with an equal value, and no render happens to overwrite the reset. A counter used as
+  the element's `key` changes every time by construction. Proven necessary by removing it and
+  watching §38.3c snap back.
 - **`textContent("body")` sees the RSC flight payload** inlined in a `<script>`, so
   `"thanked":false` satisfied a positive assertion. Use Playwright's `text=` engine.
 - **Next's build worker OOMs where `tsc` passes.** One unused
@@ -210,6 +222,10 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - Leave state clean for later sections, and remember new fixtures invalidate old absence
   assertions.
 
+- **`npx tsx scripts/e2e/verify.mts` does not build.** It is the fast path for a test-only
+  edit, and it silently tests the PREVIOUS build of any app code — which cost three rounds of
+  chasing a timezone fix that was already correct on disk. After touching anything under
+  `src/`, run `npm run e2e`.
 - **`npx next start` is a wrapper.** SIGTERM to it killed the wrapper and left the real
   next-server behind, reparented to init — so even clean e2e runs leaked a server, and a
   day's worth starved the machine until `tsc` and the editor were being OOM-killed. The

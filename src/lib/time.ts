@@ -162,7 +162,15 @@ export function commonTimeZones(): string[] {
   ).supportedValuesOf;
   if (typeof supported !== "function") return fallback;
   try {
-    return supported("timeZone");
+    // UTC put back at the front, and it is not decoration.
+    //
+    // Intl.supportedValuesOf("timeZone") returns 418 canonical zones and includes neither
+    // "UTC" nor "Etc/UTC" — while UserSettings.timeZone DEFAULTS to "UTC". A select whose
+    // value matches no option shows the first one instead, so every fresh install displayed
+    // "Africa/Abidjan" as its default time zone, and saving that page without touching the
+    // picker submitted Africa/Abidjan over the UTC that was stored. A list that cannot express
+    // the value it is asked to display is worse than a short list.
+    return ["UTC", ...supported("timeZone").filter((tz) => tz !== "UTC")];
   } catch {
     return fallback;
   }
