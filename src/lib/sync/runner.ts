@@ -5,6 +5,8 @@ import { createCalendarClient } from "@/lib/google/calendar-client";
 import {
   CALENDAR_SYNC_SCOPES,
   CONTACT_SYNC_SCOPES,
+  googleWritesEnabled,
+  GOOGLE_WRITES_OFF,
   grantCovers,
 } from "@/lib/google/scopes";
 import { withSyncLease } from "./lease";
@@ -58,6 +60,9 @@ export async function runContactSyncForUser(
   if (!settings.syncContactsEnabled) {
     return { status: "skipped", reason: "contact sync is turned off" };
   }
+  // Answered here as well as in the client, so a manual "Sync now" gets a sentence
+  // naming the setting instead of the backstop's refusal of one HTTP call.
+  if (!googleWritesEnabled()) return { status: "skipped", reason: GOOGLE_WRITES_OFF };
 
   if (
     !options.force &&
@@ -148,6 +153,7 @@ export async function runEventSyncForUser(
   if (!settings.syncCalendarEnabled) {
     return { status: "skipped", reason: "calendar sync is turned off" };
   }
+  if (!googleWritesEnabled()) return { status: "skipped", reason: GOOGLE_WRITES_OFF };
 
   if (
     !options.force &&

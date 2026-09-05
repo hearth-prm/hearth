@@ -349,7 +349,17 @@ set_env AUTH_URL "http://localhost:$APP_PORT"
 # Off deliberately: this stack inherits production's Google grant, and a test install
 # pushing contacts and events to the same account would be indistinguishable from the
 # real one doing it.
+#
+# SYNC_ENABLED stops the background loop and nothing else — pressing "Sync now" still
+# pushes, because an install that syncs only on the button is a workflow somebody wants.
+# So the writes are refused at the source as well, which also covers the thank-you mail
+# the loop was never involved in. Belt and braces, and the braces are the load-bearing
+# half: the test database is a copy of production's, so it holds every thank-you not yet
+# sent, and sending one from here mails a real person while production goes on believing
+# it still owes them a note.
 set_env SYNC_ENABLED "false"
+set_env HEARTH_GOOGLE_WRITES "off"
+set_env HEARTH_ENABLE_MAIL ""
 set_env OLLAMA_URL ""
 
 mkdir -p "$DATA"

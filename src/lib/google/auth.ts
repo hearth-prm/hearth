@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import type { Credentials, OAuth2Client } from "google-auth-library";
+import { googleWritesEnabled, GOOGLE_WRITES_OFF } from "@/lib/google/scopes";
 import { prisma } from "@/lib/db";
 
 /**
@@ -159,5 +160,35 @@ export async function getGoogleClient(userId: string): Promise<OAuth2Client> {
   }
 
   await clearAuthError(userId);
+  return googleWritesEnabled() ? client : readOnly(client);
+}
+
+/**
+ * The same client with every write refused.
+ *
+ * Derived from the HTTP method, not from a list of endpoints: a write is a write whichever
+ * API it belongs to, so a call added later is covered on the day it is added rather than on
+ * the day somebody remembers to add it here. Reads still work, which is the point — the
+ * import and the calendar picker stay testable.
+ *
+ * Safe for the token refresh: that goes out through the library's own transporter rather
+ * than back through `request`, and by the time this wraps anything the refresh has already
+ * happened above.
+ *
+ * NOT sufficient on its own. `sendMail` posts over plain fetch and never touches this
+ * client, so it asks `googleWritesEnabled()` through `canSendMail` instead. Two chokepoints
+ * because there are genuinely two ways out of the process — one rule, consulted twice.
+ */
+function readOnly(client: OAuth2Client): OAuth2Client {
+  const send = client.request.bind(client);
+  client.request = (async (opts: { method?: string; url?: string }) => {
+    const method = (opts?.method ?? "GET").toUpperCase();
+    if (method !== "GET") {
+      throw new GoogleAuthError(
+        `Refused ${method} ${opts?.url ?? "a Google write"}: ${GOOGLE_WRITES_OFF}.`,
+      );
+    }
+    return send(opts);
+  }) as typeof client.request;
   return client;
 }

@@ -347,6 +347,12 @@ its own, restores the dump into a Postgres of its own under `./.try/postgres`, t
 app so its migrations run against real rows. `--empty` skips the data, `--dump <file>` uses one
 you already have, and `--status` says what the stack is doing.
 
+The test stack cannot write to your Google account. It sets `HEARTH_GOOGLE_WRITES=off` and
+clears `HEARTH_ENABLE_MAIL`, so contact and calendar pushes and thank-you emails are all
+refused — which matters because it is holding a copy of your real database, complete with a
+working Google grant and every thank-you you have not sent yet. Reads still work, so the
+Google import and the calendar picker stay testable.
+
 ### Testing on a different machine from the server
 
 Point `--from` at an ssh URL and the dump and the settings come over ssh, while everything else

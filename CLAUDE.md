@@ -81,6 +81,18 @@ caller that decides WHICH CONTACTS something applies to goes through `resolvePeo
 list, the CSV export and "select all matching" — or a bulk action would act on a wider set than
 the page displayed.
 
+**`HEARTH_GOOGLE_WRITES=off` is not `SYNC_ENABLED=false`.** The second stops the background
+loop and deliberately nothing else — pushing only when you press the button is a workflow
+somebody chose. The first means nothing here reaches Google by any route, which is what a test
+stack standing on a dump of production needs: that dump carries a working grant for the REAL
+account, so a stray "Sync now" is indistinguishable from the real install doing it, and the sync
+being one-way OUT means production never finds out. One predicate, `googleWritesEnabled()`,
+consulted at three places because there are genuinely three ways out — and the easy one to miss
+is that **`sendMail` posts over plain `fetch`**, never touching the OAuth client, so the
+`readOnly` wrapper in `auth.ts` cannot see it. §39.4 is that check: removing the line in
+`canSendMail` fails it and nothing else. It fails OPEN on a typo, because a self-hosted install
+that quietly stopped syncing would be worse than one that kept going.
+
 **The trash never empties itself.** No retention window, no pruning job, no "after 30
 days" setting — ever, by explicit design. Bulk convenience for the human (Empty trash) is
 fine; automatic expiry is not. Restoring must keep working, so trashing keeps every related

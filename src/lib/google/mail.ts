@@ -1,5 +1,5 @@
 import { getGoogleClient, GoogleAuthError } from "@/lib/google/auth";
-import { GMAIL_SEND_SCOPE } from "@/lib/google/scopes";
+import { GMAIL_SEND_SCOPE, googleWritesEnabled } from "@/lib/google/scopes";
 import { prisma } from "@/lib/db";
 
 /**
@@ -10,8 +10,15 @@ import { prisma } from "@/lib/db";
  * deliberately small — one message type, no queue, no templates engine.
  */
 
-/** Whether this user has granted the optional send permission. */
+/**
+ * Whether this user has granted the optional send permission — and whether this install
+ * is allowed to act on it.
+ *
+ * The write switch is answered here rather than in `sendMail` alone because this is also
+ * what the UI asks: an install that cannot send should not offer a send button that fails.
+ */
 export async function canSendMail(userId: string): Promise<boolean> {
+  if (!googleWritesEnabled()) return false;
   const account = await prisma.account.findFirst({
     where: { userId, provider: "google" },
     select: { scope: true },

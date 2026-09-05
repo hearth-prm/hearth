@@ -45,6 +45,36 @@ export function mailEnabled(): boolean {
 }
 
 /**
+ * Whether this install may write to Google AT ALL.
+ *
+ * Deliberately not SYNC_ENABLED. That one means "run the background loop", and turning it
+ * off is a legitimate way to push only when you press the button — so teaching the button
+ * to obey it would take a real workflow away from somebody. This means something stronger
+ * and simpler: nothing here reaches Google, by any route, however it was asked for.
+ *
+ * What needs it is a test install standing on a copy of somebody's production database.
+ * That dump carries a working grant for the real Google account, so a stray "Sync now"
+ * there is indistinguishable from the real install doing it — and Hearth's sync is one-way
+ * out, so production would never find out it had happened.
+ *
+ * Default ON: every ordinary install wants writes, and a switch that fails closed on a
+ * typo would be a self-hosted install that silently stopped syncing. Turning it off is the
+ * deliberate act, and the spellings people actually type all work.
+ */
+export function googleWritesEnabled(): boolean {
+  const raw = (process.env.HEARTH_GOOGLE_WRITES ?? "").trim().toLowerCase();
+  return !(raw === "off" || raw === "false" || raw === "no" || raw === "0");
+}
+
+/**
+ * Said the same way wherever a write is refused, so the cause is recognisable whether it
+ * surfaces in the settings page, a thank-you dialog or a container log. No full stop: the
+ * callers punctuate.
+ */
+export const GOOGLE_WRITES_OFF =
+  "this install runs with HEARTH_GOOGLE_WRITES=off, so it will not write to Google";
+
+/**
  * Every scope Hearth is capable of asking for.
  *
  * For the Google-facing test scripts, which acquire a token once and then exercise features

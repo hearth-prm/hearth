@@ -6851,6 +6851,172 @@ try {
     await prisma.userSettings.updateMany({ where: { userId: A.id }, data: { timeZone: "UTC" } });
   }
 
+  section("§39 An install that may not write to Google")
+
+  // The case this exists for: try-hearth.sh stands a test stack on a dump of production,
+  // and that dump carries a working Google grant for the real account. SYNC_ENABLED=false
+  // stops the background loop and nothing else — pressing "Sync now" still pushed, and a
+  // thank-you still mailed a real person — so the loop was never the whole of the danger.
+  //
+  // Driven in-process rather than through the browser: the switch is read from the
+  // environment on each call, and the server under test was started once with its own.
+  {
+    const scopesMod = await import("@/lib/google/scopes");
+    const { googleWritesEnabled, GOOGLE_WRITES_OFF } = scopesMod;
+    const writesVar = "HEARTH_GOOGLE_WRITES";
+    const writesWas = process.env[writesVar];
+    const setWrites = (v: string | undefined) => {
+      if (v === undefined) delete process.env[writesVar];
+      else process.env[writesVar] = v;
+    };
+
+    // Fails OPEN. A self-hosted install that silently stopped syncing because somebody
+    // typed the value wrong would be far worse than one that kept syncing, so only the
+    // spellings a person means by "off" turn it off.
+    setWrites(undefined);
+    ok("39.1 writes are on when nothing says otherwise", googleWritesEnabled() === true);
+    for (const yes of ["on", "true", "yes", "1", "", "  ", "offish", "no-thanks"]) {
+      setWrites(yes);
+      ok(`39.1b "${yes}" does not turn writes off`, googleWritesEnabled() === true);
+    }
+    for (const no of ["off", "OFF", " off ", "false", "No", "0"]) {
+      setWrites(no);
+      ok(`39.1c "${no}" does`, googleWritesEnabled() === false);
+    }
+
+    // A user of its own, so the fixtures the rest of the suite relies on keep their grants.
+    const wUser = await prisma.user.create({
+      data: { name: "Writes Off", email: "writes-off@hearth.test" },
+    });
+    await prisma.userSettings.create({
+      data: { userId: wUser.id, syncContactsEnabled: true, syncCalendarEnabled: true },
+    });
+    await prisma.account.create({
+      data: {
+        userId: wUser.id,
+        type: "oauth",
+        provider: "google",
+        providerAccountId: "writes-off-account",
+        access_token: "fake-access-token",
+        refresh_token: "fake-refresh-token",
+        // Well clear of the refresh skew: a refresh would go to Google with a made-up
+        // token and fail for a reason that has nothing to do with what is being tested.
+        expires_at: Math.floor(Date.now() / 1000) + 86_400,
+        scope: [...scopesMod.ALL_GOOGLE_SCOPES].join(" "),
+      },
+    });
+
+    // The harness seeds sessions straight into the database and never drives an OAuth
+    // round trip, so this process has no client credentials — and getGoogleClient refuses
+    // to build a client without them, before it reaches the switch being tested. Supplied
+    // here and taken away again; they are never sent anywhere, because every request this
+    // section makes is either refused locally or aimed at a hostname that does not resolve.
+    const credWas = {
+      id: process.env.AUTH_GOOGLE_ID,
+      secret: process.env.AUTH_GOOGLE_SECRET,
+    };
+    process.env.AUTH_GOOGLE_ID ??= "e2e-not-a-real-client.apps.googleusercontent.com";
+    process.env.AUTH_GOOGLE_SECRET ??= "e2e-not-a-real-secret";
+
+    const { getGoogleClient } = await import("@/lib/google/auth");
+    const { canSendMail } = await import("@/lib/google/mail");
+    const { runContactSyncForUser, runEventSyncForUser } = await import("@/lib/sync/runner");
+
+    const refused = async (method: string): Promise<string> => {
+      const client = await getGoogleClient(wUser.id);
+      try {
+        await client.request({ url: "https://people.googleapis.test/v1/x", method });
+        return "";
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err);
+      }
+    };
+
+    // --- with writes ON, the gate is not in the way -------------------------
+    //
+    // Asserted first and deliberately: a wrapper that refused everything would pass every
+    // check below while breaking every real install.
+    setWrites("on");
+    const postOn = await refused("POST");
+    ok("39.2 with writes on, a POST is not refused by the switch",
+       postOn !== "" && !postOn.includes("HEARTH_GOOGLE_WRITES"),
+       postOn.slice(0, 120));
+    ok("39.2b and mail is offered to a user who granted the scope",
+       (await canSendMail(wUser.id)) === true);
+
+    // --- with writes OFF ----------------------------------------------------
+    setWrites("off");
+    const postOff = await refused("POST");
+    ok("39.3 a POST is refused before it leaves the process",
+       postOff.includes("HEARTH_GOOGLE_WRITES"), postOff.slice(0, 120));
+    // Derived from the method, so an endpoint nobody has written yet is covered too.
+    for (const m of ["PATCH", "DELETE", "PUT"]) {
+      const msg = await refused(m);
+      ok(`39.3b so is ${m}`, msg.includes("HEARTH_GOOGLE_WRITES"), msg.slice(0, 90));
+    }
+    const getOff = await refused("GET");
+    ok("39.3c but a GET still goes out — the import and the calendar picker stay testable",
+       getOff !== "" && !getOff.includes("HEARTH_GOOGLE_WRITES"), getOff.slice(0, 120));
+
+    // The client wrapper cannot see this one: sendMail posts over plain fetch to keep the
+    // gmail_v1 surface out of the image, so it never touches the OAuth client at all. This
+    // is the check that would have caught shipping only the wrapper.
+    ok("39.4 mail is withdrawn even though the scope is granted",
+       (await canSendMail(wUser.id)) === false);
+
+    const cOut = await runContactSyncForUser(wUser.id, { force: true });
+    ok("39.5 Sync now skips, with a reason naming the setting",
+       cOut.status === "skipped" && cOut.reason === GOOGLE_WRITES_OFF,
+       JSON.stringify(cOut).slice(0, 140));
+    const eOut = await runEventSyncForUser(wUser.id, { force: true });
+    ok("39.5b and so does the calendar half",
+       eOut.status === "skipped" && eOut.reason === GOOGLE_WRITES_OFF,
+       JSON.stringify(eOut).slice(0, 140));
+    // force: true is what the button passes, so a gate the button could argue past would
+    // be no gate at all.
+    ok("39.5c which force cannot argue past", cOut.status === "skipped");
+
+    // --- the two switches are not the same switch ---------------------------
+    //
+    // SYNC_ENABLED=false must keep letting the button through: pushing only when you press
+    // it is a workflow somebody chose. If this ever starts skipping, the two have been
+    // conflated and an operator has quietly lost that.
+    setWrites("on");
+    const syncWas = process.env.SYNC_ENABLED;
+    process.env.SYNC_ENABLED = "false";
+    const stillGoes = await runContactSyncForUser(wUser.id, { force: true });
+    ok("39.6 SYNC_ENABLED=false stops the loop but not the button",
+       !(stillGoes.status === "skipped" && stillGoes.reason === GOOGLE_WRITES_OFF),
+       JSON.stringify(stillGoes).slice(0, 140));
+    if (syncWas === undefined) delete process.env.SYNC_ENABLED;
+    else process.env.SYNC_ENABLED = syncWas;
+
+    // --- the switch has to reach the container ------------------------------
+    //
+    // A variable the app reads and compose does not pass is off in development and on in
+    // the image, which is the half that matters. Read from the files rather than trusted.
+    const composeText = readFileSync("docker-compose.yml", "utf8");
+    ok("39.7 compose passes the switch through to the app",
+       /HEARTH_GOOGLE_WRITES:\s*"\$\{HEARTH_GOOGLE_WRITES/.test(composeText));
+    const tryText = readFileSync("try-hearth.sh", "utf8");
+    ok("39.7b try-hearth.sh turns it off for the test stack",
+       /set_env HEARTH_GOOGLE_WRITES "off"/.test(tryText));
+    ok("39.7c and takes the mail switch away as well",
+       /set_env HEARTH_ENABLE_MAIL ""/.test(tryText));
+    ok("39.7d while still disabling the loop, which is the cheap half",
+       /set_env SYNC_ENABLED "false"/.test(tryText));
+
+    await prisma.account.deleteMany({ where: { userId: wUser.id } });
+    await prisma.userSettings.deleteMany({ where: { userId: wUser.id } });
+    await prisma.user.delete({ where: { id: wUser.id } });
+    setWrites(writesWas);
+    if (credWas.id === undefined) delete process.env.AUTH_GOOGLE_ID;
+    else process.env.AUTH_GOOGLE_ID = credWas.id;
+    if (credWas.secret === undefined) delete process.env.AUTH_GOOGLE_SECRET;
+    else process.env.AUTH_GOOGLE_SECRET = credWas.secret;
+    ok("39.8 and the suite is left able to write again", googleWritesEnabled() === true);
+  }
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the
