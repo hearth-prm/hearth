@@ -232,6 +232,13 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   letters into `input[type=number]`, so a check meant to prove the SERVER validates proved
   nothing. Pick a value the browser will hand over — over-long text in a TEXT field, which
   carries no maxlength — so the schema is what refuses it.
+- **A container writes its data as its own uid, and the host user cannot delete it.**
+  `.try/postgres` is uid 70 mode 700, so `try-hearth.sh --down`'s `rm -rf` failed partway
+  through — and under `set -e` that ended the run before `.env.try` was removed, leaving
+  production's secrets on disk. Two rules came out of it: **what must be removed goes before
+  what might fail to be**, and Docker made those files so Docker removes them
+  (`remove_pgdata` mounts the parent into a throwaway container using the image the compose
+  file already names). §40.7 asserts the order.
 - **A probe has to be a control the feature keeps.** Three checks used the guest list's
   per-row form as their evidence that "the controls are showing" — first the RSVP dropdown,
   then the role dropdown, then the Update button — and each stopped existing when a Hearth-only

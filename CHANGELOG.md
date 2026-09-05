@@ -55,6 +55,14 @@ of a green test suite alone where a real address book can be asked instead.
     production, since nothing local can collide with it. Password authentication works as well
     as a key: the run shares one connection for both trips to the server, so a password is
     asked for once.
+  - **`--down` now actually tears down.** Postgres writes `.try/postgres` as its own uid at
+    mode 700, so the person who started the stack could not delete it: the `rm` failed
+    partway — after taking the dump with it — and `set -e` ended the run *before* removing
+    `.env.try`, leaving production's `AUTH_SECRET`, database password and Google client
+    secret on disk. The secrets are now removed first, and the data directory is deleted by
+    a throwaway container using the same Postgres image, so no `sudo` is needed. If even
+    that fails it says so, and prints the command to run.
+  - `--down` no longer prints an image tag it has no use for.
   - Checks the image tag exists **before** asking for an ssh password or dumping
     production. CI builds one image per commit and takes a few minutes, so running this
     straight after a push used to spend the password, the dump, a Postgres container and a

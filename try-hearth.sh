@@ -165,6 +165,26 @@ prod_sh() {
 ENV_FILE="$SELF_DIR/.env.try"
 COMPOSE="$SELF_DIR/docker-compose.yml"
 
+# Postgres writes its data directory as its own uid — 70 in the alpine image — with mode
+# 700, so the person who started the stack cannot delete it afterwards and plain rm stops
+# at "Permission denied" partway through, having already taken the dump with it. Docker
+# created those files as root and Docker can remove them: same bind mount, one throwaway
+# container, no sudo.
+#
+# The image comes out of the compose file rather than being written down again here, so it
+# is always one that has just been used and is therefore already pulled.
+remove_pgdata() {
+  _t="$1"
+  [ -e "$_t" ] || return 0
+  rm -rf "$_t" 2>/dev/null
+  [ -e "$_t" ] || return 0
+  _img=$(sed -n 's/^[[:space:]]*image:[[:space:]]*"\{0,1\}\(postgres:[^"[:space:]]*\).*/\1/p' \
+    "$COMPOSE" 2>/dev/null | head -n 1)
+  docker run --rm -v "$(dirname "$_t"):/target" "${_img:-postgres:16-alpine}" \
+    rm -rf "/target/$(basename "$_t")" >/dev/null 2>&1 || true
+  [ ! -e "$_t" ]
+}
+
 # Every compose call goes through here, so -p and --env-file cannot be forgotten.
 dc() { docker compose -p "$PROJECT" -f "$COMPOSE" --env-file "$ENV_FILE" "$@"; }
 psql_t() { dc exec -T db psql -tAq -U "$PROD_USER" -d "$PROD_DB" "$@"; }
@@ -220,7 +240,10 @@ if [ -z "$TAG" ]; then
 fi
 
 say "checkout $SELF_DIR"
-say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
+# Only a real run has an image to speak of. Printing this under --down read as though the
+# teardown cared which build it was tearing down, which it does not.
+[ "$ACTION" != "up" ] ||
+  say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
 
 # Asked HERE, before the ssh password and the dump, because it is the one thing in this
 # script that can fail instantly and the only one that did: a commit pushed minutes ago
@@ -322,13 +345,26 @@ if [ "$ACTION" = "down" ]; then
     ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" || true)
     [ -z "$ids" ] || docker rm -f $ids >/dev/null
   fi
-  if [ -d "$(dirname "$DATA")" ] && [ "$DATA" = "$SELF_DIR/.try/postgres" ]; then
-    rm -rf "$SELF_DIR/.try"
-    say "removed $SELF_DIR/.try"
+  # Secrets first, and before anything that can fail. This file is production's AUTH_SECRET,
+  # database password and Google client secret; it used to be removed AFTER the data
+  # directory, so the first time that rm hit a root-owned file `set -e` ended the run with
+  # the secrets still on disk. What must go does not queue behind what might not.
+  if [ -f "$ENV_FILE" ]; then
+    rm -f "$ENV_FILE"
+    say "removed $ENV_FILE — production's secrets are no longer on this machine"
+  fi
+
+  if [ "$DATA" = "$SELF_DIR/.try/postgres" ]; then
+    if remove_pgdata "$DATA" && rm -rf "$SELF_DIR/.try" 2>/dev/null; then
+      say "removed $SELF_DIR/.try"
+    else
+      # Never left as a silent partial: it holds a full copy of the contact database.
+      warn "could not remove $SELF_DIR/.try — it still holds a copy of your data. Remove it with:
+        sudo rm -rf '$SELF_DIR/.try'"
+    fi
   else
     say "left $DATA alone — it is not the default location, so it may not be mine to delete"
   fi
-  rm -f "$ENV_FILE"
   say "done. Production was never referenced."
   exit 0
 fi

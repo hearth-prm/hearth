@@ -7176,6 +7176,27 @@ try {
     ok("40.6d and falls back to a copy already pulled rather than refusing offline",
        /docker image inspect "\$IMAGE_REF"/.test(readFileSync("try-hearth.sh", "utf8")));
 
+    // Teardown ordering, from a real failure. `.try/postgres` belongs to uid 70 — the
+    // postgres user inside the image — at mode 700, so the person who started the stack
+    // cannot delete it. Under `set -e` that rm ended the run, and because the env file was
+    // removed AFTER it, --down left production's AUTH_SECRET, database password and Google
+    // client secret sitting in .env.try. The rm had already taken the dump with it on the
+    // way past, so this was not "nothing happened" either.
+    const envRmAt = tryLines.findIndex((l) => l.includes('rm -f "$ENV_FILE"'));
+    const dataRmAt = tryLines.findIndex((l) => l.includes('remove_pgdata "$DATA"'));
+    ok("40.7 --down removes the secrets before it touches anything that can fail",
+       envRmAt > 0 && dataRmAt > envRmAt, `env ${envRmAt}, data ${dataRmAt}`);
+    // Docker wrote those files as root and Docker can remove them, so a bare rm here is the
+    // regression: it works for whoever tests it with an empty .try and fails for everyone else.
+    ok("40.7b and deletes the data through the container-assisted remover, not a bare rm",
+       readFileSync("try-hearth.sh", "utf8").includes("remove_pgdata()") && dataRmAt > 0);
+    ok("40.7c saying what to run by hand if even that cannot do it",
+       readFileSync("try-hearth.sh", "utf8").includes("sudo rm -rf"));
+    // Same rule as the app image: the tag comes from the compose file so the container doing
+    // the deleting is one that has just been used, and is therefore already pulled.
+    ok("40.7d using the postgres image named in the compose file",
+       /image:\[\[:space:\]\]\*"\\{0,1\\}\\\(postgres:/.test(readFileSync("try-hearth.sh", "utf8")));
+
     const guardAt = tryLines.findIndex((l) => l.includes("require_compose_v2"));
     // The CALL, not the definition — which sits above the guard and is not the thing
     // being ordered. The first version of this compared against the definition and
