@@ -43,7 +43,8 @@
 #                     Default /mnt/user/appdata/hearth/app
 #                     Also takes ssh://user@host/path, to test on a DIFFERENT machine
 #                     from the one production runs on — the dump and the settings are
-#                     then fetched over ssh and everything else stays local.
+#                     then fetched over ssh and everything else stays local. Keys or a
+#                     password both work; a password is asked for once per run.
 #   --dump <file>     Restore this dump instead of taking a fresh one.
 #   --empty           No data at all. Fast, but exercises no migration.
 #   --keep-data       Reuse the test database already there.
@@ -124,11 +125,37 @@ ssh://*)
   ;;
 esac
 
+# A run makes two trips to production — the settings, then the dump — and with password
+# authentication that is two prompts, the second arriving in the middle of "dumping
+# production" where it reads as a hang rather than a question. So one authenticated
+# connection is opened up front and both trips share it, which is what ssh's own
+# multiplexing is for. Keys still work and simply never prompt.
+SSH_CTL=""
+ssh_ctl_close() {
+  [ -n "$SSH_CTL" ] || return 0
+  ssh -o ControlPath="$SSH_CTL/s" -O exit "$REMOTE" >/dev/null 2>&1 || true
+  rm -rf "$SSH_CTL"
+  SSH_CTL=""
+}
+ssh_open() {
+  # The socket is a logged-in session in the shape of a file: anyone who can open it is
+  # on the server as you, with nothing to authenticate. Hence a private directory of its
+  # own, 0700, and a trap rather than trusting the end of the script to be reached.
+  SSH_CTL=$(mktemp -d "${TMPDIR:-/tmp}/hearth-ssh.XXXXXX") ||
+    die "could not make a directory for the ssh socket"
+  chmod 700 "$SSH_CTL"
+  trap 'ssh_ctl_close' EXIT
+  trap 'ssh_ctl_close; exit 130' INT TERM
+  say "connecting to $REMOTE — if it asks for a password, that is once for the whole run"
+  ssh -o ControlMaster=yes -o ControlPath="$SSH_CTL/s" -N -f "$REMOTE" ||
+    die "could not connect to $REMOTE — check the host, your user, and the password or key"
+}
+
 # Run a command where production is: here, or over ssh. Single call site for both, so
 # the local and remote paths cannot drift apart.
 prod_sh() {
   if [ -n "$REMOTE" ]; then
-    ssh -o BatchMode=yes "$REMOTE" "$1"
+    ssh -o ControlPath="${SSH_CTL:-/nonexistent}/s" "$REMOTE" "$1"
   else
     sh -c "$1"
   fi
@@ -158,12 +185,19 @@ docker compose version >/dev/null 2>&1 || die "this docker has no 'compose' subc
 
 # Production's environment, fetched once. It holds AUTH_SECRET, the database password
 # and the Google client secret, so it is read into a variable and never echoed.
+#
+# Only a real run needs it: --status questions the TEST database and --down works from
+# the local compose file. Reaching for production there would be a password prompt to
+# tear down a stack that is entirely here.
 PROD_ENV=""
-if [ -n "$REMOTE" ]; then
+if [ "$ACTION" != "up" ]; then
+  [ ! -f "$ENV_FILE" ] || PROD_ENV=$(cat "$ENV_FILE")
+elif [ -n "$REMOTE" ]; then
   command -v ssh >/dev/null 2>&1 || die "--from ssh:// needs ssh on PATH"
+  ssh_open
   PROD_ENV=$(prod_sh "cat '$FROM/.env'" 2>/dev/null || true)
   [ -n "$PROD_ENV" ] ||
-    die "could not read $FROM/.env on $REMOTE — is the path right, and does your key work? (ssh $REMOTE true)"
+    die "connected to $REMOTE but could not read $FROM/.env — is that the right path? (ssh $REMOTE 'ls $FROM/.env')"
 elif [ -f "$FROM/.env" ]; then
   PROD_ENV=$(cat "$FROM/.env")
 fi
@@ -176,10 +210,10 @@ if [ -n "$PROD_ENV" ]; then
   PD=$(from_env POSTGRES_DB)
   [ -z "$PU" ] || PROD_USER="$PU"
   [ -z "$PD" ] || PROD_DB="$PD"
-  # Collisions are only possible when the two share a machine. On a remote production
-  # the local port and data directory cannot clash with anything of its, so insisting
-  # would refuse a perfectly safe run.
-  if [ -z "$REMOTE" ]; then
+  # Collisions are only possible when the two share a machine, and only matter when a
+  # stack is about to be created. On a remote production nothing local can clash with
+  # it, and under --status these values describe the test stack itself.
+  if [ -z "$REMOTE" ] && [ "$ACTION" = "up" ]; then
     [ "$APP_PORT" != "${PROD_PORT:-3000}" ] ||
       die "--port $APP_PORT is the production port. Pick another."
     if [ -n "${PROD_PGDATA:-}" ]; then
@@ -334,7 +368,7 @@ if [ "$MODE" = "copy" ] && [ -z "$DUMP" ]; then
   if [ -n "$REMOTE" ]; then
     prod_sh "cd '$FROM' && docker compose exec -T db pg_dump -U '$PROD_USER' -d '$PROD_DB' --clean --if-exists | gzip" \
       >"$DUMP" 2>/dev/null ||
-      die "the dump failed on $REMOTE — is production running there? (ssh $REMOTE 'cd $FROM && docker compose ps')"
+      die "the dump failed on $REMOTE — is production running there? (ssh $REMOTE \"cd $FROM && docker compose ps\")"
   else
     (cd "$FROM" && docker compose exec -T db \
       pg_dump -U "$PROD_USER" -d "$PROD_DB" --clean --if-exists) 2>/dev/null | gzip >"$DUMP" ||

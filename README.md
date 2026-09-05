@@ -356,8 +356,13 @@ runs locally:
 sh try-hearth.sh --from ssh://root@your-server/mnt/user/appdata/hearth/app
 ```
 
-The dump is compressed on the far side, so what crosses the network is gzip. Needs key-based
-ssh — the script runs with `BatchMode`, so it will not sit waiting for a password.
+The dump is compressed on the far side, so what crosses the network is gzip.
+
+A password works, and so does a key. A run needs to reach the server twice — once for the
+settings, once for the dump — so it opens a single connection up front and both trips share it;
+you are asked for a password once, at the point where the script says it is connecting. If you
+would rather not be asked at all, `ssh-copy-id root@your-server` once and every run after that
+is silent.
 
 Two things get easier this way. There is no port or data-directory collision to guard against,
 so `--port` may be anything including production's. And you can reach the app at

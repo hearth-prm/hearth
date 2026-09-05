@@ -41,7 +41,9 @@ of a green test suite alone where a real address book can be asked instead.
   - **`--from ssh://user@host/path`** tests a build on a different machine from the one
     production runs on: the dump and the settings come over ssh — compressed on the far side —
     and everything else stays local. The port and data-directory guards stand down for a remote
-    production, since nothing local can collide with it.
+    production, since nothing local can collide with it. Password authentication works as well
+    as a key: the run shares one connection for both trips to the server, so a password is
+    asked for once.
   - `--status`, `--down`, `--empty`, `--dump`, `--data`, `--port`, `--project`, `--from`.
   - It exists because `docker-compose.yml` pins `name: hearth`: a second checkout on one host is
     the *same Compose project*, and one forgotten `-p` recreates production with the test
