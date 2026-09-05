@@ -44,6 +44,11 @@ of a green test suite alone where a real address book can be asked instead.
     production, since nothing local can collide with it. Password authentication works as well
     as a key: the run shares one connection for both trips to the server, so a password is
     asked for once.
+  - Checks the image tag exists **before** asking for an ssh password or dumping
+    production. CI builds one image per commit and takes a few minutes, so running this
+    straight after a push used to spend the password, the dump, a Postgres container and a
+    restore before compose reported the tag missing. The refusal names `--tag edge` and the
+    registry listing. An unreachable registry falls back to a copy already pulled.
   - Refuses to start on **Docker Compose v1** with a message naming the cause, instead of
     letting v1 fail on the top-level `name:` with "'name' does not match any of the regexes"
     and advice to add a `version:` key that would not help. `scripts/docker-up.sh` asks the

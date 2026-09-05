@@ -7111,6 +7111,27 @@ try {
     // The point of refusing early is not spending a password prompt and a 1.5MB dump on
     // a run that cannot start, so the guard has to sit above the part that reaches out.
     const tryLines = readFileSync("try-hearth.sh", "utf8").split("\n");
+
+    // Same ordering rule, learned the expensive way a second time: the image tag is
+    // derived from the local checkout and needs nothing from production, but the check
+    // that it EXISTS sat below the dump — so a commit pushed before CI had finished cost
+    // a password, 1.5MB, a Postgres container and a restore of 329 contacts before
+    // compose said "not found". Everything free happens before anything expensive.
+    const imageAt = tryLines.findIndex((l) => l.includes("IMAGE_REF="));
+    const dumpAt = tryLines.findIndex((l) => l.includes("dumping production"));
+    const sshCallAt = tryLines.findIndex((l) => /^\s+ssh_open\s*$/.test(l));
+    ok("40.6 try-hearth.sh checks the image exists before opening an ssh connection",
+       imageAt > 0 && sshCallAt > imageAt, `image ${imageAt}, ssh ${sshCallAt}`);
+    ok("40.6b and well before it dumps production",
+       dumpAt > imageAt, `image ${imageAt}, dump ${dumpAt}`);
+    // Reading the default out of the compose file is what stops HEARTH_IMAGE pointing the
+    // run at one registry while the check asks a different one about the tag.
+    ok("40.6c taking the default repository from the compose file, not a second copy of it",
+       readFileSync("try-hearth.sh", "utf8").includes("HEARTH_IMAGE:-\\([^}]*\\)"));
+    // A registry that cannot be reached is not a tag that does not exist.
+    ok("40.6d and falls back to a copy already pulled rather than refusing offline",
+       /docker image inspect "\$IMAGE_REF"/.test(readFileSync("try-hearth.sh", "utf8")));
+
     const guardAt = tryLines.findIndex((l) => l.includes("require_compose_v2"));
     // The CALL, not the definition — which sits above the guard and is not the thing
     // being ordered. The first version of this compared against the definition and

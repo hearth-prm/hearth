@@ -342,6 +342,9 @@ The tag defaults to `sha-<HEAD>`, so cloning at a ref and running the script tes
 commit — the compose file and the running image cannot describe different builds. Clone at a
 tag or a branch to test something else, or pass `--tag edge`.
 
+It defaults to the image built from the commit you have checked out, so give CI a few minutes
+after pushing — otherwise it will tell you that tag does not exist yet and suggest `--tag edge`.
+
 What it does: dumps production (read-only, and production stays up), writes an `.env.try` of
 its own, restores the dump into a Postgres of its own under `./.try/postgres`, then starts the
 app so its migrations run against real rows. `--empty` skips the data, `--dump <file>` uses one

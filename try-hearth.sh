@@ -187,6 +187,73 @@ require_compose_v2
 { [ -n "$REMOTE" ] || [ "$SELF_DIR" != "$FROM" ]; } ||
   die "this is the production checkout ($FROM). Clone somewhere else and run it from there."
 
+# --- which image ------------------------------------------------------------
+
+[ -f "$COMPOSE" ] || die "no docker-compose.yml beside this script — is this a Hearth checkout?"
+grep -q 'HEARTH_TAG' "$COMPOSE" ||
+  die "this checkout's docker-compose.yml cannot pull a published image; it is too old"
+
+if [ -z "$TAG" ]; then
+  # From this checkout's HEAD, read without needing git: a clone has either a loose ref
+  # or an entry in packed-refs. Same approach as scripts/docker-up.sh.
+  head_sha=""
+  if command -v git >/dev/null 2>&1 &&
+    head_sha=$(cd "$SELF_DIR" && git rev-parse --short=8 HEAD 2>/dev/null); then
+    :
+  elif [ -f "$SELF_DIR/.git/HEAD" ]; then
+    h=$(cat "$SELF_DIR/.git/HEAD")
+    case "$h" in
+    "ref: "*)
+      r=${h#ref: }
+      if [ -f "$SELF_DIR/.git/$r" ]; then
+        head_sha=$(cut -c1-8 "$SELF_DIR/.git/$r")
+      elif [ -f "$SELF_DIR/.git/packed-refs" ]; then
+        head_sha=$(grep " $r\$" "$SELF_DIR/.git/packed-refs" | cut -c1-8)
+      fi
+      ;;
+    *) head_sha=$(printf '%s' "$h" | cut -c1-8) ;;
+    esac
+  fi
+  [ -n "$head_sha" ] ||
+    die "could not read this checkout's commit; pass --tag edge or --tag <version>"
+  TAG="sha-$head_sha"
+fi
+
+say "checkout $SELF_DIR"
+say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
+
+# Asked HERE, before the ssh password and the dump, because it is the one thing in this
+# script that can fail instantly and the only one that did: a commit pushed minutes ago
+# has no image yet — CI takes about three minutes per commit — and finding that out cost
+# a password prompt, 1.5MB over the network, a Postgres container and a restore of 329
+# contacts before compose said "not found".
+#
+# Default repository read from the compose file rather than repeated here, so overriding
+# HEARTH_IMAGE cannot make the check and the run disagree about what they are talking
+# about.
+if [ "$ACTION" = "up" ]; then
+  default_image=$(sed -n 's/.*\${HEARTH_IMAGE:-\([^}]*\)}.*/\1/p' "$COMPOSE" | head -n 1)
+  IMAGE_REF="${HEARTH_IMAGE:-${default_image:-registry.gitlab.com/hearth-prm/hearth}}:$TAG"
+  if ! docker manifest inspect "$IMAGE_REF" >/dev/null 2>&1; then
+    # A registry that cannot be reached is not the same as a tag that does not exist, and
+    # a copy already pulled makes both moot.
+    if docker image inspect "$IMAGE_REF" >/dev/null 2>&1; then
+      say "registry unreachable — using the copy of $TAG already on this machine"
+    else
+      die "no image $IMAGE_REF, and no local copy.
+
+  CI builds one image per commit and takes a few minutes, so a commit pushed just now
+  has not landed yet. Either wait and run this again, or pick a tag that exists:
+
+    --tag edge              the newest build of main
+    --tag sha-<commit>      a specific earlier commit
+    --tag 1.2.0             a release
+
+  Browse them at https://gitlab.com/hearth-prm/hearth/container_registry"
+    fi
+  fi
+fi
+
 # Production's environment, fetched once. It holds AUTH_SECRET, the database password
 # and the Google client secret, so it is read into a variable and never echoed.
 #
@@ -265,41 +332,6 @@ if [ "$ACTION" = "down" ]; then
   say "done. Production was never referenced."
   exit 0
 fi
-
-# --- which image ------------------------------------------------------------
-
-[ -f "$COMPOSE" ] || die "no docker-compose.yml beside this script — is this a Hearth checkout?"
-grep -q 'HEARTH_TAG' "$COMPOSE" ||
-  die "this checkout's docker-compose.yml cannot pull a published image; it is too old"
-
-if [ -z "$TAG" ]; then
-  # From this checkout's HEAD, read without needing git: a clone has either a loose ref
-  # or an entry in packed-refs. Same approach as scripts/docker-up.sh.
-  head_sha=""
-  if command -v git >/dev/null 2>&1 &&
-    head_sha=$(cd "$SELF_DIR" && git rev-parse --short=8 HEAD 2>/dev/null); then
-    :
-  elif [ -f "$SELF_DIR/.git/HEAD" ]; then
-    h=$(cat "$SELF_DIR/.git/HEAD")
-    case "$h" in
-    "ref: "*)
-      r=${h#ref: }
-      if [ -f "$SELF_DIR/.git/$r" ]; then
-        head_sha=$(cut -c1-8 "$SELF_DIR/.git/$r")
-      elif [ -f "$SELF_DIR/.git/packed-refs" ]; then
-        head_sha=$(grep " $r\$" "$SELF_DIR/.git/packed-refs" | cut -c1-8)
-      fi
-      ;;
-    *) head_sha=$(printf '%s' "$h" | cut -c1-8) ;;
-    esac
-  fi
-  [ -n "$head_sha" ] ||
-    die "could not read this checkout's commit; pass --tag edge or --tag <version>"
-  TAG="sha-$head_sha"
-fi
-
-say "checkout $SELF_DIR"
-say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
 
 # --- the environment, in a file of its own ---------------------------------
 #
