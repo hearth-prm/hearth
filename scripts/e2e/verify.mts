@@ -1582,6 +1582,12 @@ try {
   // distinction that cracked the mapping bug in §23. Do not "fix" it by retrying until it is
   // clear which of the three is stale.
   //
+  // FOUND, 2026-09-05. saveSettings called revalidatePath("/settings"), but `data-theme` is
+  // stamped on <html> in the ROOT LAYOUT from these settings, so it is on every route and the
+  // layout's cached output still held the old value. `revalidatePath("/", "layout")` is the
+  // fix. The observation below is what pointed at it, and is kept because it is the reasoning
+  // that got there rather than the answer.
+  //
   // 2026-09-04, one observed failure, recorded because it rules a theory out:
   //   {wantBg: light, gotBg: DARK, htmlAttr: "dark", storedTheme: "light"}
   // The row was already light — 15.4c waits for that before reloading — and the paint AGREES
@@ -6973,170 +6979,231 @@ try {
     await prisma.userSettings.updateMany({ where: { userId: A.id }, data: { timeZone: "UTC" } });
   }
 
-  section("§39 An install that may not write to Google")
+  section("§39 A development install runs everything and sends nothing")
 
-  // The case this exists for: try-hearth.sh stands a test stack on a dump of production,
-  // and that dump carries a working Google grant for the real account. SYNC_ENABLED=false
-  // stops the background loop and nothing else — pressing "Sync now" still pushed, and a
-  // thank-you still mailed a real person — so the loop was never the whole of the danger.
+  // The case this exists for: try-hearth.sh stands a test stack on a dump of production, and
+  // that dump carries a working Google grant for the real account.
   //
-  // Driven in-process rather than through the browser: the switch is read from the
-  // environment on each call, and the server under test was started once with its own.
+  // The first design switched the FEATURES off — the thank-you link vanished, "Sync now"
+  // skipped — and the bug that produced was somebody clicking a link that had been quietly
+  // disabled and reporting it broken. It also made the half of the app that most needs a copy
+  // of real data the half you could not exercise. So the gate moved to the door: everything
+  // runs, and the outbound call is the only thing that does not happen.
   {
-    const scopesMod = await import("@/lib/google/scopes");
-    const { googleWritesEnabled, GOOGLE_WRITES_OFF } = scopesMod;
-    const writesVar = "HEARTH_GOOGLE_WRITES";
-    const writesWas = process.env[writesVar];
-    const setWrites = (v: string | undefined) => {
-      if (v === undefined) delete process.env[writesVar];
-      else process.env[writesVar] = v;
+    const { runMode, isDevelopment, DEV_NOT_SENT } = await import("@/lib/run-mode");
+    const envVar = "HEARTH_ENV";
+    const was = process.env[envVar];
+    const set = (v: string | undefined) => {
+      if (v === undefined) delete process.env[envVar];
+      else process.env[envVar] = v;
     };
 
-    // Fails OPEN. A self-hosted install that silently stopped syncing because somebody
-    // typed the value wrong would be far worse than one that kept syncing, so only the
-    // spellings a person means by "off" turn it off.
-    setWrites(undefined);
-    ok("39.1 writes are on when nothing says otherwise", googleWritesEnabled() === true);
-    for (const yes of ["on", "true", "yes", "1", "", "  ", "offish", "no-thanks"]) {
-      setWrites(yes);
-      ok(`39.1b "${yes}" does not turn writes off`, googleWritesEnabled() === true);
+    // --- which way it fails ------------------------------------------------
+    set(undefined);
+    ok("39.1 unset means production, so no existing install changes behaviour",
+       runMode() === "production");
+    for (const p of ["production", "PRODUCTION", " prod ", "live"]) {
+      set(p);
+      ok(`39.1b "${p}" is production`, runMode() === "production");
     }
-    for (const no of ["off", "OFF", " off ", "false", "No", "0"]) {
-      setWrites(no);
-      ok(`39.1c "${no}" does`, googleWritesEnabled() === false);
+    for (const d of ["development", "dev", "DEVEL", " test ", "staging"]) {
+      set(d);
+      ok(`39.1c "${d}" is development`, runMode() === "development");
+    }
+    // The opposite of how the allowlist fails, on purpose. A production install that stops
+    // sending is annoying and visible; a development one that starts sending emails real
+    // people out of a copy of their own address book.
+    for (const junk of ["produciton", "yes", "1", "off"]) {
+      set(junk);
+      ok(`39.1d "${junk}" is not understood, so it is treated as development`,
+         runMode() === "development", runMode());
     }
 
-    // A user of its own, so the fixtures the rest of the suite relies on keep their grants.
-    const wUser = await prisma.user.create({
-      data: { name: "Writes Off", email: "writes-off@hearth.test" },
-    });
-    await prisma.userSettings.create({
-      data: { userId: wUser.id, syncContactsEnabled: true, syncCalendarEnabled: true },
-    });
-    await prisma.account.create({
-      data: {
-        userId: wUser.id,
-        type: "oauth",
-        provider: "google",
-        providerAccountId: "writes-off-account",
-        access_token: "fake-access-token",
-        refresh_token: "fake-refresh-token",
-        // Well clear of the refresh skew: a refresh would go to Google with a made-up
-        // token and fail for a reason that has nothing to do with what is being tested.
-        expires_at: Math.floor(Date.now() / 1000) + 86_400,
-        scope: [...scopesMod.ALL_GOOGLE_SCOPES].join(" "),
-      },
-    });
+    // --- the simulating clients -------------------------------------------
+    //
+    // Driven directly rather than through the browser: the server under test was started
+    // once, with its own environment, and this is read per call.
+    set("development");
+    const { devPeopleClient, devCalendarClient } = await import("@/lib/google/dev-clients");
+    const reached: string[] = [];
+    const boom = (name: string) => async () => {
+      reached.push(name);
+      throw new Error(`${name} reached the real client`);
+    };
+    // Every method throws, so anything the decorator forgets to answer announces itself
+    // instead of quietly succeeding against a stub that agreed with it.
+    const hostilePeople = {
+      createContact: boom("createContact"),
+      updateContact: boom("updateContact"),
+      deleteContact: boom("deleteContact"),
+      getEtag: boom("getEtag"),
+      listConnections: boom("listConnections"),
+      listContactGroups: boom("listContactGroups"),
+      createContactGroup: boom("createContactGroup"),
+      updateContactPhoto: boom("updateContactPhoto"),
+      deleteContactPhoto: boom("deleteContactPhoto"),
+      deleteContactGroup: boom("deleteContactGroup"),
+      updateContactGroup: boom("updateContactGroup"),
+      modifyGroupMembers: boom("modifyGroupMembers"),
+    } as unknown as import("@/lib/google/people-client").PeopleClient;
+    const dp = devPeopleClient(hostilePeople);
 
-    // The harness seeds sessions straight into the database and never drives an OAuth
-    // round trip, so this process has no client credentials — and getGoogleClient refuses
-    // to build a client without them, before it reaches the switch being tested. Supplied
-    // here and taken away again; they are never sent anywhere, because every request this
-    // section makes is either refused locally or aimed at a hostname that does not resolve.
-    const credWas = {
+    const created = await dp.createContact({ names: [{ givenName: "Dev" }] });
+    ok("39.2 a create is answered without reaching Google",
+       created.resourceName.includes("dev-") && reached.length === 0, created);
+    const updated = await dp.updateContact({
+      resourceName: "people/c123", etag: "e", person: {}, updateFields: ["names"],
+    });
+    // Echoed, not invented: a record whose id changed on every push would drive the
+    // adoption path forever and never look like production.
+    ok("39.2b an update keeps the resource name it was given",
+       updated.resourceName === "people/c123", updated);
+    await dp.deleteContact("people/c123");
+    await dp.deleteContactPhoto("people/c123");
+    await dp.deleteContactGroup("contactGroups/g1");
+    await dp.modifyGroupMembers({ resourceName: "contactGroups/g1", add: ["a"], remove: [] });
+    await dp.updateContactPhoto({ resourceName: "people/c123", data: new Uint8Array([1]) });
+    await dp.updateContactGroup({ resourceName: "contactGroups/g1", etag: null, name: "N" });
+    await dp.createContactGroup("New");
+    ok("39.2c and no write of any kind touched the real client", reached.length === 0, reached);
+
+    // Reads must still go through, or the import and the calendar picker become untestable
+    // — which was the whole complaint about the previous design.
+    await dp.listConnections(["names"]).catch(() => {});
+    ok("39.2d while a read IS delegated to the real client",
+       reached.includes("listConnections"), reached);
+
+    const calReached: string[] = [];
+    const hostileCal = {
+      insertEvent: async () => { calReached.push("insertEvent"); throw new Error("x"); },
+      patchEvent: async () => { calReached.push("patchEvent"); throw new Error("x"); },
+      deleteEvent: async () => { calReached.push("deleteEvent"); throw new Error("x"); },
+      getEvent: async () => { calReached.push("getEvent"); return null; },
+      listChangedEvents: async () => { calReached.push("listChangedEvents"); return []; },
+      listCalendars: async () => { calReached.push("listCalendars"); return []; },
+    } as unknown as import("@/lib/google/calendar-client").CalendarClient;
+    const dc = devCalendarClient(hostileCal);
+    await dc.insertEvent({ calendarId: "primary", event: {}, sendUpdates: "all" });
+    await dc.patchEvent({ calendarId: "primary", eventId: "e1", event: {}, sendUpdates: "all" });
+    await dc.deleteEvent({ calendarId: "primary", eventId: "e1", sendUpdates: "all" });
+    ok("39.3 calendar writes are answered too — no invitation email leaves",
+       calReached.length === 0, calReached);
+    await dc.listCalendars();
+    ok("39.3b and its reads are delegated", calReached.includes("listCalendars"));
+
+    // --- the features are NOT switched off ---------------------------------
+    //
+    // The point of the change. Under the old design these were false and skipped.
+    const { canSendMail } = await import("@/lib/google/mail");
+    const { runContactSyncForUser } = await import("@/lib/sync/runner");
+    ok("39.4 a development install still OFFERS to send a thank-you",
+       (await canSendMail(A.id)) === true, await canSendMail(A.id));
+    const out = await runContactSyncForUser(A.id, { force: true });
+    ok("39.4b and Sync now runs the pass rather than skipping it",
+       out.status !== "skipped" ||
+         !(out.status === "skipped" && out.reason.includes("development")),
+       JSON.stringify(out).slice(0, 120));
+
+    // --- the factory, not just the decorator -------------------------------
+    //
+    // Everything above tested devPeopleClient by calling it directly, which says nothing
+    // about whether anything USES it. This asks the factory: with no usable credentials, a
+    // real client's createContact would reach for the network and throw, so a synthetic
+    // resource name coming back is proof the wrapping happened.
+    set("development");
+    const { google: googleapis } = await import("googleapis");
+    const { createPeopleClient } = await import("@/lib/google/people-client");
+    const bareAuth = new googleapis.auth.OAuth2({ clientId: "x", clientSecret: "y" });
+    const viaFactory = await createPeopleClient(bareAuth)
+      .createContact({ names: [{ givenName: "Wired" }] })
+      .catch((e: unknown) => ({ resourceName: `THREW: ${String(e).slice(0, 60)}`, etag: null }));
+    ok("39.2e the factory hands out the simulating client, so no call site can get a real one",
+       viaFactory.resourceName.startsWith("people/dev-"), viaFactory);
+
+    // --- and the mail gate, by watching the socket -------------------------
+    //
+    // The claim is "nothing leaves". The only way to check that is to count the outbound
+    // requests, so global fetch is replaced and every call recorded. A far-future expiry and
+    // client credentials are set first, because otherwise getGoogleClient throws on a token
+    // refresh and "no request was made" would be true for a reason that has nothing to do
+    // with the gate.
+    const credWas39 = {
       id: process.env.AUTH_GOOGLE_ID,
       secret: process.env.AUTH_GOOGLE_SECRET,
     };
-    process.env.AUTH_GOOGLE_ID ??= "e2e-not-a-real-client.apps.googleusercontent.com";
-    process.env.AUTH_GOOGLE_SECRET ??= "e2e-not-a-real-secret";
+    process.env.AUTH_GOOGLE_ID ??= "e2e-not-real.apps.googleusercontent.com";
+    process.env.AUTH_GOOGLE_SECRET ??= "e2e-not-real";
+    const acctWas = await prisma.account.findFirstOrThrow({
+      where: { userId: A.id, provider: "google" },
+      select: { id: true, access_token: true, expires_at: true },
+    });
+    await prisma.account.update({
+      where: { id: acctWas.id },
+      data: { access_token: "fake-token", expires_at: Math.floor(Date.now() / 1000) + 86_400 },
+    });
 
-    const { getGoogleClient } = await import("@/lib/google/auth");
-    const { canSendMail } = await import("@/lib/google/mail");
-    const { runContactSyncForUser, runEventSyncForUser } = await import("@/lib/sync/runner");
-
-    const refused = async (method: string): Promise<string> => {
-      const client = await getGoogleClient(wUser.id);
-      try {
-        await client.request({ url: "https://people.googleapis.test/v1/x", method });
-        return "";
-      } catch (err) {
-        return err instanceof Error ? err.message : String(err);
-      }
+    const { sendMail } = await import("@/lib/google/mail");
+    const realFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (input: unknown, init?: unknown) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ id: "fake" }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+    const letter = {
+      to: ["nobody@e2e.test"],
+      subject: "A development thank-you",
+      text: "This must not leave the process.",
+      html: "<p>This must not leave the process.</p>",
     };
+    try {
+      await sendMail(A.id, letter);
+      ok("39.4c a development send builds the message and makes no request",
+         calls.length === 0, calls);
 
-    // --- with writes ON, the gate is not in the way -------------------------
-    //
-    // Asserted first and deliberately: a wrapper that refused everything would pass every
-    // check below while breaking every real install.
-    setWrites("on");
-    const postOn = await refused("POST");
-    ok("39.2 with writes on, a POST is not refused by the switch",
-       postOn !== "" && !postOn.includes("HEARTH_GOOGLE_WRITES"),
-       postOn.slice(0, 120));
-    ok("39.2b and mail is offered to a user who granted the scope",
-       (await canSendMail(wUser.id)) === true);
-
-    // --- with writes OFF ----------------------------------------------------
-    setWrites("off");
-    const postOff = await refused("POST");
-    ok("39.3 a POST is refused before it leaves the process",
-       postOff.includes("HEARTH_GOOGLE_WRITES"), postOff.slice(0, 120));
-    // Derived from the method, so an endpoint nobody has written yet is covered too.
-    for (const m of ["PATCH", "DELETE", "PUT"]) {
-      const msg = await refused(m);
-      ok(`39.3b so is ${m}`, msg.includes("HEARTH_GOOGLE_WRITES"), msg.slice(0, 90));
+      set("production");
+      await sendMail(A.id, letter);
+      ok("39.4d while in production the very same call does reach Gmail",
+         calls.length === 1 && calls[0]!.includes("gmail.googleapis.com"), calls);
+    } finally {
+      globalThis.fetch = realFetch;
+      await prisma.account.update({
+        where: { id: acctWas.id },
+        data: { access_token: acctWas.access_token, expires_at: acctWas.expires_at },
+      });
+      if (credWas39.id === undefined) delete process.env.AUTH_GOOGLE_ID;
+      else process.env.AUTH_GOOGLE_ID = credWas39.id;
+      if (credWas39.secret === undefined) delete process.env.AUTH_GOOGLE_SECRET;
+      else process.env.AUTH_GOOGLE_SECRET = credWas39.secret;
     }
-    const getOff = await refused("GET");
-    ok("39.3c but a GET still goes out — the import and the calendar picker stay testable",
-       getOff !== "" && !getOff.includes("HEARTH_GOOGLE_WRITES"), getOff.slice(0, 120));
 
-    // The client wrapper cannot see this one: sendMail posts over plain fetch to keep the
-    // gmail_v1 surface out of the image, so it never touches the OAuth client at all. This
-    // is the check that would have caught shipping only the wrapper.
-    ok("39.4 mail is withdrawn even though the scope is granted",
-       (await canSendMail(wUser.id)) === false);
+    // --- and production is untouched ---------------------------------------
+    set("production");
+    ok("39.5 in production nothing is simulated",
+       isDevelopment() === false && runMode() === "production");
+    ok("39.5b and the phrase used to report a simulated send exists to be searched for",
+       DEV_NOT_SENT.length > 0 && DEV_NOT_SENT.includes("Google"));
 
-    const cOut = await runContactSyncForUser(wUser.id, { force: true });
-    ok("39.5 Sync now skips, with a reason naming the setting",
-       cOut.status === "skipped" && cOut.reason === GOOGLE_WRITES_OFF,
-       JSON.stringify(cOut).slice(0, 140));
-    const eOut = await runEventSyncForUser(wUser.id, { force: true });
-    ok("39.5b and so does the calendar half",
-       eOut.status === "skipped" && eOut.reason === GOOGLE_WRITES_OFF,
-       JSON.stringify(eOut).slice(0, 140));
-    // force: true is what the button passes, so a gate the button could argue past would
-    // be no gate at all.
-    ok("39.5c which force cannot argue past", cOut.status === "skipped");
-
-    // --- the two switches are not the same switch ---------------------------
-    //
-    // SYNC_ENABLED=false must keep letting the button through: pushing only when you press
-    // it is a workflow somebody chose. If this ever starts skipping, the two have been
-    // conflated and an operator has quietly lost that.
-    setWrites("on");
-    const syncWas = process.env.SYNC_ENABLED;
-    process.env.SYNC_ENABLED = "false";
-    const stillGoes = await runContactSyncForUser(wUser.id, { force: true });
-    ok("39.6 SYNC_ENABLED=false stops the loop but not the button",
-       !(stillGoes.status === "skipped" && stillGoes.reason === GOOGLE_WRITES_OFF),
-       JSON.stringify(stillGoes).slice(0, 140));
-    if (syncWas === undefined) delete process.env.SYNC_ENABLED;
-    else process.env.SYNC_ENABLED = syncWas;
-
-    // --- the switch has to reach the container ------------------------------
-    //
-    // A variable the app reads and compose does not pass is off in development and on in
-    // the image, which is the half that matters. Read from the files rather than trusted.
+    // --- the wiring reaches the container and the test stack ---------------
     const composeText = readFileSync("docker-compose.yml", "utf8");
-    ok("39.7 compose passes the switch through to the app",
-       /HEARTH_GOOGLE_WRITES:\s*"\$\{HEARTH_GOOGLE_WRITES/.test(composeText));
-    const tryText = readFileSync("try-hearth.sh", "utf8");
-    ok("39.7b try-hearth.sh turns it off for the test stack",
-       /set_env HEARTH_GOOGLE_WRITES "off"/.test(tryText));
-    ok("39.7c and takes the mail switch away as well",
-       /set_env HEARTH_ENABLE_MAIL ""/.test(tryText));
-    ok("39.7d while still disabling the loop, which is the cheap half",
-       /set_env SYNC_ENABLED "false"/.test(tryText));
+    ok("39.6 compose passes HEARTH_ENV through to the app",
+       /HEARTH_ENV:\s*"\$\{HEARTH_ENV/.test(composeText));
+    const tryText39 = readFileSync("try-hearth.sh", "utf8");
+    ok("39.6b try-hearth.sh marks the test stack as development",
+       /set_env HEARTH_ENV "development"/.test(tryText39));
+    // It must NOT still be disabling mail: that would put the feature back out of reach and
+    // undo the reason this changed.
+    ok("39.6c and no longer switches the mail feature off instead",
+       !/set_env HEARTH_ENABLE_MAIL ""/.test(tryText39));
+    // The factories, not the call sites — a new caller must not be able to get a real client.
+    ok("39.6d the client factories wrap in development, so no call site can forget",
+       /isDevelopment\(\)/.test(readFileSync("src/lib/google/people-client.ts", "utf8")) &&
+         /isDevelopment\(\)/.test(readFileSync("src/lib/google/calendar-client.ts", "utf8")));
+    ok("39.6e and sendMail gates itself, since it never touches the OAuth client",
+       /isDevelopment\(\)/.test(readFileSync("src/lib/google/mail.ts", "utf8")));
 
-    await prisma.account.deleteMany({ where: { userId: wUser.id } });
-    await prisma.userSettings.deleteMany({ where: { userId: wUser.id } });
-    await prisma.user.delete({ where: { id: wUser.id } });
-    setWrites(writesWas);
-    if (credWas.id === undefined) delete process.env.AUTH_GOOGLE_ID;
-    else process.env.AUTH_GOOGLE_ID = credWas.id;
-    if (credWas.secret === undefined) delete process.env.AUTH_GOOGLE_SECRET;
-    else process.env.AUTH_GOOGLE_SECRET = credWas.secret;
-    ok("39.8 and the suite is left able to write again", googleWritesEnabled() === true);
+    set(was);
   }
 
   section("§40 Refusing a Compose that cannot read the file")

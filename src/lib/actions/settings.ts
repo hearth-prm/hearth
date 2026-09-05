@@ -61,6 +61,12 @@ export async function updateSettings(
     return toActionError(err);
   }
 
-  revalidatePath("/settings");
+  // The LAYOUT, not just this page. `data-theme` is stamped on <html> in the root layout
+  // from these settings, so every route carries it — and revalidating only /settings left
+  // the layout's cached output holding the old value. It showed up as §15.4d failing about
+  // one run in three with the attribute saying "dark" while the row said "light": not a
+  // stylesheet lagging behind, but the server rendering from a cache the save had not
+  // reached. The same is true of the default time zone, which every page formats against.
+  revalidatePath("/", "layout");
   return actionOk("Settings saved.");
 }
