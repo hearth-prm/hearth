@@ -17,6 +17,11 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+# Before anything is built: Compose v1 cannot read this project's compose file, and says
+# so in terms that point at the wrong thing.
+. "$(dirname "$0")/require-compose-v2.sh"
+require_compose_v2
+
 # --- version: from package.json, without needing node ----------------------
 read_version() {
   if command -v node >/dev/null 2>&1; then

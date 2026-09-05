@@ -353,6 +353,12 @@ refused — which matters because it is holding a copy of your real database, co
 working Google grant and every thank-you you have not sent yet. Reads still work, so the
 Google import and the calendar picker stay testable.
 
+Both need **Docker Compose v2**. The compose file uses the Compose Specification, and
+Compose v1 — the Python `docker-compose` still in some distro repositories, end-of-life since
+2023 — cannot read its top-level `name:` key. `sudo apt install docker-compose-plugin` on
+Debian, Ubuntu or Mint. Note that podman's `docker` shim passes compose calls to whatever
+`docker-compose` is on your PATH, so having podman is not the same as having Compose v2.
+
 ### Testing on a different machine from the server
 
 Point `--from` at an ssh URL and the dump and the settings come over ssh, while everything else

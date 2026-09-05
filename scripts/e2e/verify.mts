@@ -7017,6 +7017,109 @@ try {
     ok("39.8 and the suite is left able to write again", googleWritesEnabled() === true);
   }
 
+  section("§40 Refusing a Compose that cannot read the file")
+
+  // A real report: podman's docker shim handed `docker compose` to the distro's Python
+  // v1.29.2, which failed on the top-level `name:` with "'name' does not match any of the
+  // regexes" and advice to add a version: key that would not have helped. The guard that
+  // was supposed to catch this asked whether `docker compose` answered at all — which it
+  // did. Same shape as every other check here that passed without the feature working.
+  {
+    const { execFileSync } = await import("node:child_process");
+    const { chmodSync, mkdirSync } = await import("node:fs");
+    const binDir = path.join(scratch, "compose-bin");
+    mkdirSync(binDir, { recursive: true });
+    const fakeDocker = path.join(binDir, "docker");
+
+    // Stands in for the real thing at exactly the two questions the guard asks.
+    const writeFakeDocker = (version: string, podman: boolean) => {
+      writeFileSync(
+        fakeDocker,
+        `#!/bin/sh\ncase "$*" in\n` +
+          `"--version") echo "${podman ? "podman version 4.9.3" : "Docker version 27.0.0"}" ;;\n` +
+          `"compose version --short") ${version === "" ? "exit 1" : `echo "${version}"`} ;;\n` +
+          `esac\n`,
+      );
+      chmodSync(fakeDocker, 0o755);
+    };
+
+    /** Exit status and stderr of the guard, run against the fake docker alone. */
+    const guard = (): { code: number; err: string } => {
+      try {
+        execFileSync(
+          "sh",
+          ["-c", ". ./scripts/require-compose-v2.sh; require_compose_v2; echo ALLOWED"],
+          {
+            // In FRONT of the real PATH, not instead of it: the guard needs sh, tr and
+            // grep too. Replacing PATH outright made every case fail identically with
+            // status -1 and empty stderr — which is what "sh: not found" looks like from
+            // in here, and looks exactly like a guard that refuses everything.
+            env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` },
+            encoding: "utf8",
+            stdio: "pipe",
+          },
+        );
+        return { code: 0, err: "" };
+      } catch (e) {
+        const x = e as { status?: number; stderr?: string };
+        return { code: x.status ?? -1, err: x.stderr ?? "" };
+      }
+    };
+
+    // Allowed, and asserted first: a guard that refused everything would satisfy every
+    // check below while stopping every real install from starting.
+    for (const good of ["2.0.0", "2.39.1", "v2.29.7", "3.0.0", "10.1.0"]) {
+      writeFakeDocker(good, false);
+      ok(`40.1 Compose ${good} is allowed through`, guard().code === 0);
+    }
+
+    // The exact version from the report.
+    writeFakeDocker("1.29.2", true);
+    const v1 = guard();
+    ok("40.2 Compose 1.29.2 is refused", v1.code === 1, JSON.stringify(v1).slice(0, 120));
+    ok("40.2b naming the key that is actually the problem",
+       v1.err.includes("name:") && v1.err.includes("Compose Specification"),
+       v1.err.slice(0, 160));
+    ok("40.2c and a command that fixes it",
+       v1.err.includes("docker-compose-plugin"), v1.err.slice(0, 160));
+    // Somebody who ran `apt install podman-docker` believes they installed Docker, and
+    // every error they are about to read says "docker".
+    ok("40.2d and says so when 'docker' is really podman", v1.err.includes("podman"));
+
+    writeFakeDocker("1.29.2", false);
+    ok("40.2e but does not blame podman when podman is not involved",
+       !guard().err.includes("podman"));
+
+    for (const old of ["1.0.0", "0.9.1"]) {
+      writeFakeDocker(old, false);
+      ok(`40.3 Compose ${old} is refused too`, guard().code === 1);
+    }
+
+    // --short failing at all is the shape of a very old or very odd install; refuse
+    // rather than guess, since the next thing that happens is an unreadable file.
+    writeFakeDocker("", false);
+    ok("40.4 a compose that cannot report its version is refused", guard().code === 1);
+
+    // Both entry points, because the operator building from source hits the same wall.
+    for (const [file, needle] of [
+      ["try-hearth.sh", "require_compose_v2"],
+      ["scripts/docker-up.sh", "require_compose_v2"],
+    ] as const) {
+      ok(`40.5 ${file} asks the question before doing any work`,
+         readFileSync(file, "utf8").includes(needle));
+    }
+    // The point of refusing early is not spending a password prompt and a 1.5MB dump on
+    // a run that cannot start, so the guard has to sit above the part that reaches out.
+    const tryLines = readFileSync("try-hearth.sh", "utf8").split("\n");
+    const guardAt = tryLines.findIndex((l) => l.includes("require_compose_v2"));
+    // The CALL, not the definition — which sits above the guard and is not the thing
+    // being ordered. The first version of this compared against the definition and
+    // failed while the script was behaving correctly.
+    const sshAt = tryLines.findIndex((l) => /^\s+ssh_open\s*$/.test(l));
+    ok("40.5b and asks it before opening an ssh connection",
+       guardAt > 0 && sshAt > guardAt, `guard ${guardAt}, ssh ${sshAt}`);
+  }
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

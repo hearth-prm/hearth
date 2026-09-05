@@ -174,8 +174,12 @@ psql_t() { dc exec -T db psql -tAq -U "$PROD_USER" -d "$PROD_DB" "$@"; }
 # Each one has a specific production accident behind it. They run before anything is
 # created and before --down deletes anything.
 
-command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
-docker compose version >/dev/null 2>&1 || die "this docker has no 'compose' subcommand"
+# Not inlined: scripts/docker-up.sh needs the same answer, and a version check that
+# disagrees with itself between two entry points is worse than one that lives in a file.
+[ -f "$SELF_DIR/scripts/require-compose-v2.sh" ] ||
+  die "no scripts/require-compose-v2.sh beside this script — is this a Hearth checkout?"
+. "$SELF_DIR/scripts/require-compose-v2.sh"
+require_compose_v2
 
 [ "$PROJECT" != "hearth" ] ||
   die "--project hearth IS the production project. That collision is why this script exists."

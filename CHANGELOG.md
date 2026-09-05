@@ -44,6 +44,10 @@ of a green test suite alone where a real address book can be asked instead.
     production, since nothing local can collide with it. Password authentication works as well
     as a key: the run shares one connection for both trips to the server, so a password is
     asked for once.
+  - Refuses to start on **Docker Compose v1** with a message naming the cause, instead of
+    letting v1 fail on the top-level `name:` with "'name' does not match any of the regexes"
+    and advice to add a `version:` key that would not help. `scripts/docker-up.sh` asks the
+    same question.
   - The test stack **cannot write to Google**: it sets `HEARTH_GOOGLE_WRITES=off` and clears
     `HEARTH_ENABLE_MAIL`. It holds a copy of production's database, so it holds a working
     Google grant and every unsent thank-you along with it.

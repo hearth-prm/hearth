@@ -222,6 +222,12 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
 - **`listFields` is "shown as a list column", not "editable".** Using it to build the bulk
   field editor offered three fields where there should have been thirty. `genericFields` is
   the one that means "has a normal input".
+- **"Does the command exist" is not "can the command do the job".** `docker compose
+  version` succeeds under podman's docker shim, which hands the call to the distro's Python
+  Compose v1.29.2 — which then cannot read a top-level `name:` and blames the file format.
+  The guard proved the subcommand existed and nothing else. `require_compose_v2` asks for
+  the version number, and §40 runs it against a fake docker reporting eight different ones.
+  Same trap as `has:name`: presence is not capability.
 - **A test can be blocked by the browser rather than the code.** `page.fill` cannot type
   letters into `input[type=number]`, so a check meant to prove the SERVER validates proved
   nothing. Pick a value the browser will hand over — over-long text in a TEXT field, which
