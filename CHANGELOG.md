@@ -26,6 +26,17 @@ of a green test suite alone where a real address book can be asked instead.
 
 ## [Unreleased]
 
+### Changed
+
+- **An event that does not go to Google no longer asks for an attendee's role.** Host,
+  required and optional read as though they described the event, but the only thing that
+  value has ever done is set `optional` on a Google invitation — HOST and REQUIRED are one
+  value to Google, and nothing else reads it. On an event Hearth keeps to itself it changed
+  nothing at all. Role, RSVP and the invite box were the whole of the per-guest form, so the
+  form goes with them rather than leaving an Update button that saves nothing; Remove and the
+  add form stay, because a guest list is still a list you edit. The stored role is kept, not
+  reset, so sending the event to Google later still tells the truth.
+
 ### Added
 
 - **`try-hearth.sh` — a throwaway Hearth beside the real one**, for testing a build without

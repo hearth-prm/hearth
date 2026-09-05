@@ -369,11 +369,17 @@ try {
      eventEditLinks === 1 && guestEditToggles === 1,
      { eventEditLinks, guestEditToggles });
   await B.page.click('button[aria-label="Edit guests"]');
+  // Remove, not Update. This fixture does not go to Google either, so its rows have no role,
+  // RSVP or invite control and therefore no form and no Update button. The claim being made
+  // is about PERMISSION — an EDIT recipient gets the per-guest controls, a VIEW one (2.9g)
+  // is not even offered the toggle — so the probe has to be a control the list keeps whatever
+  // kind of event it is, and Remove is the only one.
   await B.page
-    .waitForSelector('button:has-text("Update")', { timeout: 10_000 })
+    .waitForSelector('button:text-is("Remove")', { timeout: 10_000 })
     .catch(() => {});
   ok("2.9i and the toggle yields the per-guest controls",
-     (await B.page.$$('button:has-text("Update")')).length === 1);
+     (await B.page.$$('button:text-is("Remove")')).length === 1,
+     (await B.page.$$('button:text-is("Remove")')).length);
 
   await A.page.goto("/settings/labels");
   ok("2.10 a used label reports its contact count",
@@ -1575,6 +1581,15 @@ try {
   // an attribute that disagrees with the row need opposite investigations — the same
   // distinction that cracked the mapping bug in §23. Do not "fix" it by retrying until it is
   // clear which of the three is stale.
+  //
+  // 2026-09-04, one observed failure, recorded because it rules a theory out:
+  //   {wantBg: light, gotBg: DARK, htmlAttr: "dark", storedTheme: "light"}
+  // The row was already light — 15.4c waits for that before reloading — and the paint AGREES
+  // with the attribute. So it is not a stylesheet lagging the attribute, which is what the
+  // waitForFunction above was added for. The server stamped data-theme="dark" from a row that
+  // said light, which points at what the reloaded request read, not at anything in the
+  // browser. Next place to look: whether the layout that stamps the attribute is being served
+  // from a cache the theme save does not revalidate.
   ok("15.4d and comes back server-rendered, still beating the device",
      (await htmlState()).theme === "light" && (await bodyPaint()) === systemLightBg,
      {
@@ -2007,18 +2022,22 @@ try {
      !guestsQuiet.includes("Invite in Google") && guestsQuiet.includes("Gift Auntie"),
      true);
   await A.page.click('button[aria-label="Edit guests"]');
-  // Role, not RSVP. This fixture never goes to Google — Event.addToGoogle defaults to false —
-  // so it has no RSVP control to wait for any more, which §36 is about. The check was using
-  // the RSVP dropdown as its probe for "the controls are showing", and the probe stopped
-  // existing while the behaviour it was testing did not change.
-  await A.page.waitForSelector('select[name="role"]', { timeout: 10_000 });
+  // Remove, not role, and before that not RSVP. This fixture never goes to Google —
+  // Event.addToGoogle defaults to false — so it has no RSVP control and now no role control
+  // either, and both were used in turn as the probe for "the controls are showing". Twice the
+  // probe stopped existing while the behaviour under test did not change. Remove is the one
+  // control this list keeps whatever the event is, which is what makes it the right probe.
+  await A.page.waitForSelector('button:text-is("Remove")', { timeout: 10_000 });
   const guestsEditing = (await A.page.textContent("body")) ?? "";
-  ok("16.16b and shows the role control when it is",
-     guestsEditing.includes("Role"), guestsEditing.includes("Role"));
-  ok("16.16c but no RSVP or invite box, because this event does not go to Google — see §36",
+  ok("16.16b and shows the controls it does have when it is",
+     (await A.page.$$('button:text-is("Remove")')).length >= 1);
+  ok("16.16c but no RSVP, invite box or role, because this event does not go to Google — see §36",
      (await A.page.$$('select[name="rsvp"]')).length === 0 &&
+       (await A.page.$$('select[name="role"]')).length === 0 &&
        !guestsEditing.includes("Invite in Google"),
-     [(await A.page.$$('select[name="rsvp"]')).length, guestsEditing.includes("Invite in Google")]);
+     [(await A.page.$$('select[name="rsvp"]')).length,
+      (await A.page.$$('select[name="role"]')).length,
+      guestsEditing.includes("Invite in Google")]);
 
   // A big present is one gift for several people, not one gift each — so it earns one
   // thank-you and shows on every recipient's page.
@@ -6478,28 +6497,37 @@ try {
      (await A.page.$$('select[name="rsvp"]')).length === 0);
   ok("36.2b nor an invite-in-Google checkbox, which would invite nobody",
      (await A.page.$$('input[name="inviteToGoogle"][type="checkbox"]')).length === 0);
-  ok("36.2c the role control is still there — that is about the event, not about Google",
-     (await A.page.$$('select[name="role"]')).length === 1);
+  // Role looks like it is about the event, but its only effect anywhere is
+  // `optional: attendee.role === "OPTIONAL"` on the Google payload — HOST and REQUIRED are
+  // one value to Google and nothing else reads the column. On an event that never becomes an
+  // invitation it changes nothing at all.
+  ok("36.2c nor a role control, which only ever meant 'optional on the Google invitation'",
+     (await A.page.$$('select[name="role"]')).length === 0);
+  // Those three were the whole form. What is left without them is an Update button that
+  // writes back exactly what it read.
+  ok("36.2d and so no Update button, because the form had nothing left to change",
+     (await A.page.$$('button:text-is("Update")')).length === 0);
+  // But the list is still a list you edit — the point was never to make it read-only.
+  ok("36.2e while Remove is still offered, and the add form",
+     (await A.page.$$('button:text-is("Remove")')).length >= 1 &&
+       (await A.page.$$('form select[name="personId"], form input[name="personId"]')).length >= 1,
+     [(await A.page.$$('button:text-is("Remove")')).length,
+      (await A.page.$$('form select[name="personId"], form input[name="personId"]')).length]);
 
-  // The regression this needs a guard for. updateAttendee writes
-  // `rsvp: parseRsvp(readString(form, "rsvp"))` unconditionally, and parseRsvp falls back to
-  // NEEDS_ACTION — so a form that simply omitted the field would reset a real RSVP, and
-  // untick inviteToGoogle, every time somebody changed a role. Hidden inputs carry the
-  // current values instead.
-  await A.page.selectOption('select[name="role"]', "OPTIONAL");
-  // "Update", not "Save" — the button says what it does to a row that already exists.
-  await A.page.click('button:text-is("Update")');
-  await waitForDb("the role change landed", async () =>
-    (await prisma.eventAttendee.findFirstOrThrow({
-      where: { eventId: quietEvent.id, personId: rsvpKeep.id },
-    })).role === "OPTIONAL");
-  const afterEdit = await prisma.eventAttendee.findFirstOrThrow({
+  // The regression the hidden inputs used to guard, restated as the reason they are gone.
+  // updateAttendee writes `rsvp: parseRsvp(readString(form, "rsvp"))` unconditionally and
+  // parseRsvp falls back to NEEDS_ACTION, so a form here that omitted the field would reset a
+  // real RSVP on every save. There is no form, so there is no save — and the stored values
+  // are still what they were after a visit that offered to edit them.
+  const afterVisit = await prisma.eventAttendee.findFirstOrThrow({
     where: { eventId: quietEvent.id, personId: rsvpKeep.id },
   });
-  ok("36.3 editing a role on such an event does not reset the stored RSVP",
-     afterEdit.rsvp === "ACCEPTED", afterEdit.rsvp);
-  ok("36.3b nor turn off the Google invite flag",
-     afterEdit.inviteToGoogle === true, afterEdit.inviteToGoogle);
+  ok("36.3 the stored RSVP survives a visit to the editing view",
+     afterVisit.rsvp === "ACCEPTED", afterVisit.rsvp);
+  ok("36.3b as does the Google invite flag",
+     afterVisit.inviteToGoogle === true, afterVisit.inviteToGoogle);
+  ok("36.3c and the role, which is kept rather than reset so switching to Google later is honest",
+     afterVisit.role === "REQUIRED", afterVisit.role);
 
   // The column is interpreted, not rewritten: switch the event to Google later and it tells
   // the truth about who has actually replied instead of claiming a roomful of confirmations.
@@ -6511,6 +6539,22 @@ try {
   ok("36.4b and its RSVP control",
      (await A.page.$$('select[name="rsvp"]')).length === 1 &&
        (await A.page.$$('input[name="inviteToGoogle"][type="checkbox"]')).length === 1);
+  // Asserted, not assumed: an event that DOES go to Google is where all three belong, and a
+  // change that hid them everywhere would satisfy every check above.
+  ok("36.4c and its role control, where 'optional' is a real thing to say",
+     (await A.page.$$('select[name="role"]')).length === 1);
+  await A.page.selectOption('select[name="role"]', "OPTIONAL");
+  await A.page.click('button:text-is("Update")');
+  await waitForDb("the role change landed on the Google event", async () =>
+    (await prisma.eventAttendee.findFirstOrThrow({
+      where: { eventId: loudEvent.id, personId: rsvpKeep.id },
+    })).role === "OPTIONAL");
+  const loudAfter = await prisma.eventAttendee.findFirstOrThrow({
+    where: { eventId: loudEvent.id, personId: rsvpKeep.id },
+  });
+  ok("36.4d and editing it there leaves the RSVP alone",
+     loudAfter.rsvp === "ACCEPTED" && loudAfter.inviteToGoogle === true,
+     [loudAfter.rsvp, loudAfter.inviteToGoogle]);
 
   ok("36.5 and attended: counts the guest either way, which it always did",
      (await xNames(`attended:"Quiet Kitchen Supper"`)).includes("Rsvp Keeper") &&

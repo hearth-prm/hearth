@@ -232,6 +232,13 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   letters into `input[type=number]`, so a check meant to prove the SERVER validates proved
   nothing. Pick a value the browser will hand over — over-long text in a TEXT field, which
   carries no maxlength — so the schema is what refuses it.
+- **A probe has to be a control the feature keeps.** Three checks used the guest list's
+  per-row form as their evidence that "the controls are showing" — first the RSVP dropdown,
+  then the role dropdown, then the Update button — and each stopped existing when a Hearth-only
+  event lost that control, failing while the behaviour under test was unchanged. `Remove` is
+  the one control the list keeps whatever kind of event it is. When a check needs to prove some
+  UI appeared, pick the part that is there for the reason being tested, not the part that
+  happens to be easy to select.
 - **`:has-text()` matches substrings.** "Add" found the "Add to Google" button above it, so
   two label checks failed for two runs while the code was right. Use `:text-is()` whenever
   one button's name is a prefix of another's.

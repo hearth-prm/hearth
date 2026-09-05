@@ -11,7 +11,13 @@ import {
 } from "@/lib/events";
 import { DeleteForm } from "@/components/delete-form";
 import { SubmitButton } from "@/components/submit-button";
-import { Badge, btnSecondary, Card, CardHeader, inputClass } from "@/components/ui";
+import {
+  Badge,
+  btnSecondary,
+  Card,
+  CardHeader,
+  inputClass,
+} from "@/components/ui";
 
 export interface AttendeeView {
   id: string;
@@ -49,6 +55,22 @@ export interface AttendeeView {
  * The stored `rsvp` column is left alone rather than being written to ACCEPTED. Interpreting
  * it costs nothing and stays honest: switch the event to Google later and it starts from
  * "no reply" truthfully, instead of claiming a roomful of confirmations nobody gave.
+ *
+ * ## Nor a role
+ *
+ * `role` reads as though it were about the event — host, required, optional — but its only
+ * effect anywhere is `optional: attendee.role === "OPTIONAL"` on the Google payload. HOST and
+ * REQUIRED are the same value to Google and to Hearth; nothing else reads the column. So on an
+ * event that never becomes an invitation it is a control that changes nothing, and asking
+ * whether somebody was optional at a supper that already happened is not a question.
+ *
+ * With role, RSVP and the invite box all gone, the per-row form has nothing left to change, so
+ * the FORM goes rather than being left as an Update button that saves nothing. Remove stays,
+ * outside it, because a guest list is still a list you edit. That also retires the hidden
+ * inputs this used to carry: they existed so changing a role could not reset an RSVP, and
+ * there is no longer an edit here to do it. Anything added back to this form for a
+ * Hearth-only event has to bring them back — `updateAttendee` reads rsvp and inviteToGoogle
+ * unconditionally and falls back to the enum default.
  */
 export function AttendeesCard({
   attendees,
@@ -158,8 +180,11 @@ export function AttendeesCard({
                 </div>
               </div>
 
-              {showControls ? (
-                <form action={updateAction} className="mt-3 flex flex-wrap items-end gap-2">
+              {showControls && sendsToGoogle ? (
+                <form
+                  action={updateAction}
+                  className="mt-3 flex flex-wrap items-end gap-2"
+                >
                   <input type="hidden" name="attendeeId" value={a.id} />
                   <label className="text-xs text-neutral-500 dark:text-neutral-400">
                     Role
@@ -175,46 +200,33 @@ export function AttendeesCard({
                       ))}
                     </select>
                   </label>
-                  {sendsToGoogle ? (
-                    <>
-                      <label className="text-xs text-neutral-500 dark:text-neutral-400">
-                        RSVP
-                        <select
-                          name="rsvp"
-                          defaultValue={a.rsvp}
-                          className={`${inputClass} mt-1 py-1.5`}
-                        >
-                          {RSVP_STATUSES.map((r) => (
-                            <option key={r} value={r}>
-                              {RSVP_LABELS[r]}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex items-center gap-1.5 pb-2 text-xs text-neutral-500 dark:text-neutral-400">
-                        <input
-                          type="checkbox"
-                          name="inviteToGoogle"
-                          defaultChecked={a.inviteToGoogle}
-                          className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
-                        />
-                        Invite in Google
-                      </label>
-                    </>
-                  ) : (
-                    // The form still has to SAY what these are, or the update action reads a
-                    // form with no rsvp field and writes the enum's default over whatever was
-                    // there. Hidden inputs carrying the current values keep an edit to
-                    // somebody's role from silently resetting their RSVP — which matters
-                    // because this event may be sent to Google later.
-                    <>
-                      <input type="hidden" name="rsvp" value={a.rsvp} />
-                      {a.inviteToGoogle ? (
-                        <input type="hidden" name="inviteToGoogle" value="on" />
-                      ) : null}
-                    </>
-                  )}
-                  <SubmitButton className={`${btnSecondary} py-1.5`} pendingLabel="Saving…">
+                  <label className="text-xs text-neutral-500 dark:text-neutral-400">
+                    RSVP
+                    <select
+                      name="rsvp"
+                      defaultValue={a.rsvp}
+                      className={`${inputClass} mt-1 py-1.5`}
+                    >
+                      {RSVP_STATUSES.map((r) => (
+                        <option key={r} value={r}>
+                          {RSVP_LABELS[r]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1.5 pb-2 text-xs text-neutral-500 dark:text-neutral-400">
+                    <input
+                      type="checkbox"
+                      name="inviteToGoogle"
+                      defaultChecked={a.inviteToGoogle}
+                      className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
+                    />
+                    Invite in Google
+                  </label>
+                  <SubmitButton
+                    className={`${btnSecondary} py-1.5`}
+                    pendingLabel="Saving…"
+                  >
                     Update
                   </SubmitButton>
                 </form>
