@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 import type { Credentials, OAuth2Client } from "google-auth-library";
-import { googleWritesEnabled, GOOGLE_WRITES_OFF } from "@/lib/google/scopes";
+import { isDevelopment } from "@/lib/run-mode";
 import { prisma } from "@/lib/db";
 
 /**
@@ -160,24 +160,28 @@ export async function getGoogleClient(userId: string): Promise<OAuth2Client> {
   }
 
   await clearAuthError(userId);
-  return googleWritesEnabled() ? client : readOnly(client);
+  return isDevelopment() ? readOnly(client) : client;
 }
 
 /**
- * The same client with every write refused.
+ * The same client with every write refused — a BACKSTOP, not the mechanism.
  *
- * Derived from the HTTP method, not from a list of endpoints: a write is a write whichever
- * API it belongs to, so a call added later is covered on the day it is added rather than on
- * the day somebody remembers to add it here. Reads still work, which is the point — the
- * import and the calendar picker stay testable.
+ * In development the simulating clients in `dev-clients.ts` answer every write before it
+ * reaches HTTP, so this should never fire. That is exactly why it stays: if it does fire,
+ * some write path went round the simulation and would have reached the real account on a
+ * production install of the same code. The message says so, because "this cannot happen" is
+ * the class of thing worth being told about when it happens.
+ *
+ * Derived from the HTTP method, not from a list of endpoints, so a call added later is
+ * covered on the day it is added. Reads still work: the import and the calendar picker want
+ * the real account, and reading changes nothing.
  *
  * Safe for the token refresh: that goes out through the library's own transporter rather
  * than back through `request`, and by the time this wraps anything the refresh has already
  * happened above.
  *
- * NOT sufficient on its own. `sendMail` posts over plain fetch and never touches this
- * client, so it asks `googleWritesEnabled()` through `canSendMail` instead. Two chokepoints
- * because there are genuinely two ways out of the process — one rule, consulted twice.
+ * `sendMail` is not covered here at all: it posts over plain fetch and never touches this
+ * client, so it gates itself immediately before its own request.
  */
 function readOnly(client: OAuth2Client): OAuth2Client {
   const send = client.request.bind(client);
@@ -185,7 +189,9 @@ function readOnly(client: OAuth2Client): OAuth2Client {
     const method = (opts?.method ?? "GET").toUpperCase();
     if (method !== "GET") {
       throw new GoogleAuthError(
-        `Refused ${method} ${opts?.url ?? "a Google write"}: ${GOOGLE_WRITES_OFF}.`,
+        `Refused ${method} ${opts?.url ?? "a Google write"}: this is a development install ` +
+          `(HEARTH_ENV), and this write did not pass through the simulating client — which ` +
+          `means it would have reached the real account in production. That is a bug.`,
       );
     }
     return send(opts);

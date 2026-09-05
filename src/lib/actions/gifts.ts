@@ -18,6 +18,7 @@ import {
 import { readAttachments } from "@/lib/attachments";
 import { canSendMail, sendMail } from "@/lib/google/mail";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
+import { DEV_NOT_SENT, isDevelopment } from "@/lib/run-mode";
 import {
   isFrameworkError,
   readString,
@@ -453,12 +454,17 @@ export async function sendThankYouNote(
           .join(", ")} — ${failed[0]!.message}`,
       );
     }
+    // The rows are stamped as sent either way, deliberately: the point of a development
+    // install is that everything downstream of the send behaves as it will in production —
+    // the badge drops, has:unthanked stops matching, the row leaves the Thank-yous page. So
+    // the message is the thing that has to be honest about it.
+    const dev = isDevelopment() ? ` (${DEV_NOT_SENT})` : "";
     return actionOk(
       attachments.files.length > 0
         ? `Sent to ${sent.join(", ")} with ${attachments.files.length} attachment${
             attachments.files.length === 1 ? "" : "s"
-          }.`
-        : `Sent to ${sent.join(", ")}.`,
+          }.${dev}`
+        : `Sent to ${sent.join(", ")}.${dev}`,
     );
   } catch (err) {
     if (isFrameworkError(err)) throw err;

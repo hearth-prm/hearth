@@ -81,17 +81,32 @@ caller that decides WHICH CONTACTS something applies to goes through `resolvePeo
 list, the CSV export and "select all matching" — or a bulk action would act on a wider set than
 the page displayed.
 
-**`HEARTH_GOOGLE_WRITES=off` is not `SYNC_ENABLED=false`.** The second stops the background
-loop and deliberately nothing else — pushing only when you press the button is a workflow
-somebody chose. The first means nothing here reaches Google by any route, which is what a test
-stack standing on a dump of production needs: that dump carries a working grant for the REAL
-account, so a stray "Sync now" is indistinguishable from the real install doing it, and the sync
-being one-way OUT means production never finds out. One predicate, `googleWritesEnabled()`,
-consulted at three places because there are genuinely three ways out — and the easy one to miss
-is that **`sendMail` posts over plain `fetch`**, never touching the OAuth client, so the
-`readOnly` wrapper in `auth.ts` cannot see it. §39.4 is that check: removing the line in
-`canSendMail` fails it and nothing else. It fails OPEN on a typo, because a self-hosted install
-that quietly stopped syncing would be worse than one that kept going.
+**`HEARTH_ENV=development` blocks the door, it does not lock the building.** A dev install
+runs every feature — the thank-you dialog opens, the message is built with its attachments,
+the contact push resolves its payloads — and the outbound call is the only thing that does not
+happen. Everything after it behaves as though it had, so a note is stamped sent and stops
+being owed. The previous design switched the FEATURES off instead, and produced the one bug
+you would predict: somebody clicked a link that had been quietly disabled and reported it
+broken. It also made the half of the app that most needs a copy of real data the half you
+could not exercise.
+
+Two mechanisms, not two spellings. `dev-clients.ts` answers every WRITE method of
+`PeopleClient` and `CalendarClient` with a synthetic result — at the TYPED boundary, because
+at the HTTP layer a refusal is all you can manage and inventing People API response bodies per
+endpoint is guesswork. The compiler then enforces completeness: a method added to either
+interface will not build until somebody decides what it does in development. The wrapping
+happens inside `createPeopleClient` / `createCalendarClient`, not at the call sites, so a new
+caller cannot get a real client by forgetting. `sendMail` gates itself immediately before its
+own `fetch`, since it never touches the OAuth client. And `readOnly` in `auth.ts` stays as a
+BACKSTOP that must never fire: if it does, a write went round the simulation and would have
+reached the real account in production.
+
+It fails the OPPOSITE way to the allowlist. Unset means production, so no existing install
+changes behaviour — but a value that is set and not understood means development, because a
+production install that stops sending is annoying and visible while a dev one that starts
+sending emails real people out of a copy of their own address book. §39.1d pins the typos.
+Proven by removing both gates: §39.4c then records a real request to
+`gmail.googleapis.com/.../send`.
 
 **Head of household and thank-you manager are different roles, on purpose.** The head owns
 every user's contact card by default (`ensureContactCard` — the first person to sign in becomes

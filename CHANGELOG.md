@@ -61,6 +61,20 @@ of a green test suite alone where a real address book can be asked instead.
   add form stay, because a guest list is still a list you edit. The stored role is kept, not
   reset, so sending the event to Google later still tells the truth.
 
+### Changed
+
+- **`HEARTH_ENV` replaces `HEARTH_GOOGLE_WRITES`.** A development install now runs every
+  feature and stops only the outbound call: the thank-you dialog opens, the message is built
+  with its attachments, the contact and calendar pushes resolve their payloads — and nothing
+  reaches Google. Everything downstream behaves as though it had, so a note is marked sent and
+  stops being owed, which is what makes a stack standing on a copy of real data usable rather
+  than merely startable. The old switch disabled the features instead, which put the
+  interesting half of the app out of reach and produced a "this link does nothing" report.
+  Unset means production; a value that is set but not understood means development, because
+  that is the failure that cannot email anybody.
+- The nav carries a **"dev — nothing reaches Google"** badge on a development install, and a
+  simulated send says so in its confirmation.
+
 ### Added
 
 - **A Thank-yous page**, in the top-level nav with a count badge. Every note still to write,

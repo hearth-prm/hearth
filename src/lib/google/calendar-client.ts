@@ -1,5 +1,7 @@
 import { google, type calendar_v3 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { isDevelopment } from "@/lib/run-mode";
+import { devCalendarClient } from "@/lib/google/dev-clients";
 
 /**
  * The Calendar API surface Hearth needs, behind an interface, for the same reason
@@ -88,6 +90,12 @@ const CHANGED_PAGE_SIZE = 250;
 const MAX_CHANGED_PAGES = 10;
 
 export function createCalendarClient(auth: OAuth2Client): CalendarClient {
+  // Same reasoning as the people client: one place, not per call site.
+  if (isDevelopment()) return devCalendarClient(realCalendarClient(auth));
+  return realCalendarClient(auth);
+}
+
+function realCalendarClient(auth: OAuth2Client): CalendarClient {
   const calendar = google.calendar({ version: "v3", auth });
 
   return {
@@ -99,7 +107,11 @@ export function createCalendarClient(auth: OAuth2Client): CalendarClient {
       });
       const id = res.data.id;
       if (!id) throw new Error("Google created the event but returned no id");
-      return { id, etag: res.data.etag ?? null, htmlLink: res.data.htmlLink ?? null };
+      return {
+        id,
+        etag: res.data.etag ?? null,
+        htmlLink: res.data.htmlLink ?? null,
+      };
     },
 
     async patchEvent({ calendarId, eventId, event, sendUpdates }) {
@@ -158,8 +170,9 @@ export function createCalendarClient(auth: OAuth2Client): CalendarClient {
     async listCalendars() {
       const res = await calendar.calendarList.list({ maxResults: 250 });
       return (res.data.items ?? [])
-        .filter((c): c is calendar_v3.Schema$CalendarListEntry & { id: string } =>
-          Boolean(c.id),
+        .filter(
+          (c): c is calendar_v3.Schema$CalendarListEntry & { id: string } =>
+            Boolean(c.id),
         )
         .map((c) => ({
           id: c.id,

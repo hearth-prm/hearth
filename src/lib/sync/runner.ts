@@ -1,17 +1,27 @@
 import { prisma } from "@/lib/db";
-import { getGoogleClient, GoogleAuthError, recordAuthError } from "@/lib/google/auth";
+import {
+  getGoogleClient,
+  GoogleAuthError,
+  recordAuthError,
+} from "@/lib/google/auth";
 import { createPeopleClient } from "@/lib/google/people-client";
 import { createCalendarClient } from "@/lib/google/calendar-client";
 import {
   CALENDAR_SYNC_SCOPES,
   CONTACT_SYNC_SCOPES,
-  googleWritesEnabled,
-  GOOGLE_WRITES_OFF,
   grantCovers,
 } from "@/lib/google/scopes";
 import { withSyncLease } from "./lease";
-import { summarise, syncContactsForUser, type ContactSyncResult } from "./contacts";
-import { summariseEvents, syncEventsForUser, type EventSyncResult } from "./events";
+import {
+  summarise,
+  syncContactsForUser,
+  type ContactSyncResult,
+} from "./contacts";
+import {
+  summariseEvents,
+  syncEventsForUser,
+  type EventSyncResult,
+} from "./events";
 
 /**
  * Wraps the push engine with everything it should not have to know about:
@@ -56,13 +66,11 @@ export async function runContactSyncForUser(
     },
   });
 
-  if (!settings) return { status: "skipped", reason: "no settings for this user" };
+  if (!settings)
+    return { status: "skipped", reason: "no settings for this user" };
   if (!settings.syncContactsEnabled) {
     return { status: "skipped", reason: "contact sync is turned off" };
   }
-  // Answered here as well as in the client, so a manual "Sync now" gets a sentence
-  // naming the setting instead of the backstop's refusal of one HTTP call.
-  if (!googleWritesEnabled()) return { status: "skipped", reason: GOOGLE_WRITES_OFF };
 
   if (
     !options.force &&
@@ -96,7 +104,10 @@ export async function runContactSyncForUser(
 
       await prisma.userSettings.updateMany({
         where: { userId },
-        data: { lastContactSyncAt: new Date(), lastContactSyncSummary: summary },
+        data: {
+          lastContactSyncAt: new Date(),
+          lastContactSyncSummary: summary,
+        },
       });
 
       return { status: "ok", result, summary };
@@ -149,11 +160,11 @@ export async function runEventSyncForUser(
     },
   });
 
-  if (!settings) return { status: "skipped", reason: "no settings for this user" };
+  if (!settings)
+    return { status: "skipped", reason: "no settings for this user" };
   if (!settings.syncCalendarEnabled) {
     return { status: "skipped", reason: "calendar sync is turned off" };
   }
-  if (!googleWritesEnabled()) return { status: "skipped", reason: GOOGLE_WRITES_OFF };
 
   if (
     !options.force &&
@@ -178,43 +189,46 @@ export async function runEventSyncForUser(
   // The same lease as contacts, deliberately: both write sync state on the same
   // user and a Google project's quota is shared, so serialising them is both safer
   // and kinder to the rate limit.
-  const outcome = await withSyncLease(userId, async (): Promise<EventRunOutcome> => {
-    try {
-      const auth = await getGoogleClient(userId);
-      const calendar = createCalendarClient(auth);
-      const result = await syncEventsForUser(userId, { calendar }, options);
-      const summary = summariseEvents(result);
+  const outcome = await withSyncLease(
+    userId,
+    async (): Promise<EventRunOutcome> => {
+      try {
+        const auth = await getGoogleClient(userId);
+        const calendar = createCalendarClient(auth);
+        const result = await syncEventsForUser(userId, { calendar }, options);
+        const summary = summariseEvents(result);
 
-      await prisma.userSettings.updateMany({
-        where: { userId },
-        data: { lastEventSyncAt: new Date(), lastEventSyncSummary: summary },
-      });
+        await prisma.userSettings.updateMany({
+          where: { userId },
+          data: { lastEventSyncAt: new Date(), lastEventSyncSummary: summary },
+        });
 
-      return { status: "ok", result, summary };
-    } catch (err) {
-      if (err instanceof GoogleAuthError) {
-        await recordAuthError(userId, err.message);
+        return { status: "ok", result, summary };
+      } catch (err) {
+        if (err instanceof GoogleAuthError) {
+          await recordAuthError(userId, err.message);
+          await prisma.userSettings.updateMany({
+            where: { userId },
+            data: {
+              lastEventSyncAt: new Date(),
+              lastEventSyncSummary: `stopped: ${err.message}`,
+            },
+          });
+          return { status: "auth", message: err.message };
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[hearth] event sync failed for ${userId}:`, err);
         await prisma.userSettings.updateMany({
           where: { userId },
           data: {
             lastEventSyncAt: new Date(),
-            lastEventSyncSummary: `stopped: ${err.message}`,
+            lastEventSyncSummary: `failed: ${message}`,
           },
         });
-        return { status: "auth", message: err.message };
+        return { status: "error", message };
       }
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[hearth] event sync failed for ${userId}:`, err);
-      await prisma.userSettings.updateMany({
-        where: { userId },
-        data: {
-          lastEventSyncAt: new Date(),
-          lastEventSyncSummary: `failed: ${message}`,
-        },
-      });
-      return { status: "error", message };
-    }
-  });
+    },
+  );
 
   return outcome ?? { status: "busy" };
 }

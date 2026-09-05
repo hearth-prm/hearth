@@ -1,5 +1,7 @@
 import { google, type people_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
+import { isDevelopment } from "@/lib/run-mode";
+import { devPeopleClient } from "@/lib/google/dev-clients";
 
 /**
  * The People API surface Hearth needs, behind an interface.
@@ -110,6 +112,13 @@ const MAX_CONTACT_GROUP_PAGES = 10;
 const GROUP_MEMBER_CHUNK = 1_000;
 
 export function createPeopleClient(auth: OAuth2Client): PeopleClient {
+  // Wrapped HERE rather than at each call site, so a new caller cannot forget and a
+  // development install cannot have one path that still writes. Reads still reach Google.
+  if (isDevelopment()) return devPeopleClient(realPeopleClient(auth));
+  return realPeopleClient(auth);
+}
+
+function realPeopleClient(auth: OAuth2Client): PeopleClient {
   const people = google.people({ version: "v1", auth });
 
   return {
@@ -119,7 +128,9 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
       });
       const resourceName = res.data.resourceName;
       if (!resourceName) {
-        throw new Error("Google created the contact but returned no resourceName");
+        throw new Error(
+          "Google created the contact but returned no resourceName",
+        );
       }
       return { resourceName, etag: res.data.etag ?? null };
     },
@@ -202,7 +213,11 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
           // should ever be able to do.
           if (g.groupType !== "USER_CONTACT_GROUP") continue;
           if (!g.resourceName || !g.name) continue;
-          out.push({ resourceName: g.resourceName, name: g.name, etag: g.etag ?? null });
+          out.push({
+            resourceName: g.resourceName,
+            name: g.name,
+            etag: g.etag ?? null,
+          });
         }
         pageToken = res.data.nextPageToken ?? undefined;
         pages += 1;
@@ -223,9 +238,15 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
       });
       const resourceName = res.data.resourceName;
       if (!resourceName) {
-        throw new Error("Google created the group but returned no resourceName");
+        throw new Error(
+          "Google created the group but returned no resourceName",
+        );
       }
-      return { resourceName, name: res.data.name ?? name, etag: res.data.etag ?? null };
+      return {
+        resourceName,
+        name: res.data.name ?? name,
+        etag: res.data.etag ?? null,
+      };
     },
 
     async updateContactPhoto({ resourceName, data }) {
@@ -249,7 +270,10 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
     async deleteContactGroup(resourceName) {
       // deleteContacts defaults to false, but saying so is worth the two words: a
       // label being removed must never take the people in it with it.
-      await people.contactGroups.delete({ resourceName, deleteContacts: false });
+      await people.contactGroups.delete({
+        resourceName,
+        deleteContacts: false,
+      });
     },
 
     async updateContactGroup({ resourceName, etag, name }) {
@@ -277,7 +301,11 @@ export function createPeopleClient(auth: OAuth2Client): PeopleClient {
     async modifyGroupMembers({ resourceName, add, remove }) {
       // Google caps a single modify at 1000 members each way, so long lists are
       // chunked rather than silently truncated.
-      for (let i = 0; i < Math.max(add.length, remove.length); i += GROUP_MEMBER_CHUNK) {
+      for (
+        let i = 0;
+        i < Math.max(add.length, remove.length);
+        i += GROUP_MEMBER_CHUNK
+      ) {
         const addChunk = add.slice(i, i + GROUP_MEMBER_CHUNK);
         const removeChunk = remove.slice(i, i + GROUP_MEMBER_CHUNK);
         if (addChunk.length === 0 && removeChunk.length === 0) continue;

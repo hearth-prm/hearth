@@ -20,8 +20,11 @@ const links = [
 export function AppNav({
   user,
   thankYousOwed = 0,
+  isDev = false,
 }: {
   user: CurrentUser;
+  /** HEARTH_ENV=development. Read in the layout; the nav only renders it. */
+  isDev?: boolean;
   /** What the page would list: a manager's is the whole household's backlog. */
   thankYousOwed?: number;
 }) {
@@ -42,6 +45,18 @@ export function AppNav({
           <HearthMark className="size-5 text-accent-600 dark:text-accent-400" />
           Hearth
         </Link>
+
+        {isDev ? (
+          // Said once, at the top, on every page. A development install now behaves exactly
+          // like production right up to the moment something would leave for Google, which
+          // is the point — and is also precisely why it must not be mistakable for it.
+          <span
+            title="HEARTH_ENV is set to development. Everything works, but nothing reaches Google: no contact push, no calendar invitation, no thank-you email."
+            className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+          >
+            dev — nothing reaches Google
+          </span>
+        ) : null}
 
         <nav className="flex flex-1 flex-wrap items-center gap-1">
           {links.map((l) => (

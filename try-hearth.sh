@@ -424,14 +424,18 @@ set_env AUTH_URL "http://localhost:$APP_PORT"
 #
 # SYNC_ENABLED stops the background loop and nothing else — pressing "Sync now" still
 # pushes, because an install that syncs only on the button is a workflow somebody wants.
-# So the writes are refused at the source as well, which also covers the thank-you mail
-# the loop was never involved in. Belt and braces, and the braces are the load-bearing
-# half: the test database is a copy of production's, so it holds every thank-you not yet
-# sent, and sending one from here mails a real person while production goes on believing
-# it still owes them a note.
+# HEARTH_ENV=development is what makes that safe: every feature stays switched ON and
+# usable, and the only thing that does not happen is the outbound call itself. So a test
+# stack can write a thank-you, attach a photograph, choose the addressing and press send —
+# exercising the whole path — without mailing the real person whose unsent note it inherited
+# along with the rest of production'"'"'s database.
+# The loop stays off, even though HEARTH_ENV=development would make it harmless: left on,
+# it would simulate a push of all 329 contacts within five minutes and stamp every sync
+# column with a dev- id, so everything would read as SYNCED and later tests would be less
+# representative, not more. Press "Sync now" when you want to watch it happen. One line in
+# .env.try turns the loop on if you want to test the scheduler itself.
 set_env SYNC_ENABLED "false"
-set_env HEARTH_GOOGLE_WRITES "off"
-set_env HEARTH_ENABLE_MAIL ""
+set_env HEARTH_ENV "development"
 set_env OLLAMA_URL ""
 
 mkdir -p "$DATA"

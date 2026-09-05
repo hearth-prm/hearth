@@ -10,6 +10,7 @@ import {
 import { AppearanceProvider } from "@/components/appearance-provider";
 import { AppNav } from "@/components/nav";
 import { countThankYousOwed } from "@/lib/thank-yous-owed";
+import { isDevelopment } from "@/lib/run-mode";
 import { AppFooter } from "@/components/app-footer";
 
 export const metadata: Metadata = {
@@ -38,6 +39,7 @@ export default async function RootLayout({
             <AppNav
               user={user}
               thankYousOwed={await countThankYousOwed(user.id)}
+              isDev={isDevelopment()}
             />
           ) : null}
           {/* max-w-5xl left roughly half a wide screen as margin. This is a data-dense

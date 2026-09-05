@@ -1,5 +1,6 @@
 import { getGoogleClient, GoogleAuthError } from "@/lib/google/auth";
-import { GMAIL_SEND_SCOPE, googleWritesEnabled, mailEnabled } from "@/lib/google/scopes";
+import { GMAIL_SEND_SCOPE, mailEnabled } from "@/lib/google/scopes";
+import { isDevelopment } from "@/lib/run-mode";
 import type { MailBlock } from "@/lib/thank-you";
 import { prisma } from "@/lib/db";
 
@@ -28,13 +29,9 @@ export async function canSendMail(userId: string): Promise<boolean> {
  * Order matters: the install-wide switches are checked before the per-user grant, because
  * "reconnect Google" is useless advice on an install that would refuse the send anyway.
  */
-export async function mailBlockedFor(userId: string): Promise<MailBlock | null> {
-  if (!googleWritesEnabled()) {
-    return {
-      short: "sending is off here",
-      full: "This install runs with HEARTH_GOOGLE_WRITES=off, so it will not send mail. That is what a test stack standing on a copy of real data is meant to do.",
-    };
-  }
+export async function mailBlockedFor(
+  userId: string,
+): Promise<MailBlock | null> {
   const account = await prisma.account.findFirst({
     where: { userId, provider: "google" },
     select: { scope: true },
@@ -192,7 +189,8 @@ function toRaw(lines: string[]): string {
   return Buffer.from(lines.join("\r\n"), "utf8").toString("base64url");
 }
 
-const SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+const SEND_ENDPOINT =
+  "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
 /**
  * Send, over plain fetch rather than through the googleapis client.
@@ -202,7 +200,10 @@ const SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/s
  * a home server. The OAuth2 client is still used for the token, so refresh and the
  * invalid-grant handling stay in the one place that knows about them.
  */
-export async function sendMail(userId: string, mail: OutgoingMail): Promise<void> {
+export async function sendMail(
+  userId: string,
+  mail: OutgoingMail,
+): Promise<void> {
   if (!(await canSendMail(userId))) {
     throw new GoogleAuthError(
       "Hearth has not been given permission to send mail as you.",
@@ -211,7 +212,21 @@ export async function sendMail(userId: string, mail: OutgoingMail): Promise<void
 
   const auth = await getGoogleClient(userId);
   const { token } = await auth.getAccessToken();
-  if (!token) throw new GoogleAuthError("Could not obtain a Google access token.");
+  if (!token)
+    throw new GoogleAuthError("Could not obtain a Google access token.");
+
+  // The gate, and the only one. Everything above this line has already happened: the scope
+  // was checked, the token refreshed, the multipart message built with its attachments and
+  // its base64 wrapped at 76 columns. A development install has therefore exercised all of
+  // it and stops at the door rather than at the handle.
+  if (isDevelopment()) {
+    console.log(
+      `[hearth] development mode: NOT sending mail to ${mail.to.join(", ")}` +
+        `${mail.bcc?.length ? ` (bcc ${mail.bcc.length})` : ""}` +
+        ` — subject ${JSON.stringify(mail.subject)}, ${buildMessage(mail).length} bytes built`,
+    );
+    return;
+  }
 
   const response = await fetch(SEND_ENDPOINT, {
     method: "POST",

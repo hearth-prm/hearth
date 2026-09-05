@@ -68,7 +68,7 @@ services:
       # Thank-you emails, which need Google's gmail.send scope. Off by default;
       # setting this makes Hearth request the scope at sign-in.
       HEARTH_ENABLE_MAIL: "${HEARTH_ENABLE_MAIL:-}"
-      HEARTH_GOOGLE_WRITES: "${HEARTH_GOOGLE_WRITES:-}"
+      HEARTH_ENV: "${HEARTH_ENV:-}"
       # Who may sign in. See .env.example: unset is safe once the install has a
       # user, but set it before first boot on anything internet-reachable.
       HEARTH_ALLOWED_EMAILS: "${HEARTH_ALLOWED_EMAILS:-}"

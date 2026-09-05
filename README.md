@@ -184,6 +184,7 @@ docker compose down -v         # stop and destroy the database
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
 | `HEARTH_ALLOWED_EMAILS` | see below | Who may sign in. Addresses and/or `@domain`, comma-separated. |
 | `HEARTH_THANK_YOU_MANAGERS` | empty | Addresses that see **everybody's** outstanding thank-yous on the Thank-yous page. No other extra access. Whole addresses only — `@domain` is ignored here. |
+| `HEARTH_ENV` | `production` | `development` runs every feature but sends nothing to Google — no contact push, no calendar invitation, no thank-you email. For a stack standing on a copy of real data. |
 | `HEARTH_SOURCE_URL` | no | Where to get this install's source, offered in the footer for the AGPL. Set it if you have modified Hearth. |
 | `HEARTH_ENABLE_MAIL` | no | `true` to offer thank-you emails, which needs Google's `gmail.send` scope. Off by default, and the scope is not requested unless set. |
 | `HEARTH_IMAGE` / `HEARTH_TAG` | no | Which published image to run. Defaults to `registry.gitlab.com/hearth-prm/hearth:latest`. |
@@ -351,11 +352,13 @@ its own, restores the dump into a Postgres of its own under `./.try/postgres`, t
 app so its migrations run against real rows. `--empty` skips the data, `--dump <file>` uses one
 you already have, and `--status` says what the stack is doing.
 
-The test stack cannot write to your Google account. It sets `HEARTH_GOOGLE_WRITES=off` and
-clears `HEARTH_ENABLE_MAIL`, so contact and calendar pushes and thank-you emails are all
-refused — which matters because it is holding a copy of your real database, complete with a
-working Google grant and every thank-you you have not sent yet. Reads still work, so the
-Google import and the calendar picker stay testable.
+The test stack cannot write to your Google account. It sets `HEARTH_ENV=development`, which
+leaves every feature switched on and stops only the outbound call: you can write a thank-you,
+attach a photograph, choose the addressing and press send, and the message is built and then
+not sent. Contact and calendar pushes behave the same way. That matters because the stack is
+holding a copy of your real database, complete with a working Google grant and every
+thank-you you have not written yet. Reads still reach Google, so the import and the calendar
+picker are testable too.
 
 Both need **Docker Compose v2 or newer** (the current line is v5). The compose file uses
 the Compose Specification, and
