@@ -55,6 +55,14 @@ of a green test suite alone where a real address book can be asked instead.
     production, since nothing local can collide with it. Password authentication works as well
     as a key: the run shares one connection for both trips to the server, so a password is
     asked for once.
+  - **Waits for the database properly before restoring.** It had its own readiness loop
+    calling bare `pg_isready`, which reports ready while the application database is still
+    being created — Postgres's entrypoint runs a temporary server to do `initdb` first. On a
+    fresh data directory the restore therefore ran against a database that did not exist and
+    the run stopped with "the restore left no contacts". It now waits on the compose
+    healthcheck, which has always asked the right question.
+  - The restore keeps psql's output in `.try/restore.log` and prints the end of it when
+    something goes wrong, instead of discarding it.
   - **`--down` now actually tears down.** Postgres writes `.try/postgres` as its own uid at
     mode 700, so the person who started the stack could not delete it: the `rm` failed
     partway — after taking the dump with it — and `set -e` ended the run *before* removing

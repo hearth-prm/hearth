@@ -7197,6 +7197,34 @@ try {
     ok("40.7d using the postgres image named in the compose file",
        /image:\[\[:space:\]\]\*"\\{0,1\\}\\\(postgres:/.test(readFileSync("try-hearth.sh", "utf8")));
 
+    // Readiness, from a failure that presented as "the restore left no contacts". Postgres's
+    // entrypoint runs a temporary server on the socket to do initdb before the real one
+    // starts, so bare `pg_isready` reports ready while the application database does not
+    // exist yet — measured on a fresh data directory as READY two polls early. The compose
+    // healthcheck already asks the right question, with -U and -d and a comment saying why;
+    // this script had written a weaker second version of it three lines away.
+    const tryText = readFileSync("try-hearth.sh", "utf8");
+    ok("40.8 the script waits on the compose healthcheck rather than its own readiness test",
+       /dc up -d --wait\b/.test(tryText));
+    // Comments stripped first. The comment above the fix quotes the wrong form deliberately,
+    // so that somebody reading it knows what was wrong — and the first version of this check
+    // matched that quotation and failed on the explanation of the bug it was checking for.
+    const tryCode = tryText
+      .split("\n")
+      .filter((l) => !/^\s*#/.test(l))
+      .join("\n");
+    ok("40.8b and no longer asks pg_isready without naming the user and database",
+       !/pg_isready(?![^\n]*-U)/.test(tryCode),
+       (tryCode.match(/.*pg_isready.*/g) ?? []).join(" | ").slice(0, 120));
+    // The compose healthcheck is the definition being relied on, so it has to keep the flags.
+    ok("40.8c which is only right because the healthcheck itself names them",
+       /pg_isready -U \$\{POSTGRES_USER[^}]*\} -d \$\{POSTGRES_DB/.test(
+         readFileSync("docker-compose.yml", "utf8")));
+    // The reason this took a session to find: psql's output went to /dev/null, so the one
+    // message naming the cause was the one thing discarded.
+    ok("40.8d and the restore keeps what psql said instead of discarding it",
+       tryText.includes("restore.log") && /tail -n 15 "\$restore_log"/.test(tryText));
+
     const guardAt = tryLines.findIndex((l) => l.includes("require_compose_v2"));
     // The CALL, not the definition — which sits above the guard and is not the thing
     // being ordered. The first version of this compared against the definition and

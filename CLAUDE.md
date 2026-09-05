@@ -232,6 +232,15 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   letters into `input[type=number]`, so a check meant to prove the SERVER validates proved
   nothing. Pick a value the browser will hand over — over-long text in a TEXT field, which
   carries no maxlength — so the schema is what refuses it.
+- **`pg_isready` without `-U` and `-d` reports on the wrong database.** Postgres's container
+  entrypoint runs a temporary server on the socket to perform `initdb` before the real one
+  starts, so the bare form says ready while the application database does not exist —
+  measured at two polls early on a fresh data directory. `docker-compose.yml`'s healthcheck
+  has always carried the flags and a comment saying why; `try-hearth.sh` had a second, weaker
+  readiness loop three lines away, and restored into nothing. Wait on the healthcheck
+  (`up -d --wait`) rather than writing a second definition of ready. It surfaced as "the
+  restore left no contacts" and took a session to find only because psql's output was going
+  to `/dev/null`: **a step whose failure is noticed later must not discard what it said.**
 - **A container writes its data as its own uid, and the host user cannot delete it.**
   `.try/postgres` is uid 70 mode 700, so `try-hearth.sh --down`'s `rm -rf` failed partway
   through — and under `set -e` that ended the run before `.env.try` was removed, leaving

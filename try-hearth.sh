@@ -477,19 +477,36 @@ fi
 # nothing.
 
 say "starting Postgres"
-dc up -d db
-i=0
-until dc exec -T db pg_isready -q 2>/dev/null; do
-  i=$((i + 1))
-  [ "$i" -lt 60 ] || die "Postgres did not come up: docker compose -p $PROJECT logs db"
-  sleep 2
-done
+# --wait, rather than a readiness loop of this script's own. The compose healthcheck already
+# asks the right question — `pg_isready -U <user> -d <db>`, with a comment beside it saying
+# why the bare form is wrong — and this had written a second, weaker one three lines away:
+#
+#   until dc exec -T db pg_isready -q; do ...
+#
+# Without -U/-d that reports on a different database, and on first boot there is a window
+# where it says ready while `hearth` does not exist: the entrypoint runs a temporary server
+# on the socket to do initdb before the real one starts. Measured on a fresh data directory,
+# the bare form said READY two polls before a connection to hearth could be made — and the
+# restore then ran against a database that was not there.
+dc up -d --wait --wait-timeout 300 db ||
+  die "Postgres did not come up: docker compose -p $PROJECT logs db"
 
 if [ "$MODE" = "copy" ] && [ -n "$DUMP" ]; then
   say "restoring"
-  gunzip -c "$DUMP" | dc exec -T db psql -q -U "$PROD_USER" -d "$PROD_DB" >/dev/null 2>&1 || true
+  # Kept, not discarded. The failure above was diagnosed as "no contacts" because psql's
+  # output went to /dev/null, so the one message naming the cause was the one thing thrown
+  # away. A step whose failure is noticed later has to leave its evidence behind.
+  mkdir -p "$SELF_DIR/.try"
+  restore_log="$SELF_DIR/.try/restore.log"
+  gunzip -c "$DUMP" | dc exec -T db psql -q -U "$PROD_USER" -d "$PROD_DB" \
+    >"$restore_log" 2>&1 || true
   people=$(psql_t -c 'select count(*) from "Person"' 2>/dev/null || echo 0)
-  [ "${people:-0}" -gt 0 ] || die "the restore left no contacts; stopping before migrations run"
+  if [ "${people:-0}" -le 0 ]; then
+    warn "the restore produced no contacts. The last of what psql said:"
+    tail -n 15 "$restore_log" >&2
+    die "stopping before migrations run — an empty database would prove nothing.
+  Full output: $restore_log"
+  fi
   say "restored — $people contacts"
 fi
 
