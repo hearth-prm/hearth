@@ -4111,6 +4111,16 @@ try {
      (await A.page.inputValue(mapSel)) === "nicknames", await A.page.inputValue(mapSel));
 
   // Back to not synced, which is a removal rather than an update.
+  //
+  // Observed failing ONCE, 2026-09-05, with the select still reading "nicknames" after the
+  // row had been deleted — the waitForDb above had already passed, so the database was
+  // right and the DOM was stale. Passed on the next run and every run since. Recorded, not
+  // chased: this is the uncontrolled-remounted select from the React 19 note in CLAUDE.md,
+  // where the DOM's default is whatever the server last said, so a revalidation landing
+  // late leaves exactly this. If it recurs, the question to ask first is whether the PROP
+  // or the DOM is stale — they look identical here and need opposite fixes. It is not
+  // saveSettings' revalidatePath("/", "layout"): mappings revalidate their own page path
+  // and never go through that action.
   await A.page.selectOption(mapSel, "none");
   await A.page.click('button:has-text("Save mappings")');
   await waitForDb("the mapping to be removed", async () =>
@@ -7184,6 +7194,46 @@ try {
        isDevelopment() === false && runMode() === "production");
     ok("39.5b and the phrase used to report a simulated send exists to be searched for",
        DEV_NOT_SENT.length > 0 && DEV_NOT_SENT.includes("Google"));
+
+    // --- and it is visible, in a way that does not scroll away -------------
+    //
+    // Asserted on the element the component returns rather than through a renderer: a React
+    // element is a plain object, so its props can be read directly, and the suite's server
+    // runs in production so the banner can never appear in the browser to be looked at.
+    const { DevBanner, DEV_BANNER_CLASS } = await import("@/components/dev-banner");
+    // The inactive path returns before any JSX, so it can be called from here; the active
+    // one cannot, because JSX in this process would need a React runtime the root tsconfig
+    // does not configure. The classes are exported for that reason and asserted directly —
+    // they are the whole behaviour of this component.
+    ok("39.7 no banner on a production install",
+       DevBanner({ active: false }) === null);
+    const cls = DEV_BANNER_CLASS;
+    ok("39.7b and one on a development install",
+       cls.length > 0 && readFileSync("src/components/dev-banner.tsx", "utf8")
+         .includes("className={DEV_BANNER_CLASS}"), cls);
+    // fixed, or it scrolls away with the header — which is the whole reason this exists
+    // alongside the pill that was already there.
+    ok("39.7c pinned to the viewport rather than the page", cls.includes("fixed"), cls);
+    // pointer-events-none, or an indicator that cannot be dismissed becomes an indicator
+    // that eats the click you aimed at whatever is under it.
+    ok("39.7d and unable to swallow a click", cls.includes("pointer-events-none"), cls);
+    // inset-x-0 rather than a width: a fixed element with a width wider than the viewport is
+    // how §22's sideways-scroll checks get broken by something they cannot see.
+    ok("39.7e spanning the viewport without being able to overflow it",
+       cls.includes("inset-x-0") && !/w-\[/.test(cls), cls);
+    // Outside the signed-in guard: the sign-in page is where somebody is least sure which
+    // install they have opened, and it renders no nav at all.
+    const layoutText = readFileSync("src/app/layout.tsx", "utf8");
+    const bannerAt = layoutText.indexOf("<DevBanner");
+    const userGuardAt = layoutText.indexOf("{user ?");
+    ok("39.7f rendered before the signed-in check, so the sign-in page carries it too",
+       bannerAt > 0 && userGuardAt > bannerAt, [bannerAt, userGuardAt]);
+
+    // The production server the suite runs is the negative case, and it is a real one.
+    await A.page.goto("/people");
+    ok("39.7g and this production server shows neither the banner nor the header pill",
+       (await A.page.$$('[aria-hidden="true"].fixed.top-0')).length === 0 &&
+         !((await A.page.textContent("body")) ?? "").includes("nothing reaches Google"));
 
     // --- the wiring reaches the container and the test stack ---------------
     const composeText = readFileSync("docker-compose.yml", "utf8");

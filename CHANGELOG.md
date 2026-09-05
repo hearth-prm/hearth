@@ -72,8 +72,9 @@ of a green test suite alone where a real address book can be asked instead.
   interesting half of the app out of reach and produced a "this link does nothing" report.
   Unset means production; a value that is set but not understood means development, because
   that is the failure that cannot email anybody.
-- The nav carries a **"dev — nothing reaches Google"** badge on a development install, and a
-  simulated send says so in its confirmation.
+- The nav carries a **"dev — nothing reaches Google"** badge on a development install, a
+  striped marker is pinned to the top of the window on every page including the sign-in page,
+  and a simulated send says so in its confirmation.
 
 ### Added
 

@@ -11,6 +11,7 @@ import { AppearanceProvider } from "@/components/appearance-provider";
 import { AppNav } from "@/components/nav";
 import { countThankYousOwed } from "@/lib/thank-yous-owed";
 import { isDevelopment } from "@/lib/run-mode";
+import { DevBanner } from "@/components/dev-banner";
 import { AppFooter } from "@/components/app-footer";
 
 export const metadata: Metadata = {
@@ -34,6 +35,9 @@ export default async function RootLayout({
   return (
     <html lang="en" {...htmlAppearanceProps(appearance)}>
       <body className="flex min-h-dvh flex-col bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
+        {/* Before the signed-in check on purpose: the sign-in page is where somebody is
+            least sure which install they have opened. */}
+        <DevBanner active={isDevelopment()} />
         <AppearanceProvider initial={appearance}>
           {user ? (
             <AppNav
