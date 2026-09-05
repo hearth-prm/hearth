@@ -7302,6 +7302,146 @@ try {
        guardAt > 0 && sshAt > guardAt, `guard ${guardAt}, ssh ${sshAt}`);
   }
 
+  section("§41 Thank-yous still to write, and who may see whose")
+
+  {
+    const { parseSuperUsers, isSuperUserEmail } = await import("@/lib/super-users");
+    const { listThankYousOwed, countThankYousOwedByMe } =
+      await import("@/lib/thank-yous-owed");
+
+    // --- the rule, without a database ------------------------------------
+    ok("41.1 addresses are read from the variable, however they are separated",
+       JSON.stringify(parseSuperUsers("A@b.com, c@d.com\n e@f.com")) ===
+         JSON.stringify(["a@b.com", "c@d.com", "e@f.com"]),
+       parseSuperUsers("A@b.com, c@d.com\n e@f.com"));
+    // The difference from HEARTH_ALLOWED_EMAILS, and the whole reason this is its own
+    // module: "@gmail.com" in the allowlist means "my family may sign in", which is
+    // sensible. Here it would mean "anyone at gmail.com may read every household's
+    // thank-yous", which nobody means to type — so it is dropped, not honoured.
+    ok("41.1b but an @domain entry is dropped rather than honoured",
+       parseSuperUsers("@gmail.com, real@person.test").length === 1 &&
+         !isSuperUserEmail("anyone@gmail.com", parseSuperUsers("@gmail.com")),
+       parseSuperUsers("@gmail.com, real@person.test"));
+    ok("41.1c and a word that is not an address is not one",
+       parseSuperUsers("admin, root").length === 0);
+    ok("41.1d matching ignores case and surrounding space",
+       isSuperUserEmail("  Someone@Example.test ", ["someone@example.test"]));
+    ok("41.1e nobody is a super user by default",
+       !isSuperUserEmail("someone@example.test", []) && !isSuperUserEmail(null, ["a@b.c"]));
+
+    // --- fixtures: one note owed by Alice, one owed by Bob ---------------
+    const aCard = await prisma.person.findFirstOrThrow({ where: { linkedUserId: A.id } });
+    const bCard = await prisma.person.findFirstOrThrow({ where: { linkedUserId: B.id } });
+    const aGiver = await prisma.person.create({
+      data: {
+        ownerId: A.id, displayName: "Owed To Alice", givenName: "Owed", familyName: "Alice",
+        contactPoints: { create: [{ kind: "EMAIL", value: "owed.alice@e2e.test", order: 0 }] },
+      },
+    });
+    const bGiver = await prisma.person.create({
+      data: {
+        ownerId: B.id, displayName: "Owed To Bob", givenName: "Owed", familyName: "Bob",
+        contactPoints: { create: [{ kind: "EMAIL", value: "owed.bob@e2e.test", order: 0 }] },
+      },
+    });
+    const aGift = await prisma.gift.create({
+      data: {
+        ownerId: A.id, description: "A brass telescope",
+        givers: givenBy(aGiver.id),
+        recipients: { create: [{ personId: aCard.id }] },
+      },
+    });
+    const bGift = await prisma.gift.create({
+      data: {
+        ownerId: B.id, description: "A tin whistle",
+        givers: givenBy(bGiver.id),
+        recipients: { create: [{ personId: bCard.id }] },
+      },
+    });
+
+    // --- the boundary, in the direction with no grant --------------------
+    //
+    // §5 grants Bob blanket read of Alice's contacts, so "Bob cannot see this" is never
+    // true of anything Alice owns. Asserted the other way round: Alice holds no grant over
+    // Bob, and Alice is not a super user.
+    const alicesOwn = await listThankYousOwed(A.id);
+    ok("41.2 a plain user's list is their own notes",
+       alicesOwn.everyone === false &&
+         alicesOwn.rows.some((r) => r.giverDisplayName === "Owed To Alice"),
+       [alicesOwn.everyone, alicesOwn.rows.length]);
+    ok("41.2b and does not include another household's",
+       !alicesOwn.rows.some((r) => r.giverDisplayName === "Owed To Bob"),
+       alicesOwn.rows.map((r) => r.giverDisplayName));
+
+    const bobsView = await listThankYousOwed(B.id);
+    ok("41.3 a super user's list is everybody's",
+       bobsView.everyone === true &&
+         bobsView.rows.some((r) => r.giverDisplayName === "Owed To Bob") &&
+         bobsView.rows.some((r) => r.giverDisplayName === "Owed To Alice"),
+       [bobsView.everyone, bobsView.rows.map((r) => r.giverDisplayName).slice(0, 6)]);
+    // Which row belongs to whom, or a widened view reads as your own backlog.
+    ok("41.3b saying whose each one is",
+       bobsView.rows.find((r) => r.giverDisplayName === "Owed To Alice")?.owedByUserId ===
+         A.id);
+
+    // --- a note that actually went clears the row ------------------------
+    //
+    // sentAt is load-bearing: a separate send that failed for one giver leaves a row with
+    // sentAt null, and counting that as thanked reports a bounce as a note delivered.
+    const failedSend = await prisma.thankYouSend.create({
+      data: {
+        giftId: aGift.id, fromPersonId: aCard.id, sentByUserId: A.id,
+        message: "Never left the building",
+        givers: { create: [{ giverPersonId: aGiver.id, giftId: aGift.id, sentAt: null }] },
+      },
+    });
+    ok("41.4 a send that never left still owes the note",
+       (await listThankYousOwed(A.id)).rows.some((r) => r.giftId === aGift.id));
+    await prisma.thankYouSendGiver.updateMany({
+      where: { sendId: failedSend.id },
+      data: { sentAt: new Date() },
+    });
+    ok("41.4b and stops owing it once it has gone",
+       !(await listThankYousOwed(A.id)).rows.some((r) => r.giftId === aGift.id));
+    await prisma.thankYouSend.delete({ where: { id: failedSend.id } });
+
+    // --- the page --------------------------------------------------------
+    await A.page.goto("/thank-yous");
+    const aBody = (await A.page.textContent("body")) ?? "";
+    ok("41.5 the page lists what the viewer owes",
+       aBody.includes("A brass telescope") && aBody.includes("Owed To Alice"));
+    ok("41.5b and not another household's", !aBody.includes("A tin whistle"), aBody.includes("A tin whistle"));
+    // Reads, never sends. Writing a note needs the addressing choice, the attachments and
+    // the present in front of you — and sending from a list is how the wrong note goes to
+    // the wrong person quickly.
+    ok("41.5c and offers no way to send from the list itself",
+       (await A.page.$$('button:has-text("write thank you")')).length === 0 &&
+         (await A.page.$$("dialog")).length === 0);
+
+    await B.page.goto("/thank-yous");
+    const bBody = (await B.page.textContent("body")) ?? "";
+    ok("41.6 a super user's page shows both households",
+       bBody.includes("A tin whistle") && bBody.includes("A brass telescope"),
+       [bBody.includes("A tin whistle"), bBody.includes("A brass telescope")]);
+    ok("41.6b and says why it is wider than usual",
+       bBody.includes("HEARTH_SUPER_USERS"));
+
+    // --- the badge counts YOUR notes, not everybody's --------------------
+    //
+    // A badge is a prompt to act, and somebody else's unwritten note is not something you
+    // can act on. This is the check that would catch the badge being fed the audit list.
+    const bOwn = await countThankYousOwedByMe(B.id);
+    const bAll = (await listThankYousOwed(B.id)).rows.length;
+    ok("41.7 the super user's own count is smaller than everybody's",
+       bOwn < bAll && bOwn >= 1, [bOwn, bAll]);
+    const badge = await B.page.textContent('nav a[href="/thank-yous"]');
+    ok("41.7b and the badge in the nav shows the own count",
+       (badge ?? "").trim() === `Thank-yous${bOwn}`, [badge, bOwn]);
+
+    await prisma.gift.deleteMany({ where: { id: { in: [aGift.id, bGift.id] } } });
+    await prisma.person.deleteMany({ where: { id: { in: [aGiver.id, bGiver.id] } } });
+  }
+
   section("§22 On a phone");
 
   // Measured, not eyeballed. Every page was 529px wide against a 390px viewport, so the

@@ -93,6 +93,16 @@ is that **`sendMail` posts over plain `fetch`**, never touching the OAuth client
 `canSendMail` fails it and nothing else. It fails OPEN on a typo, because a self-hosted install
 that quietly stopped syncing would be worse than one that kept going.
 
+**The Thank-yous page is the ONE place the sharing boundary is crossed on purpose.**
+`thankYouAuditCardsWhere` in `access.ts` decides: a super user reads gift descriptions and
+giver names from households they cannot otherwise see. It lives there, not in the page,
+because a second way to read a gift is what `access.ts` exists to prevent — and it is proven
+by forcing the widened branch and watching §41.2/41.2b/41.5b fail with Alice seeing "Owed To
+Bob". The role is derived from `HEARTH_SUPER_USERS` and has NO column: same reasoning as the
+sign-in allowlist, and its only power is that page. The nav badge deliberately counts the
+viewer's OWN notes through `thankableCardsWhere` — a badge is a prompt to act, and somebody
+else's unwritten note is not actionable; §41.7 is that check.
+
 **The trash never empties itself.** No retention window, no pruning job, no "after 30
 days" setting — ever, by explicit design. Bulk convenience for the human (Empty trash) is
 fine; automatic expiry is not. Restoring must keep working, so trashing keeps every related
@@ -263,6 +273,10 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   like a tidy-up and is a behaviour change: it would refuse an install whose operator turned
   the flag off after consenting. It belongs in `mailBlockedFor`'s explanation — it is usually
   why the scope is missing — never in the decision.
+- **A role read from the environment must reach BOTH processes.** The harness set
+  `HEARTH_SUPER_USERS` in the server's env only, so a page rendered Bob as a super user while
+  the same helper called in-process said he was not — §41.3 failed while the feature worked.
+  `harness.mts` now sets `process.env` too, the way it already does for `DATABASE_URL`.
 - **A probe has to be a control the feature keeps.** Three checks used the guest list's
   per-row form as their evidence that "the controls are showing" — first the RSVP dropdown,
   then the role dropdown, then the Update button — and each stopped existing when a Hearth-only

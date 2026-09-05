@@ -9,6 +9,7 @@ import {
 } from "@/lib/theme";
 import { AppearanceProvider } from "@/components/appearance-provider";
 import { AppNav } from "@/components/nav";
+import { countThankYousOwedByMe } from "@/lib/thank-yous-owed";
 import { AppFooter } from "@/components/app-footer";
 
 export const metadata: Metadata = {
@@ -33,7 +34,12 @@ export default async function RootLayout({
     <html lang="en" {...htmlAppearanceProps(appearance)}>
       <body className="flex min-h-dvh flex-col bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
         <AppearanceProvider initial={appearance}>
-          {user ? <AppNav user={user} /> : null}
+          {user ? (
+            <AppNav
+              user={user}
+              thankYousOwed={await countThankYousOwedByMe(user.id)}
+            />
+          ) : null}
           {/* max-w-5xl left roughly half a wide screen as margin. This is a data-dense
             app whose pages are two columns of cards, so it earns the width; the read
             column is bounded by the grid rather than by the page. py-8 was also more

@@ -49,6 +49,17 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Added
 
+- **A Thank-yous page**, in the top-level nav with a count badge. Every note still to write,
+  oldest first, one row per giver — a present from a couple earns two notes and may have had
+  one of them written. It reads only: each row links to the record holding the present, where
+  the note gets written with its addressing choice and attachments.
+- **`HEARTH_SUPER_USERS`** — a role, not a column. Addresses listed there see every user's
+  outstanding thank-yous on that page instead of their own, which is useful when one person
+  in a household keeps track of whether the letters went out. It grants nothing else: no
+  contacts, no events, no settings, and no sending on somebody else's behalf. A variable
+  rather than a database flag so it is right on first boot without SQL, survives a restore,
+  and cannot be locked out. `@domain` entries are ignored rather than honoured.
+
 - **`try-hearth.sh` — a throwaway Hearth beside the real one**, for testing a build without
   releasing it. Clone into a temp directory, run it from that clone, try things, `--down`,
   delete the directory. Production's checkout, `.env` and containers are never touched.

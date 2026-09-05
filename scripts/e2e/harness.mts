@@ -204,6 +204,11 @@ export async function start(): Promise<Harness> {
     AUTH_TRUST_HOST: "true",
     // The whole point: no background reach for Google with credentials that cannot work.
     SYNC_ENABLED: "false",
+    // Bob is this suite's super user, so §41 can assert both sides of the role against the
+    // running server: Alice is not one and must not see Bob's outstanding thank-yous; Bob is
+    // and must. Decided here because the role is read from the environment at request time
+    // but the server's environment is fixed when it spawns, so no check can flip it mid-run.
+    HEARTH_SUPER_USERS: "bob@e2e.test",
     // Passed through so a test can stand a fake Ollama up on a known port and exercise the
     // "ask" button for real. Empty means no model, which is what an ordinary install has.
     OLLAMA_URL: process.env.OLLAMA_URL ?? "",
@@ -220,6 +225,12 @@ export async function start(): Promise<Harness> {
   // ended cleanly leaked a server, which is how fourteen of them accumulated in a day and
   // starved the machine until tsc and the editor started being killed. The pid file said
   // nothing was outstanding, because the pid it recorded had indeed died.
+  // In THIS process too, not only the server's. Checks call these helpers directly, and a
+  // role read from the environment must give one answer whichever side asks — §41.3 failed
+  // exactly that way: the page rendered Bob as a super user and the same function called
+  // in-process said he was not, because only the child had the variable.
+  process.env.HEARTH_SUPER_USERS = env.HEARTH_SUPER_USERS;
+
   const app: ChildProcess = spawn("npx", ["next", "start", "-p", String(appPort), "-H", "127.0.0.1"], {
     env, cwd: REPO, stdio: ["ignore", "pipe", "pipe"], detached: true,
   });

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isSuperUserEmail } from "@/lib/super-users";
 // Type-only: the query language is handed its clauses by loadViewer below rather than
 // importing this module, so that a client component importing people-filter.ts does not
 // reach auth.ts through it. See the note in search/predicates.ts.
@@ -107,7 +108,11 @@ export function writablePeopleWhere(userId: string): Prisma.PersonWhereInput {
       {
         owner: {
           sharesGiven: {
-            some: { withUserId: userId, scope: "ALL_PEOPLE", permission: "EDIT" },
+            some: {
+              withUserId: userId,
+              scope: "ALL_PEOPLE",
+              permission: "EDIT",
+            },
           },
         },
       },
@@ -139,7 +144,11 @@ export function writableEventsWhere(userId: string): Prisma.EventWhereInput {
       {
         owner: {
           sharesGiven: {
-            some: { withUserId: userId, scope: "ALL_EVENTS", permission: "EDIT" },
+            some: {
+              withUserId: userId,
+              scope: "ALL_EVENTS",
+              permission: "EDIT",
+            },
           },
         },
       },
@@ -204,6 +213,51 @@ export async function thankableCardIds(userId: string): Promise<Set<string>> {
  * Narrower than the id list used to be in one respect, deliberately: a card in the trash is
  * not thankable, because a trashed contact is invisible everywhere else too.
  */
+/**
+ * Whether this user holds the super-user role.
+ *
+ * Read from the environment against their address, never from a column — see
+ * `super-users.ts` for why. One query, because the role is about the person and the session
+ * carries only what Auth.js put in it.
+ */
+export async function isSuperUser(userId: string): Promise<boolean> {
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true },
+  });
+  return isSuperUserEmail(me?.email);
+}
+
+/**
+ * Whose outstanding thank-yous this viewer may see.
+ *
+ * The ONE place the sharing boundary is deliberately crossed, and only for the thank-yous
+ * page: a super user sees every user's outstanding notes, which means seeing gift
+ * descriptions and giver names from households they cannot otherwise read. That is the
+ * point of the role, and it is expressed here rather than inlined in the page because a
+ * second way to read a gift is exactly what `access.ts` exists to prevent.
+ *
+ * Everyone else gets `thankableCardsWhere` unchanged — their own card, plus anybody who
+ * ticked "let the head of the household write my thank-yous" if they are that head.
+ *
+ * "Every user's" means every card LINKED to a user. A contact who is not a user has nobody
+ * to write for them, which is the same answer `thankableCardsWhere` gives and not a gap.
+ */
+export async function thankYouAuditCardsWhere(
+  userId: string,
+): Promise<{ cards: Prisma.PersonWhereInput; everyone: boolean }> {
+  const [isHead, isSuper] = await Promise.all([
+    isHeadOfHousehold(userId),
+    isSuperUser(userId),
+  ]);
+  if (!isSuper)
+    return { cards: thankableCardsWhere(userId, isHead), everyone: false };
+  return {
+    cards: { deletedAt: null, linkedUserId: { not: null } },
+    everyone: true,
+  };
+}
+
 export function thankableCardsWhere(
   userId: string,
   isHead: boolean,
@@ -215,7 +269,9 @@ export function thankableCardsWhere(
       { linkedUserId: userId },
       // And anybody who ticked "let the head of the household write my thank-yous", if you
       // are that head. The relation implies linkedUserId is set, so no separate test.
-      ...(isHead ? [{ linkedUser: { settings: { allowHeadThankYous: true } } }] : []),
+      ...(isHead
+        ? [{ linkedUser: { settings: { allowHeadThankYous: true } } }]
+        : []),
     ],
   };
 }
@@ -310,7 +366,10 @@ export async function requireOwnedEvent(
 // same writable*Where predicate the action guards use, so a control can never be
 // offered by a page that the action behind it will refuse — the bug these fix.
 
-export async function canWritePerson(userId: string, personId: string): Promise<boolean> {
+export async function canWritePerson(
+  userId: string,
+  personId: string,
+): Promise<boolean> {
   const found = await prisma.person.findFirst({
     where: { id: personId, ...writablePeopleWhere(userId) },
     select: { id: true },
@@ -318,7 +377,10 @@ export async function canWritePerson(userId: string, personId: string): Promise<
   return found !== null;
 }
 
-export async function canWriteEvent(userId: string, eventId: string): Promise<boolean> {
+export async function canWriteEvent(
+  userId: string,
+  eventId: string,
+): Promise<boolean> {
   const found = await prisma.event.findFirst({
     where: { id: eventId, ...writableEventsWhere(userId) },
     select: { id: true },

@@ -9,11 +9,22 @@ import { HearthMark } from "@/components/hearth-mark";
 const links = [
   { href: "/people", label: "People" },
   { href: "/events", label: "Events" },
+  // Between Events and Trash: it is work you come back to, like the two above it, rather
+  // than configuration. The badge is what makes it worth a top-level slot — an unwritten
+  // thank-you is invisible everywhere else until you happen to open the right present.
+  { href: "/thank-yous", label: "Thank-yous" },
   { href: "/trash", label: "Trash" },
   { href: "/settings", label: "Settings" },
 ];
 
-export function AppNav({ user }: { user: CurrentUser }) {
+export function AppNav({
+  user,
+  thankYousOwed = 0,
+}: {
+  user: CurrentUser;
+  /** The viewer's OWN count, never a super user's wider one — see thank-yous-owed.ts. */
+  thankYousOwed?: number;
+}) {
   return (
     <header className="border-b border-neutral-200 bg-white/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/80">
       {/*
@@ -37,9 +48,15 @@ export function AppNav({ user }: { user: CurrentUser }) {
             <Link
               key={l.href}
               href={l.href}
-              className="rounded-md px-2.5 py-1.5 text-sm text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              className="inline-flex items-center rounded-md px-2.5 py-1.5 text-sm text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
             >
               {l.label}
+              {l.href === "/thank-yous" && thankYousOwed > 0 ? (
+                // A number, not a dot: "three notes" is a different afternoon from "one".
+                <span className="ml-1.5 rounded-full bg-accent-100 px-1.5 py-0.5 text-xs font-medium text-accent-800 dark:bg-accent-900 dark:text-accent-200">
+                  {thankYousOwed}
+                </span>
+              ) : null}
             </Link>
           ))}
         </nav>
