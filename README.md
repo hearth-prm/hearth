@@ -347,6 +347,27 @@ its own, restores the dump into a Postgres of its own under `./.try/postgres`, t
 app so its migrations run against real rows. `--empty` skips the data, `--dump <file>` uses one
 you already have, and `--status` says what the stack is doing.
 
+### Testing on a different machine from the server
+
+Point `--from` at an ssh URL and the dump and the settings come over ssh, while everything else
+runs locally:
+
+```bash
+sh try-hearth.sh --from ssh://root@your-server/mnt/user/appdata/hearth/app
+```
+
+The dump is compressed on the far side, so what crosses the network is gzip. Needs key-based
+ssh — the script runs with `BatchMode`, so it will not sit waiting for a password.
+
+Two things get easier this way. There is no port or data-directory collision to guard against,
+so `--port` may be anything including production's. And you can reach the app at
+`http://localhost:3081` directly, with no tunnel, though the OAuth client still needs that
+redirect URI added.
+
+One thing to be aware of: this puts a full copy of your household's contact data on whichever
+machine you run it from. That is the point of it, but it is worth being deliberate about which
+machine.
+
 **Migrations are the point of testing on a copy.** Before starting the app the script lists
 every migration this build will apply to the test database, and names any marked destructive —
 so "does the new code change the schema" is answered before anything runs, not discovered

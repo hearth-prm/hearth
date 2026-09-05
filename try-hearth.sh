@@ -41,6 +41,9 @@
 #   --project <name>  Compose project. Default hearth-try
 #   --from <path>     Production checkout to dump and copy settings from.
 #                     Default /mnt/user/appdata/hearth/app
+#                     Also takes ssh://user@host/path, to test on a DIFFERENT machine
+#                     from the one production runs on — the dump and the settings are
+#                     then fetched over ssh and everything else stays local.
 #   --dump <file>     Restore this dump instead of taking a fresh one.
 #   --empty           No data at all. Fast, but exercises no migration.
 #   --keep-data       Reuse the test database already there.
@@ -64,6 +67,7 @@ ASSUME_YES="no"
 ACTION="up"
 PROD_USER="hearth"
 PROD_DB="hearth"
+REMOTE="" # set when --from is an ssh:// URL
 
 say() { printf '[try-hearth] %s\n' "$*"; }
 warn() { printf '[try-hearth] !! %s\n' "$*"; }
@@ -101,6 +105,35 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- where production is, and how to reach it ------------------------------
+#
+# Local by default. An ssh:// URL means production lives on another machine — the dump
+# and the settings come over ssh and everything else still happens here, which is the
+# whole point of testing somewhere that is not the server.
+case "$FROM" in
+ssh://*)
+  rest="${FROM#ssh://}"
+  # A missing slash makes ${rest#*/} return the whole string, so "ssh://justahost" would
+  # become host "justahost" and path "/justahost" and fail later with a confusing message
+  # about a path nobody typed. Checked for a separator instead.
+  case "$rest" in
+  */?*) REMOTE="${rest%%/*}" && FROM="/${rest#*/}" ;;
+  *) die "--from ssh://user@host/path needs a path after the host" ;;
+  esac
+  [ -n "$REMOTE" ] || die "--from ssh://user@host/path needs a host"
+  ;;
+esac
+
+# Run a command where production is: here, or over ssh. Single call site for both, so
+# the local and remote paths cannot drift apart.
+prod_sh() {
+  if [ -n "$REMOTE" ]; then
+    ssh -o BatchMode=yes "$REMOTE" "$1"
+  else
+    sh -c "$1"
+  fi
+}
+
 [ -n "$DATA" ] || DATA="$SELF_DIR/.try/postgres"
 ENV_FILE="$SELF_DIR/.env.try"
 COMPOSE="$SELF_DIR/docker-compose.yml"
@@ -120,26 +153,42 @@ docker compose version >/dev/null 2>&1 || die "this docker has no 'compose' subc
 [ "$PROJECT" != "hearth" ] ||
   die "--project hearth IS the production project. That collision is why this script exists."
 
-[ "$SELF_DIR" != "$FROM" ] ||
+{ [ -n "$REMOTE" ] || [ "$SELF_DIR" != "$FROM" ]; } ||
   die "this is the production checkout ($FROM). Clone somewhere else and run it from there."
 
-if [ -f "$FROM/.env" ]; then
-  # Only the keys that matter, never the whole file: it holds AUTH_SECRET, the database
-  # password and the Google client secret.
-  PROD_PORT=$(sed -n 's/^APP_PORT=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
-  PROD_PGDATA=$(sed -n 's/^PGDATA_PATH=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
-  PU=$(sed -n 's/^POSTGRES_USER=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
-  PD=$(sed -n 's/^POSTGRES_DB=\(.*\)/\1/p' "$FROM/.env" | tail -n 1)
+# Production's environment, fetched once. It holds AUTH_SECRET, the database password
+# and the Google client secret, so it is read into a variable and never echoed.
+PROD_ENV=""
+if [ -n "$REMOTE" ]; then
+  command -v ssh >/dev/null 2>&1 || die "--from ssh:// needs ssh on PATH"
+  PROD_ENV=$(prod_sh "cat '$FROM/.env'" 2>/dev/null || true)
+  [ -n "$PROD_ENV" ] ||
+    die "could not read $FROM/.env on $REMOTE — is the path right, and does your key work? (ssh $REMOTE true)"
+elif [ -f "$FROM/.env" ]; then
+  PROD_ENV=$(cat "$FROM/.env")
+fi
+
+if [ -n "$PROD_ENV" ]; then
+  from_env() { printf '%s\n' "$PROD_ENV" | sed -n "s/^$1=\(.*\)/\1/p" | tail -n 1; }
+  PROD_PORT=$(from_env APP_PORT)
+  PROD_PGDATA=$(from_env PGDATA_PATH)
+  PU=$(from_env POSTGRES_USER)
+  PD=$(from_env POSTGRES_DB)
   [ -z "$PU" ] || PROD_USER="$PU"
   [ -z "$PD" ] || PROD_DB="$PD"
-  [ "$APP_PORT" != "${PROD_PORT:-3000}" ] ||
-    die "--port $APP_PORT is the production port. Pick another."
-  if [ -n "${PROD_PGDATA:-}" ]; then
-    case "$DATA" in
-    "$PROD_PGDATA" | "$PROD_PGDATA"/*)
-      die "the test database would land in production's data directory ($PROD_PGDATA)."
-      ;;
-    esac
+  # Collisions are only possible when the two share a machine. On a remote production
+  # the local port and data directory cannot clash with anything of its, so insisting
+  # would refuse a perfectly safe run.
+  if [ -z "$REMOTE" ]; then
+    [ "$APP_PORT" != "${PROD_PORT:-3000}" ] ||
+      die "--port $APP_PORT is the production port. Pick another."
+    if [ -n "${PROD_PGDATA:-}" ]; then
+      case "$DATA" in
+      "$PROD_PGDATA" | "$PROD_PGDATA"/*)
+        die "the test database would land in production's data directory ($PROD_PGDATA)."
+        ;;
+      esac
+    fi
   fi
 fi
 
@@ -219,9 +268,9 @@ say "image     $TAG   ·  port $APP_PORT  ·  project $PROJECT"
 # .env.try, never .env: an existing environment is never overwritten, so this cannot
 # damage a checkout that is also being used for something else.
 
-if [ -f "$FROM/.env" ]; then
-  cp "$FROM/.env" "$ENV_FILE"
-  say "settings copied from production (secrets included, so the dump will open)"
+if [ -n "$PROD_ENV" ]; then
+  printf '%s\n' "$PROD_ENV" >"$ENV_FILE"
+  say "settings taken from production${REMOTE:+ on $REMOTE} (secrets included, so the dump will open)"
 else
   [ -f "$SELF_DIR/.env.example" ] && cp "$SELF_DIR/.env.example" "$ENV_FILE"
   say "no production settings at $FROM — starting from .env.example"
@@ -274,13 +323,23 @@ mkdir -p "$DATA"
 # --- the dump ---------------------------------------------------------------
 
 if [ "$MODE" = "copy" ] && [ -z "$DUMP" ]; then
-  [ -f "$FROM/docker-compose.yml" ] || die "no production install at $FROM (use --empty or --from)"
+  if [ -z "$REMOTE" ] && [ ! -f "$FROM/docker-compose.yml" ]; then
+    die "no production install at $FROM (use --empty, --dump, or --from)"
+  fi
   mkdir -p "$SELF_DIR/.try"
   DUMP="$SELF_DIR/.try/production.sql.gz"
-  say "dumping production — read-only, and it stays up throughout"
-  (cd "$FROM" && docker compose exec -T db \
-    pg_dump -U "$PROD_USER" -d "$PROD_DB" --clean --if-exists) 2>/dev/null | gzip >"$DUMP" ||
-    die "the dump failed — is production running? (docker compose ps in $FROM)"
+  say "dumping production${REMOTE:+ over ssh from $REMOTE} — read-only, and it stays up throughout"
+  # Gzipped on the far side when it is remote, so what crosses the network is compressed
+  # and the local end only has to write bytes.
+  if [ -n "$REMOTE" ]; then
+    prod_sh "cd '$FROM' && docker compose exec -T db pg_dump -U '$PROD_USER' -d '$PROD_DB' --clean --if-exists | gzip" \
+      >"$DUMP" 2>/dev/null ||
+      die "the dump failed on $REMOTE — is production running there? (ssh $REMOTE 'cd $FROM && docker compose ps')"
+  else
+    (cd "$FROM" && docker compose exec -T db \
+      pg_dump -U "$PROD_USER" -d "$PROD_DB" --clean --if-exists) 2>/dev/null | gzip >"$DUMP" ||
+      die "the dump failed — is production running? (docker compose ps in $FROM)"
+  fi
   [ -s "$DUMP" ] || die "the dump came out empty; refusing to restore nothing"
   say "dumped $(du -h "$DUMP" | cut -f1)"
 elif [ -n "$DUMP" ]; then

@@ -38,6 +38,10 @@ of a green test suite alone where a real address book can be asked instead.
     apply to the test database and names any marked destructive; afterwards it confirms each one
     landed. That is the whole reason to test on a copy of real data: a migration that *copies*
     data is invisible to the automated suite, whose database is always empty.
+  - **`--from ssh://user@host/path`** tests a build on a different machine from the one
+    production runs on: the dump and the settings come over ssh — compressed on the far side —
+    and everything else stays local. The port and data-directory guards stand down for a remote
+    production, since nothing local can collide with it.
   - `--status`, `--down`, `--empty`, `--dump`, `--data`, `--port`, `--project`, `--from`.
   - It exists because `docker-compose.yml` pins `name: hearth`: a second checkout on one host is
     the *same Compose project*, and one forgotten `-p` recreates production with the test
