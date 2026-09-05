@@ -1,5 +1,23 @@
 import type { Attachment, OutgoingMail } from "@/lib/google/mail";
 
+/**
+ * Why this install cannot send a thank-you, when it cannot.
+ *
+ * `canSendMail` answers a boolean, and three unrelated things make it false: the write
+ * switch is off, mail was never enabled for the install, or the Google grant lacks the
+ * send scope. The gift row used to render all three as one disabled button whose only
+ * explanation was a `title` — and it guessed the reason wrong, telling somebody to
+ * reconnect Google when reconnecting could not have helped. A cause collapsed into a
+ * boolean has to be guessed at by whoever displays it.
+ *
+ * `short` goes where the link would have been, so the row says why at a glance. `full` is
+ * the hover, and says what to do about it.
+ */
+export interface MailBlock {
+  short: string;
+  full: string;
+}
+
 /** How a note to several givers is addressed. */
 export const ADDRESSING_MODES = ["together", "separate", "bcc"] as const;
 export type Addressing = (typeof ADDRESSING_MODES)[number];

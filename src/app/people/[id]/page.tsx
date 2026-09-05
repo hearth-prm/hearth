@@ -45,7 +45,7 @@ import {
   sendThankYouNote,
   updateGift,
 } from "@/lib/actions/gifts";
-import { canSendMail } from "@/lib/google/mail";
+import { mailBlockedFor } from "@/lib/google/mail";
 import { ShareRecordForm } from "@/components/share-forms";
 import { LabelChips } from "@/components/label-chip";
 import { Avatar } from "@/components/avatar";
@@ -165,7 +165,7 @@ export default async function PersonPage({
     ownerLabels,
     gifts,
     versions,
-    mailAllowed,
+    mailBlock,
   ] = await Promise.all([
       loadRegistry(person.ownerId, "PERSON"),
       loadRelationshipsFor(person.ownerId, person.id),
@@ -201,7 +201,7 @@ export default async function PersonPage({
       // No access check of its own: a version says nothing the contact does not, and
       // this page has already established that the contact is readable.
       loadPersonVersions(person.id),
-      canSendMail(user.id),
+      mailBlockedFor(user.id),
     ]);
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
@@ -515,7 +515,7 @@ export default async function PersonPage({
             updateAction={updateGift}
             removeAction={removeGift}
             sendAction={sendThankYouNote}
-            canSend={mailAllowed}
+            mailBlock={mailBlock}
           />
 
           {person.googleEvents.length > 0 ? (

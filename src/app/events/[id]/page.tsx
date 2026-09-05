@@ -38,7 +38,7 @@ import {
   ThankYouControl,
 } from "@/components/gift-forms";
 import { listGiftsForEvent, listGiftRecipients } from "@/lib/gifts";
-import { canSendMail } from "@/lib/google/mail";
+import { mailBlockedFor } from "@/lib/google/mail";
 import {
   addGift,
   addGiftRecipient,
@@ -106,10 +106,10 @@ export default async function EventPage({
 
   const shareableUsers = isOwner ? await listOtherUsers(user.id) : [];
 
-  const [gifts, giftRecipients, mailAllowed] = await Promise.all([
+  const [gifts, giftRecipients, mailBlock] = await Promise.all([
     listGiftsForEvent(user.id, event.id),
     listGiftRecipients(event.id),
-    canSendMail(user.id),
+    mailBlockedFor(user.id),
   ]);
 
   // Anyone readable can be a giver; recipients are drawn from the gift list, which is
@@ -359,7 +359,7 @@ export default async function EventPage({
                                           thanked: !mine.outstandingGiverIds.includes(g.id),
                                         }))}
                                         lastNote={mine.thankYous[0]?.message ?? null}
-                                        canSend={mailAllowed}
+                                        mailBlock={mailBlock}
                                         yours={mine.canThank}
                                       />
                                     );

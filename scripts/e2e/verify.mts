@@ -1835,6 +1835,7 @@ try {
        recorded.givers.map((g) => g.personId).includes(auntie.id) &&
        recorded.recipients.map((r) => r.personId).includes(kid.id),
      recorded.description);
+
   ok("16.4b including a note of its own", recorded.notes === "Hand-knitted", recorded.notes);
   ok("16.4c and no date, since the event already answers when",
      recorded.receivedOn === null, recorded.receivedOn);
@@ -1848,6 +1849,61 @@ try {
     .catch(() => null);
   ok("16.4d and the giver is a way to their contact page",
      giverLink?.trim() === "Gift Auntie", giverLink);
+
+  // --- the giver picker filters, and does not lose what you already ticked ---
+  //
+  // Both sides used to render every readable contact as checkboxes in a 160px scroll box —
+  // up to 500 of them — so finding one person meant scrolling past everybody who sorts
+  // earlier. Typing filters them now, which introduces the trap this section is really
+  // about: a checkbox that is filtered out of the DOM submits nothing, so a ticked person
+  // hidden by the filter would vanish from the gift with nothing on screen saying so.
+  await openGifts();
+  // The form stays open after a save, so the "Record a gift" button that opens it is only
+  // there when it is closed. Either state is fine for what follows; what has to be true is
+  // that the filter box is on screen, and that is asserted rather than waited for silently.
+  const giftOpener = await A.page.$('button:has-text("Record a gift")');
+  if (giftOpener) await giftOpener.click();
+  const fromBox = 'input[aria-label="Filter From"]';
+  await A.page.waitForSelector(fromBox, { timeout: 10_000 });
+  const giverTick = (id: string) => `input[name="giverId"][value="${id}"]`;
+  const visible = async (sel: string) => (await A.page.$$(sel)).length;
+
+  ok("16.4h the giver side offers a filter rather than one long scroll",
+     (await visible(fromBox)) === 1 && (await visible('input[aria-label="Filter To"]')) === 1);
+
+  const allGivers = await visible('input[name="giverId"]');
+  await A.page.fill(fromBox, "auntie");
+  await waitForDb("the giver list to narrow", async () =>
+    (await visible('input[name="giverId"]')) < allGivers);
+  ok("16.4i typing narrows it", (await visible('input[name="giverId"]')) < allGivers,
+     [allGivers, await visible('input[name="giverId"]')]);
+  // Exactly one. Two would mean `giverId` had picked up a second meaning on this page again
+  // — the thank-you dialog used that name too, so an unscoped selector matched both and
+  // this check found "auntie" twice while the filter was working perfectly.
+  ok("16.4j to the people whose name matches", (await visible(giverTick(auntie.id))) === 1,
+     await visible(giverTick(auntie.id)));
+
+  // The load-bearing one. Tick, then filter the ticked person out by name.
+  await A.page.check(giverTick(auntie.id));
+  await A.page.fill(fromBox, "zzzz-matches-nobody");
+  ok("16.4k a ticked giver stays on screen when the filter excludes them",
+     (await visible(giverTick(auntie.id))) === 1);
+  ok("16.4l and stays ticked", await A.page.isChecked(giverTick(auntie.id)));
+
+  // Not "the checkbox is still in the DOM" — what matters is that the SERVER received them.
+  await A.page.check(`input[name="recipientId"][value="${kid.id}"]`);
+  await A.page.fill('input[name="description"]', "A hidden-while-ticked kite");
+  await A.page.click('button:has-text("Save gift")');
+  await waitForDb("the second gift to be recorded", async () =>
+    (await prisma.gift.count({ where: { eventId: xmas.id } })) === 2);
+  const kiteGift = await prisma.gift.findFirstOrThrow({
+    where: { eventId: xmas.id, description: "A hidden-while-ticked kite" },
+    include: { givers: true },
+  });
+  ok("16.4m and is recorded as a giver, having been submitted while filtered out",
+     kiteGift.givers.map((g) => g.personId).includes(auntie.id),
+     kiteGift.givers.map((g) => g.personId));
+  await prisma.gift.delete({ where: { id: kiteGift.id } });
 
   // Both directions from a contact page, which is the case a fixed recipient could not
   // express: what Auntie GAVE, not only what she was given.
@@ -2249,8 +2305,18 @@ try {
   });
   await A.page.reload();
   await openGifts();
+  // The probe was "the button is disabled". There is no button now: a faded link whose only
+  // explanation is a title attribute is indistinguishable from a broken one, which is how
+  // this got reported — "I click it and nothing happens". So the claim becomes "no control,
+  // and the row says why", which is what was actually meant all along.
   ok("16.19g with no permission to send, the control is refused up front",
-     await A.page.isDisabled('button:has-text("write thank you")'));
+     (await A.page.$$('button:has-text("write thank you")')).length === 0);
+  // Deterministic: the harness never sets HEARTH_ENABLE_MAIL for the server it starts, so
+  // the reason the scope is absent is that this install never asks for it — and telling
+  // somebody to reconnect Google here would be advice that cannot work.
+  ok("16.19h and says why in the row, not only in a tooltip",
+     (await A.page.$$('text="email is off for this install"')).length >= 1,
+     (await A.page.$$('text="email is off for this install"')).length);
   await prisma.account.updateMany({
     where: { userId: A.id, provider: "google" },
     data: { scope: "openid email https://www.googleapis.com/auth/gmail.send" },
@@ -6775,10 +6841,12 @@ try {
   await A.page.goto(`/people/${myCard.id}`);
   await A.page.click('button:has-text("write thank you")');
   await A.page.waitForSelector("dialog[open] textarea", { timeout: 10_000 });
+  // thankGiverId, not giverId: the dialog's field was renamed because the gift form on the
+  // same page owns the other name, and one selector was matching both.
   ok("37.13 the dialog offers both givers, ticked",
-     (await A.page.$$('dialog[open] input[name="giverId"]')).length === 2 &&
-       (await A.page.isChecked(`dialog[open] input[name="giverId"][value="${karenG.id}"]`)),
-     (await A.page.$$('dialog[open] input[name="giverId"]')).length);
+     (await A.page.$$('dialog[open] input[name="thankGiverId"]')).length === 2 &&
+       (await A.page.isChecked(`dialog[open] input[name="thankGiverId"][value="${karenG.id}"]`)),
+     (await A.page.$$('dialog[open] input[name="thankGiverId"]')).length);
   ok("37.13b and the addressing dropdown, because there is more than one to address",
      (await A.page.$$('dialog[open] select[name="addressing"]')).length === 1);
   ok("37.13c each option explaining itself on hover",
@@ -6789,7 +6857,7 @@ try {
      (await A.page.$$('dialog[open] input[type="file"][name="attachment"]')).length === 1);
 
   // Untick one and the choice disappears, because one recipient has no addressing.
-  await A.page.uncheck(`dialog[open] input[name="giverId"][value="${kennyG.id}"]`);
+  await A.page.uncheck(`dialog[open] input[name="thankGiverId"][value="${kennyG.id}"]`);
   ok("37.14 the dropdown is gone once only one person is being thanked",
      (await A.page.$$('dialog[open] select[name="addressing"]')).length === 0);
   await A.page.keyboard.press("Escape");

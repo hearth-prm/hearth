@@ -1,5 +1,6 @@
 import { getGoogleClient, GoogleAuthError } from "@/lib/google/auth";
-import { GMAIL_SEND_SCOPE, googleWritesEnabled } from "@/lib/google/scopes";
+import { GMAIL_SEND_SCOPE, googleWritesEnabled, mailEnabled } from "@/lib/google/scopes";
+import type { MailBlock } from "@/lib/thank-you";
 import { prisma } from "@/lib/db";
 
 /**
@@ -18,12 +19,44 @@ import { prisma } from "@/lib/db";
  * what the UI asks: an install that cannot send should not offer a send button that fails.
  */
 export async function canSendMail(userId: string): Promise<boolean> {
-  if (!googleWritesEnabled()) return false;
+  return (await mailBlockedFor(userId)) === null;
+}
+
+/**
+ * The same question, answered with its reason — null when mail can be sent.
+ *
+ * Order matters: the install-wide switches are checked before the per-user grant, because
+ * "reconnect Google" is useless advice on an install that would refuse the send anyway.
+ */
+export async function mailBlockedFor(userId: string): Promise<MailBlock | null> {
+  if (!googleWritesEnabled()) {
+    return {
+      short: "sending is off here",
+      full: "This install runs with HEARTH_GOOGLE_WRITES=off, so it will not send mail. That is what a test stack standing on a copy of real data is meant to do.",
+    };
+  }
   const account = await prisma.account.findFirst({
     where: { userId, provider: "google" },
     select: { scope: true },
   });
-  return (account?.scope ?? "").split(/\s+/).includes(GMAIL_SEND_SCOPE);
+  if (!(account?.scope ?? "").split(/\s+/).includes(GMAIL_SEND_SCOPE)) {
+    // mailEnabled() is deliberately NOT a condition of its own. It governs whether the scope
+    // is REQUESTED at sign-in, not whether a grant already held may be used, and making it
+    // gate sending would refuse an install whose operator turned the flag off after
+    // consenting — a behaviour change wearing the clothes of a better error message. It
+    // belongs here, though, because it is usually the reason the scope is absent, and
+    // "reconnect Google" is wrong advice on an install that would not ask for it.
+    return mailEnabled()
+      ? {
+          short: "Google has not granted sending",
+          full: "Hearth has not been given permission to send mail as you. Reconnect Google in Settings.",
+        }
+      : {
+          short: "email is off for this install",
+          full: "Thank-you email is not enabled here, so the send permission was never requested. Set HEARTH_ENABLE_MAIL=true, restart, and reconnect Google.",
+        };
+  }
+  return null;
 }
 
 export interface Attachment {

@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { EMPTY_ACTION_STATE, type ActionState } from "@/lib/actions/types";
 import { SubmitButton } from "@/components/submit-button";
+import { PersonPicker } from "@/components/person-picker";
 import {
   btnPrimary,
   btnSecondary,
@@ -11,6 +12,7 @@ import {
   inputClass,
   labelClass,
 } from "@/components/ui";
+import type { MailBlock } from "@/lib/thank-you";
 import {
   ADDRESSING_HELP,
   ADDRESSING_LABELS,
@@ -51,7 +53,7 @@ export function ThankYouControl({
   recipientId,
   giftDescription,
   givers,
-  canSend,
+  mailBlock,
   yours,
   lastNote,
 }: {
@@ -68,7 +70,7 @@ export function ThankYouControl({
    * unticked rather than hidden. Thanking somebody twice is a thing a person may want to do.
    */
   givers: readonly ThankYouGiver[];
-  canSend: boolean;
+  mailBlock: MailBlock | null;
   /**
    * Whether this gift was given to the person reading.
    *
@@ -91,7 +93,9 @@ export function ThankYouControl({
   // everyone if they all have been, since the alternative is a dialog with nothing ticked.
   const outstanding = givers.filter((g) => !g.thanked && g.email);
   const [chosen, setChosen] = useState<string[]>(
-    (outstanding.length > 0 ? outstanding : givers.filter((g) => g.email)).map((g) => g.id),
+    (outstanding.length > 0 ? outstanding : givers.filter((g) => g.email)).map(
+      (g) => g.id,
+    ),
   );
   const [addressing, setAddressing] = useState<Addressing>("together");
 
@@ -119,11 +123,20 @@ export function ThankYouControl({
 
   if (!yours) return null;
 
-  const blocked = reachable.length === 0
-    ? `${givers.map((g) => g.displayName).join(", ")} ${givers.length === 1 ? "has" : "have"} no email address.`
-    : !canSend
-      ? "Reconnect Google in Settings to allow Hearth to send mail."
-      : null;
+  // Why not, rather than whether. A disabled link whose only explanation is a `title` is
+  // indistinguishable from a broken one, which is exactly how this was reported: "I click
+  // it and nothing happens". The install-wide reasons arrive already worded, because three
+  // different things make sending impossible and only one of them is about Google.
+  const blocked: MailBlock | null =
+    reachable.length === 0
+      ? {
+          short:
+            givers.length === 1
+              ? "no email on file"
+              : "no email addresses on file",
+          full: `${givers.map((g) => g.displayName).join(", ")} ${givers.length === 1 ? "has" : "have"} no email address, so there is nowhere to send a thank-you.`,
+        }
+      : mailBlock;
 
   const picked = givers.filter((g) => chosen.includes(g.id) && g.email);
   // The choice only exists when there is a choice to make: one giver has no addressing.
@@ -131,18 +144,25 @@ export function ThankYouControl({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => dialog.current?.showModal()}
-        disabled={Boolean(blocked)}
-        title={
-          blocked ??
-          `Sends from your own address to ${reachable.map((g) => g.email).join(", ")}.`
-        }
-        className="ml-1 text-xs text-accent-700 underline hover:text-accent-800 disabled:no-underline disabled:opacity-50 dark:text-accent-400"
-      >
-        {owed.length < givers.length ? "thank the rest" : "write thank you"}
-      </button>
+      {blocked ? (
+        // Not a dead button: a faded link that does nothing teaches people the app is
+        // broken rather than that it is unconfigured.
+        <span
+          title={blocked.full}
+          className="ml-1 cursor-help text-xs text-neutral-500 underline decoration-dotted dark:text-neutral-400"
+        >
+          {blocked.short}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => dialog.current?.showModal()}
+          title={`Sends from your own address to ${reachable.map((g) => g.email).join(", ")}.`}
+          className="ml-1 text-xs text-accent-700 underline hover:text-accent-800 dark:text-accent-400"
+        >
+          {owed.length < givers.length ? "thank the rest" : "write thank you"}
+        </button>
+      )}
 
       <dialog
         ref={dialog}
@@ -163,7 +183,10 @@ export function ThankYouControl({
         >
           <div>
             <h2 className="text-sm font-semibold">
-              Thank {picked.length === 1 ? picked[0]!.displayName : `${picked.length} people`}
+              Thank{" "}
+              {picked.length === 1
+                ? picked[0]!.displayName
+                : `${picked.length} people`}
             </h2>
             {/* Naming the addresses, not just the people. With several givers it matters
                 MORE than it did with one: "sent to Karen" does not tell you which of her
@@ -192,22 +215,32 @@ export function ThankYouControl({
                 <label
                   key={g.id}
                   className="flex items-center gap-2 text-sm"
-                  title={g.email ?? "No email address, so this one cannot be sent"}
+                  title={
+                    g.email ?? "No email address, so this one cannot be sent"
+                  }
                 >
                   <input
                     type="checkbox"
-                    name="giverId"
+                    // "thankGiverId", not "giverId". The gift form's own giver picker owns
+                    // that name and is rendered on the same page, so a selector for one
+                    // matched both — the collision the recipientId note above warned about,
+                    // committed with the other field. It cost a debugging cycle to find.
+                    name="thankGiverId"
                     value={g.id}
                     checked={chosen.includes(g.id)}
                     disabled={!g.email}
                     onChange={(e) =>
                       setChosen((prev) =>
-                        e.target.checked ? [...prev, g.id] : prev.filter((id) => id !== g.id),
+                        e.target.checked
+                          ? [...prev, g.id]
+                          : prev.filter((id) => id !== g.id),
                       )
                     }
                     className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
                   />
-                  <span className={g.email ? "" : "text-neutral-400"}>{g.displayName}</span>
+                  <span className={g.email ? "" : "text-neutral-400"}>
+                    {g.displayName}
+                  </span>
                   {g.thanked ? (
                     <span className="text-xs text-emerald-700 dark:text-emerald-400">
                       already thanked
@@ -216,10 +249,10 @@ export function ThankYouControl({
                 </label>
               ))}
             </fieldset>
-          ) : (
-            // One giver: still submitted, so the action never has to guess.
-            picked[0] ? <input type="hidden" name="giverId" value={picked[0].id} /> : null
-          )}
+          ) : // One giver: still submitted, so the action never has to guess.
+          picked[0] ? (
+            <input type="hidden" name="thankGiverId" value={picked[0].id} />
+          ) : null}
 
           {showAddressing ? (
             <label className="block">
@@ -266,9 +299,10 @@ export function ThankYouControl({
               className="mt-1 block w-full text-xs text-neutral-600 file:mr-3 file:rounded file:border-0 file:bg-neutral-100 file:px-2 file:py-1 file:text-xs dark:text-neutral-400 dark:file:bg-neutral-800"
             />
             <span className={helpClass}>
-              Up to {MAX_FILES} files, {Math.round(MAX_TOTAL_BYTES / (1024 * 1024))}MB in
-              total — a photograph of the present being used, usually. A group note carries one
-              copy, however many people it goes to.
+              Up to {MAX_FILES} files,{" "}
+              {Math.round(MAX_TOTAL_BYTES / (1024 * 1024))}MB in total — a
+              photograph of the present being used, usually. A group note
+              carries one copy, however many people it goes to.
             </span>
           </label>
 
@@ -341,7 +375,11 @@ export function GiftForm({
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className={btnSecondary}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={btnSecondary}
+      >
         Record a gift
       </button>
     );
@@ -353,53 +391,24 @@ export function GiftForm({
       {eventId ? <input type="hidden" name="eventId" value={eventId} /> : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <span className={labelClass}>From</span>
-          {/* Checkboxes on this side too, now that a present from a couple is one present
-              rather than two. Same shape as the recipients beside it, which also means the
-              two sides read the same and neither needs explaining twice. */}
-          <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 p-2 dark:border-neutral-700">
-            {givers.map((p) => (
-              <label
-                key={p.id}
-                className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
-              >
-                <input
-                  type="checkbox"
-                  name="giverId"
-                  value={p.id}
-                  defaultChecked={p.id === defaultGiverId}
-                  className="size-3.5 rounded border-neutral-300 text-accent-600 dark:border-neutral-600"
-                />
-                {p.displayName}
-              </label>
-            ))}
-          </div>
-        </div>
+        {/* Typed filtering rather than two 500-row scroll boxes. Ticked people stay pinned
+            above the matches: a checkbox filtered out of the DOM submits nothing, so hiding
+            one would drop a giver from the gift with nothing on screen saying so. */}
+        <PersonPicker
+          name="giverId"
+          label="From"
+          people={givers}
+          defaultSelected={defaultGiverId ? [defaultGiverId] : []}
+          help="A present from a couple is one present — tick everybody who gave it."
+        />
 
-        <div>
-          <span className={labelClass}>To</span>
-          {/* Checkboxes rather than a select, because a big present is often for several
-              people at once — a holiday for the children is one gift and one thank-you,
-              not one per child. */}
-          <div className="mt-1.5 max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 p-2 dark:border-neutral-700">
-            {recipients.map((p) => (
-              <label
-                key={p.id}
-                className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300"
-              >
-                <input
-                  type="checkbox"
-                  name="recipientId"
-                  value={p.id}
-                  defaultChecked={checkedRecipients.has(p.id)}
-                  className="size-4 rounded border-neutral-300 dark:border-neutral-600"
-                />
-                {p.displayName}
-              </label>
-            ))}
-          </div>
-        </div>
+        <PersonPicker
+          name="recipientId"
+          label="To"
+          people={recipients}
+          defaultSelected={Array.from(checkedRecipients)}
+          help="A holiday for the children is one gift and one thank-you, not one per child."
+        />
       </div>
 
       <div>
@@ -427,8 +436,8 @@ export function GiftForm({
           placeholder="Hand-knitted — mention the colour"
         />
         <p className={helpClass}>
-          Anything worth saying in the thank-you. It travels with the gift into the
-          emailed list.
+          Anything worth saying in the thank-you. It travels with the gift into
+          the emailed list.
         </p>
       </div>
 
@@ -450,7 +459,11 @@ export function GiftForm({
         <SubmitButton className={btnPrimary} pendingLabel="Saving…">
           Save gift
         </SubmitButton>
-        <button type="button" onClick={() => setOpen(false)} className={btnSecondary}>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className={btnSecondary}
+        >
           Cancel
         </button>
       </div>
@@ -551,7 +564,12 @@ export function GiftRecipientForm({
           <label htmlFor="gift-for" className={labelClass}>
             Gifts are for
           </label>
-          <select id="gift-for" name="personId" className={`${inputClass} mt-1.5`} required>
+          <select
+            id="gift-for"
+            name="personId"
+            className={`${inputClass} mt-1.5`}
+            required
+          >
             <option value="">Choose someone…</option>
             {people.map((p) => (
               <option key={p.id} value={p.id}>
@@ -567,4 +585,3 @@ export function GiftRecipientForm({
     </form>
   );
 }
-

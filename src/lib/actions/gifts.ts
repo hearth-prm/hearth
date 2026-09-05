@@ -10,11 +10,19 @@ import {
   requireWritablePerson,
   writableGiftsWhere,
 } from "@/lib/access";
-import { buildThankYouMail, isAddressing, type Addressing } from "@/lib/thank-you";
+import {
+  buildThankYouMail,
+  isAddressing,
+  type Addressing,
+} from "@/lib/thank-you";
 import { readAttachments } from "@/lib/attachments";
 import { canSendMail, sendMail } from "@/lib/google/mail";
 import { actionError, actionOk, type ActionState } from "@/lib/actions/types";
-import { isFrameworkError, readString, toActionError } from "@/lib/actions/shared";
+import {
+  isFrameworkError,
+  readString,
+  toActionError,
+} from "@/lib/actions/shared";
 import { inputToDateOnly } from "@/lib/time";
 
 /**
@@ -36,7 +44,9 @@ async function checkPair(
   if (giverIds.length === 0) return actionError("Choose who gave it.");
   const overlap = giverIds.filter((id) => recipientIds.includes(id));
   if (overlap.length > 0) {
-    return actionError("Somebody cannot be both a giver and a recipient of the same gift.");
+    return actionError(
+      "Somebody cannot be both a giver and a recipient of the same gift.",
+    );
   }
   // Every recipient, not merely one: the gift is written onto all of their records, so
   // permission for one is not permission for the rest. Throws if any is not writable.
@@ -52,14 +62,21 @@ async function checkPair(
   return null;
 }
 
-export async function addGift(_prev: ActionState, form: FormData): Promise<ActionState> {
+export async function addGift(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
   try {
     const user = await requireUserForAction();
 
     // Several checkboxes share the name, so read them all.
-    const recipientIds = [...new Set(form.getAll("recipientId").map(String).filter(Boolean))];
+    const recipientIds = [
+      ...new Set(form.getAll("recipientId").map(String).filter(Boolean)),
+    ];
     // Several givers, the same way: a present from a couple is one present.
-    const giverIds = [...new Set(form.getAll("giverId").map(String).filter(Boolean))];
+    const giverIds = [
+      ...new Set(form.getAll("giverId").map(String).filter(Boolean)),
+    ];
     const bad = await checkPair(user.id, recipientIds, giverIds);
     if (bad) return bad;
 
@@ -79,7 +96,9 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
         notes: readString(form, "notes") || null,
         // An event gift takes its date from the event, so the column stays null and
         // there is one answer rather than two that can drift apart.
-        receivedOn: eventId ? null : inputToDateOnly(readString(form, "receivedOn")),
+        receivedOn: eventId
+          ? null
+          : inputToDateOnly(readString(form, "receivedOn")),
       },
     });
 
@@ -94,7 +113,10 @@ export async function addGift(_prev: ActionState, form: FormData): Promise<Actio
   }
 }
 
-export async function updateGift(_prev: ActionState, form: FormData): Promise<ActionState> {
+export async function updateGift(
+  _prev: ActionState,
+  form: FormData,
+): Promise<ActionState> {
   try {
     const user = await requireUserForAction();
     const id = readString(form, "giftId");
@@ -168,7 +190,10 @@ export async function addGiftRecipient(
 ): Promise<ActionState> {
   try {
     const user = await requireUserForAction();
-    const eventId = await requireWritableEvent(user.id, readString(form, "eventId"));
+    const eventId = await requireWritableEvent(
+      user.id,
+      readString(form, "eventId"),
+    );
     const personId = readString(form, "personId");
     if (!personId) return actionError("Choose who the gifts are for.");
 
@@ -218,9 +243,17 @@ export async function sendThankYouNote(
 
     // Which givers this note is for. Absent means all of them, which is what the form sends
     // when there is only one and therefore no choice to make.
-    const askedGiverIds = [...new Set(form.getAll("giverId").map(String).filter(Boolean))];
+    // "thankGiverId", not "giverId". The gift form's own giver checkboxes already own that
+    // name, and this dialog is rendered on the same page as that form — so a selector for
+    // one matched both, which is exactly the collision the recipientId comment warns about
+    // three hundred lines up. It cost a debugging cycle to find; renaming costs nothing.
+    const askedGiverIds = [
+      ...new Set(form.getAll("thankGiverId").map(String).filter(Boolean)),
+    ];
     const addressingRaw = readString(form, "addressing");
-    const addressing: Addressing = isAddressing(addressingRaw) ? addressingRaw : "together";
+    const addressing: Addressing = isAddressing(addressingRaw)
+      ? addressingRaw
+      : "together";
 
     const gift = await prisma.gift.findFirst({
       where: { AND: [{ id: giftId }, writableGiftsWhere(user.id)] },
@@ -337,7 +370,11 @@ export async function sendThankYouNote(
       });
     };
 
-    if (targets.length === 1 || addressing === "together" || addressing === "bcc") {
+    if (
+      targets.length === 1 ||
+      addressing === "together" ||
+      addressing === "bcc"
+    ) {
       // One message. `together` puts everyone in To, which is what makes it read as a shared
       // note; `bcc` hides them from each other and addresses it to the sender, because Gmail
       // requires a visible recipient and a note addressed to nobody looks like spam.
@@ -363,8 +400,13 @@ export async function sendThankYouNote(
         sent.push(...targets.map((t) => t.displayName));
       } catch (err) {
         const detail = err instanceof Error ? err.message : "the send failed";
-        await stamp(targets.map((t) => t.personId), detail);
-        failed.push(...targets.map((t) => ({ name: t.displayName, message: detail })));
+        await stamp(
+          targets.map((t) => t.personId),
+          detail,
+        );
+        failed.push(
+          ...targets.map((t) => ({ name: t.displayName, message: detail })),
+        );
       }
     } else {
       // Separate: the same words, one message each, so nobody sees the others' addresses.
@@ -435,7 +477,10 @@ async function ownEmail(userId: string): Promise<string | null> {
 
 export async function removeGiftRecipient(form: FormData): Promise<void> {
   const user = await requireUserForAction();
-  const eventId = await requireWritableEvent(user.id, readString(form, "eventId"));
+  const eventId = await requireWritableEvent(
+    user.id,
+    readString(form, "eventId"),
+  );
   const personId = readString(form, "id");
 
   await prisma.eventGiftRecipient.deleteMany({ where: { eventId, personId } });

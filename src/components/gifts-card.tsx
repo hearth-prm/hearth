@@ -1,5 +1,6 @@
 "use client";
 
+import type { MailBlock } from "@/lib/thank-you";
 import { useState } from "react";
 import Link from "next/link";
 import type { ActionState } from "@/lib/actions/types";
@@ -33,7 +34,7 @@ export function GiftsCard({
   updateAction,
   removeAction,
   sendAction,
-  canSend,
+  mailBlock,
 }: {
   gifts: readonly GiftView[];
   personId: string;
@@ -44,7 +45,7 @@ export function GiftsCard({
   removeAction: (form: FormData) => Promise<void>;
   /** Sends one written thank-you to one giver. */
   sendAction: Action;
-  canSend: boolean;
+  mailBlock: MailBlock | null;
 }) {
   const [editing, setEditing] = useState(false);
   // Open when there is something to read. Controlled rather than left to the element,
@@ -55,7 +56,9 @@ export function GiftsCard({
 
   // One row read from either end; which name to show is the only difference. See the
   // note on the Gift model for why there is no direction column to consult.
-  const received = gifts.filter((g) => g.recipients.some((r) => r.id === personId));
+  const received = gifts.filter((g) =>
+    g.recipients.some((r) => r.id === personId),
+  );
   const given = gifts.filter((g) => g.givers.some((gv) => gv.id === personId));
 
   return (
@@ -111,53 +114,53 @@ export function GiftsCard({
         </summary>
 
         <div className="border-t border-neutral-200 dark:border-neutral-800">
-      {gifts.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
-          Nothing recorded yet.
-        </p>
-      ) : (
-        <div className="px-5 py-3">
-          <GiftGroup
-            heading="Received"
-            gifts={received}
-            otherSide="from"
-            personId={personId}
-            showControls={showControls}
-            sendAction={sendAction}
-            canSend={canSend}
-            updateAction={updateAction}
-            removeAction={removeAction}
-          />
-          {/* The rule earns its place only when there is something on both sides of
+          {gifts.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-neutral-500 dark:text-neutral-400">
+              Nothing recorded yet.
+            </p>
+          ) : (
+            <div className="px-5 py-3">
+              <GiftGroup
+                heading="Received"
+                gifts={received}
+                otherSide="from"
+                personId={personId}
+                showControls={showControls}
+                sendAction={sendAction}
+                mailBlock={mailBlock}
+                updateAction={updateAction}
+                removeAction={removeAction}
+              />
+              {/* The rule earns its place only when there is something on both sides of
               it; between a list and nothing it is just a line. */}
-          {received.length > 0 && given.length > 0 ? (
-            <hr className="my-3 border-neutral-200 dark:border-neutral-800" />
-          ) : null}
-          {/* Status is about thanks owed, so it belongs only to what came in. */}
-          <GiftGroup
-            heading="Given"
-            gifts={given}
-            otherSide="to"
-            personId={personId}
-            showControls={showControls}
-            sendAction={sendAction}
-            canSend={canSend}
-            updateAction={updateAction}
-            removeAction={removeAction}
-          />
-        </div>
-      )}
+              {received.length > 0 && given.length > 0 ? (
+                <hr className="my-3 border-neutral-200 dark:border-neutral-800" />
+              ) : null}
+              {/* Status is about thanks owed, so it belongs only to what came in. */}
+              <GiftGroup
+                heading="Given"
+                gifts={given}
+                otherSide="to"
+                personId={personId}
+                showControls={showControls}
+                sendAction={sendAction}
+                mailBlock={mailBlock}
+                updateAction={updateAction}
+                removeAction={removeAction}
+              />
+            </div>
+          )}
 
-      {showControls ? (
-        <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
-          <GiftForm
-            action={addAction}
-            givers={people}
-            recipients={people}
-            defaultGiverId={personId}
-          />
-        </div>
-      ) : null}
+          {showControls ? (
+            <div className="border-t border-neutral-100 px-5 py-4 dark:border-neutral-800/60">
+              <GiftForm
+                action={addAction}
+                givers={people}
+                recipients={people}
+                defaultGiverId={personId}
+              />
+            </div>
+          ) : null}
         </div>
       </details>
     </Card>
@@ -179,7 +182,7 @@ function GiftGroup({
   personId,
   showControls,
   sendAction,
-  canSend,
+  mailBlock,
   updateAction,
   removeAction,
 }: {
@@ -190,7 +193,7 @@ function GiftGroup({
   personId: string;
   showControls: boolean;
   sendAction: Action;
-  canSend: boolean;
+  mailBlock: MailBlock | null;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -215,7 +218,7 @@ function GiftGroup({
               personId={personId}
               showControls={showControls}
               sendAction={sendAction}
-              canSend={canSend}
+              mailBlock={mailBlock}
               updateAction={updateAction}
               removeAction={removeAction}
             />
@@ -264,7 +267,7 @@ function GiftGroup({
                 personId={personId}
                 showControls={showControls}
                 sendAction={sendAction}
-                canSend={canSend}
+                mailBlock={mailBlock}
                 updateAction={updateAction}
                 removeAction={removeAction}
               />
@@ -309,7 +312,7 @@ function GiftLine({
   personId,
   showControls,
   sendAction,
-  canSend,
+  mailBlock,
   updateAction,
   removeAction,
 }: {
@@ -318,7 +321,7 @@ function GiftLine({
   personId: string;
   showControls: boolean;
   sendAction: Action;
-  canSend: boolean;
+  mailBlock: MailBlock | null;
   updateAction: Action;
   removeAction: (form: FormData) => Promise<void>;
 }) {
@@ -334,7 +337,9 @@ function GiftLine({
     <li className="flex flex-wrap items-start justify-between gap-x-3 py-0.5 text-sm">
       <span className="min-w-0">
         {gift.description}{" "}
-        <span className="text-neutral-500 dark:text-neutral-400">{otherSide}</span>{" "}
+        <span className="text-neutral-500 dark:text-neutral-400">
+          {otherSide}
+        </span>{" "}
         {others.map((person, i) => (
           <span key={person.id}>
             {i > 0 ? <span className="text-neutral-400">{", "}</span> : null}
@@ -382,7 +387,7 @@ function GiftLine({
               thanked: !forRecipient.outstandingGiverIds.includes(g.id),
             }))}
             lastNote={forRecipient.thankYous[0]?.message ?? null}
-            canSend={canSend}
+            mailBlock={mailBlock}
             yours={forRecipient.canThank}
           />
         ) : null}
@@ -402,7 +407,9 @@ function GiftLine({
             current={{
               description: gift.description,
               notes: gift.notes ?? "",
-              receivedOn: gift.receivedOn ? dateOnlyToInput(gift.receivedOn) : "",
+              receivedOn: gift.receivedOn
+                ? dateOnlyToInput(gift.receivedOn)
+                : "",
             }}
           />
           <DeleteForm
