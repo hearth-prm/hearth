@@ -2159,41 +2159,51 @@ try {
   const { thankableCardIds } = await import("@/lib/access");
   const { listGiftsForPerson } = await import("@/lib/gifts");
 
-  // Asked of whoever actually holds the role rather than of A on the assumption they
-  // still do — the head is elected, and one day something here will hand it over.
-  const head = await prisma.user.findFirstOrThrow({ where: { isHeadOfHousehold: true } });
-  const notHead = [A.id, B.id].find((id) => id !== head.id)!;
+  // Writing somebody else's thanks belongs to a THANK-YOU MANAGER now, not the head of the
+  // household. The two had been conflated: the head owns the household's contact cards and
+  // can hand that custody over, which is a different job from chasing unwritten letters.
+  //
+  // Read from the same variable the server was started with, rather than restating bob's
+  // address here, so the suite cannot end up testing a role nobody actually holds.
+  const { parseThankYouManagers } = await import("@/lib/thank-you-managers");
+  const managerEmails = parseThankYouManagers(process.env.HEARTH_THANK_YOU_MANAGERS);
+  const manager = await prisma.user.findFirstOrThrow({
+    where: { email: { in: managerEmails } },
+  });
+  const notManager = [A.id, B.id].find((id) => id !== manager.id)!;
 
   ok("16.22 nobody may write another user's thanks by default",
-     !(await thankableCardIds(head.id)).has(karenCard.id));
+     !(await thankableCardIds(manager.id)).has(karenCard.id));
 
   await prisma.userSettings.updateMany({
     where: { userId: karenUser.id },
-    data: { allowHeadThankYous: true },
+    data: { allowManagerThankYous: true },
   });
-  ok("16.22b once they allow it, the head of the household may",
-     (await thankableCardIds(head.id)).has(karenCard.id), karensGift.id);
+  ok("16.22b once they allow it, a thank-you manager may",
+     (await thankableCardIds(manager.id)).has(karenCard.id), karensGift.id);
+  // The head of the household included, who is who could do this until now. This is the
+  // check that fails if the power was copied rather than moved.
   ok("16.22c but nobody else, however much of the record they can edit",
-     !(await thankableCardIds(notHead)).has(karenCard.id));
+     !(await thankableCardIds(notManager)).has(karenCard.id));
 
   await prisma.userSettings.updateMany({
     where: { userId: karenUser.id },
-    data: { allowHeadThankYous: false },
+    data: { allowManagerThankYous: false },
   });
   ok("16.22d and it is withdrawn the moment they turn it off",
-     !(await thankableCardIds(head.id)).has(karenCard.id));
+     !(await thankableCardIds(manager.id)).has(karenCard.id));
 
   // Delegation reaches a share of a shared present, not only a gift of one's own.
   await prisma.userSettings.updateMany({
     where: { userId: karenUser.id },
-    data: { allowHeadThankYous: true },
+    data: { allowManagerThankYous: true },
   });
   await prisma.giftRecipient.create({
     data: { giftId: shared.id, personId: karenCard.id },
   });
-  const withKaren = await listGiftsForPerson(head.id, karenCard.id);
+  const withKaren = await listGiftsForPerson(manager.id, karenCard.id);
   const karensShare = withKaren.find((g) => g.id === shared.id);
-  ok("16.22e the head may write a delegated user's share of a shared present",
+  ok("16.22e a manager may write a delegated user's share of a shared present",
      karensShare?.recipients.find((r) => r.id === karenCard.id)?.canThank === true,
      karensShare?.recipients.map((r) => [r.displayName, r.canThank]));
   ok("16.22f while a co-recipient who delegated nothing stays untouched",
@@ -7305,29 +7315,29 @@ try {
   section("§41 Thank-yous still to write, and who may see whose")
 
   {
-    const { parseSuperUsers, isSuperUserEmail } = await import("@/lib/super-users");
-    const { listThankYousOwed, countThankYousOwedByMe } =
+    const { parseThankYouManagers, isThankYouManagerEmail } = await import("@/lib/thank-you-managers");
+    const { listThankYousOwed, countThankYousOwed } =
       await import("@/lib/thank-yous-owed");
 
     // --- the rule, without a database ------------------------------------
     ok("41.1 addresses are read from the variable, however they are separated",
-       JSON.stringify(parseSuperUsers("A@b.com, c@d.com\n e@f.com")) ===
+       JSON.stringify(parseThankYouManagers("A@b.com, c@d.com\n e@f.com")) ===
          JSON.stringify(["a@b.com", "c@d.com", "e@f.com"]),
-       parseSuperUsers("A@b.com, c@d.com\n e@f.com"));
+       parseThankYouManagers("A@b.com, c@d.com\n e@f.com"));
     // The difference from HEARTH_ALLOWED_EMAILS, and the whole reason this is its own
     // module: "@gmail.com" in the allowlist means "my family may sign in", which is
     // sensible. Here it would mean "anyone at gmail.com may read every household's
     // thank-yous", which nobody means to type — so it is dropped, not honoured.
     ok("41.1b but an @domain entry is dropped rather than honoured",
-       parseSuperUsers("@gmail.com, real@person.test").length === 1 &&
-         !isSuperUserEmail("anyone@gmail.com", parseSuperUsers("@gmail.com")),
-       parseSuperUsers("@gmail.com, real@person.test"));
+       parseThankYouManagers("@gmail.com, real@person.test").length === 1 &&
+         !isThankYouManagerEmail("anyone@gmail.com", parseThankYouManagers("@gmail.com")),
+       parseThankYouManagers("@gmail.com, real@person.test"));
     ok("41.1c and a word that is not an address is not one",
-       parseSuperUsers("admin, root").length === 0);
+       parseThankYouManagers("admin, root").length === 0);
     ok("41.1d matching ignores case and surrounding space",
-       isSuperUserEmail("  Someone@Example.test ", ["someone@example.test"]));
-    ok("41.1e nobody is a super user by default",
-       !isSuperUserEmail("someone@example.test", []) && !isSuperUserEmail(null, ["a@b.c"]));
+       isThankYouManagerEmail("  Someone@Example.test ", ["someone@example.test"]));
+    ok("41.1e nobody is a thank-you manager by default",
+       !isThankYouManagerEmail("someone@example.test", []) && !isThankYouManagerEmail(null, ["a@b.c"]));
 
     // --- fixtures: one note owed by Alice, one owed by Bob ---------------
     const aCard = await prisma.person.findFirstOrThrow({ where: { linkedUserId: A.id } });
@@ -7363,7 +7373,7 @@ try {
     //
     // §5 grants Bob blanket read of Alice's contacts, so "Bob cannot see this" is never
     // true of anything Alice owns. Asserted the other way round: Alice holds no grant over
-    // Bob, and Alice is not a super user.
+    // Bob, and Alice is not a thank-you manager.
     const alicesOwn = await listThankYousOwed(A.id);
     ok("41.2 a plain user's list is their own notes",
        alicesOwn.everyone === false &&
@@ -7374,7 +7384,7 @@ try {
        alicesOwn.rows.map((r) => r.giverDisplayName));
 
     const bobsView = await listThankYousOwed(B.id);
-    ok("41.3 a super user's list is everybody's",
+    ok("41.3 a manager's list is everybody's",
        bobsView.everyone === true &&
          bobsView.rows.some((r) => r.giverDisplayName === "Owed To Bob") &&
          bobsView.rows.some((r) => r.giverDisplayName === "Owed To Alice"),
@@ -7420,23 +7430,38 @@ try {
 
     await B.page.goto("/thank-yous");
     const bBody = (await B.page.textContent("body")) ?? "";
-    ok("41.6 a super user's page shows both households",
+    ok("41.6 a manager's page shows both households",
        bBody.includes("A tin whistle") && bBody.includes("A brass telescope"),
        [bBody.includes("A tin whistle"), bBody.includes("A brass telescope")]);
     ok("41.6b and says why it is wider than usual",
-       bBody.includes("HEARTH_SUPER_USERS"));
+       bBody.includes("HEARTH_THANK_YOU_MANAGERS"));
 
-    // --- the badge counts YOUR notes, not everybody's --------------------
+    // --- the badge counts the whole backlog for a manager ----------------
     //
-    // A badge is a prompt to act, and somebody else's unwritten note is not something you
-    // can act on. This is the check that would catch the badge being fed the audit list.
-    const bOwn = await countThankYousOwedByMe(B.id);
-    const bAll = (await listThankYousOwed(B.id)).rows.length;
-    ok("41.7 the super user's own count is smaller than everybody's",
-       bOwn < bAll && bOwn >= 1, [bOwn, bAll]);
+    // This is the reverse of how it shipped, and the reasoning that reversed it is better:
+    // a badge showing only your own letters is a personal to-do list, but a manager's job
+    // IS the household's backlog, and a reminder that stays quiet while three notes go
+    // unwritten does not remind anybody of anything. The badge and the page agree now,
+    // which also disposes of the question of why they would differ.
+    const bobsRows = (await listThankYousOwed(B.id)).rows;
+    const bobsOwn = bobsRows.filter((r) => r.owedByUserId === B.id).length;
+    ok("41.7 a manager's badge counts everybody's notes, not only their own",
+       (await countThankYousOwed(B.id)) === bobsRows.length && bobsRows.length > bobsOwn,
+       [await countThankYousOwed(B.id), bobsRows.length, bobsOwn]);
     const badge = await B.page.textContent('nav a[href="/thank-yous"]');
-    ok("41.7b and the badge in the nav shows the own count",
-       (badge ?? "").trim() === `Thank-yous${bOwn}`, [badge, bOwn]);
+    ok("41.7b and the nav shows that number",
+       (badge ?? "").trim() === `Thank-yous${bobsRows.length}`, [badge, bobsRows.length]);
+    // And is NOT widened for everybody else, which is the half that would leak a count of
+    // records they cannot see.
+    const alicesRows = (await listThankYousOwed(A.id)).rows;
+    ok("41.7c while a plain user's badge is only theirs",
+       (await countThankYousOwed(A.id)) === alicesRows.length &&
+         alicesRows.length < bobsRows.length,
+       [alicesRows.length, bobsRows.length]);
+    const aliceBadge = await A.page.textContent('nav a[href="/thank-yous"]');
+    ok("41.7d shown the same way",
+       (aliceBadge ?? "").trim() === `Thank-yous${alicesRows.length}`,
+       [aliceBadge, alicesRows.length]);
 
     await prisma.gift.deleteMany({ where: { id: { in: [aGift.id, bGift.id] } } });
     await prisma.person.deleteMany({ where: { id: { in: [aGiver.id, bGiver.id] } } });

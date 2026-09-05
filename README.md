@@ -183,7 +183,7 @@ docker compose down -v         # stop and destroy the database
 | `AUTH_TRUST_HOST` | behind a proxy | `true` when running behind Caddy/nginx/Traefik. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | yes | From Google Cloud Console, below. |
 | `HEARTH_ALLOWED_EMAILS` | see below | Who may sign in. Addresses and/or `@domain`, comma-separated. |
-| `HEARTH_SUPER_USERS` | empty | Addresses that see **everybody's** outstanding thank-yous on the Thank-yous page. No other extra access. Whole addresses only — `@domain` is ignored here. |
+| `HEARTH_THANK_YOU_MANAGERS` | empty | Addresses that see **everybody's** outstanding thank-yous on the Thank-yous page. No other extra access. Whole addresses only — `@domain` is ignored here. |
 | `HEARTH_SOURCE_URL` | no | Where to get this install's source, offered in the footer for the AGPL. Set it if you have modified Hearth. |
 | `HEARTH_ENABLE_MAIL` | no | `true` to offer thank-you emails, which needs Google's `gmail.send` scope. Off by default, and the scope is not requested unless set. |
 | `HEARTH_IMAGE` / `HEARTH_TAG` | no | Which published image to run. Defaults to `registry.gitlab.com/hearth-prm/hearth:latest`. |

@@ -35,7 +35,7 @@ export interface Viewer {
    * household. Read from the database rather than the session, so promoting somebody takes
    * effect on their next page load rather than their next sign-in.
    */
-  isHeadOfHousehold: boolean;
+  isThankYouManager: boolean;
   readablePeople: Prisma.PersonWhereInput;
   readableEvents: Prisma.EventWhereInput;
   /** The cards whose thanks this viewer may write; see thankableCardIds. */

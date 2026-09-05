@@ -93,12 +93,21 @@ is that **`sendMail` posts over plain `fetch`**, never touching the OAuth client
 `canSendMail` fails it and nothing else. It fails OPEN on a typo, because a self-hosted install
 that quietly stopped syncing would be worse than one that kept going.
 
+**Head of household and thank-you manager are different roles, on purpose.** The head owns
+every user's contact card by default (`ensureContactCard` — the first person to sign in becomes
+head automatically) and can hand that custody over, taking the cards with it
+(`handOverHousehold`). That is all it does now. Writing somebody else's thank-yous used to be
+the head's too and moved to `HEARTH_THANK_YOU_MANAGERS`, because custody of records and
+chasing unwritten letters are not the same job and tying them together meant you could not
+have one without the other. §16.22c is the check that the power MOVED rather than being
+copied: the head must no longer be able to.
+
 **The Thank-yous page is the ONE place the sharing boundary is crossed on purpose.**
-`thankYouAuditCardsWhere` in `access.ts` decides: a super user reads gift descriptions and
+`thankYouAuditCardsWhere` in `access.ts` decides: a thank-you manager reads gift descriptions and
 giver names from households they cannot otherwise see. It lives there, not in the page,
 because a second way to read a gift is what `access.ts` exists to prevent — and it is proven
 by forcing the widened branch and watching §41.2/41.2b/41.5b fail with Alice seeing "Owed To
-Bob". The role is derived from `HEARTH_SUPER_USERS` and has NO column: same reasoning as the
+Bob". The role is derived from `HEARTH_THANK_YOU_MANAGERS` and has NO column: same reasoning as the
 sign-in allowlist, and its only power is that page. The nav badge deliberately counts the
 viewer's OWN notes through `thankableCardsWhere` — a badge is a prompt to act, and somebody
 else's unwritten note is not actionable; §41.7 is that check.
@@ -274,7 +283,7 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   the flag off after consenting. It belongs in `mailBlockedFor`'s explanation — it is usually
   why the scope is missing — never in the decision.
 - **A role read from the environment must reach BOTH processes.** The harness set
-  `HEARTH_SUPER_USERS` in the server's env only, so a page rendered Bob as a super user while
+  `HEARTH_THANK_YOU_MANAGERS` in the server's env only, so a page rendered Bob as a thank-you manager while
   the same helper called in-process said he was not — §41.3 failed while the feature worked.
   `harness.mts` now sets `process.env` too, the way it already does for `DATABASE_URL`.
 - **A probe has to be a control the feature keeps.** Three checks used the guest list's

@@ -22,7 +22,7 @@ export interface CalendarOption {
 export interface SettingsValues {
   syncContactsEnabled: boolean;
   syncSharedContacts: boolean;
-  allowHeadThankYous: boolean;
+  allowManagerThankYous: boolean;
   sendInvites: boolean;
   syncCalendarEnabled: boolean;
   defaultAddToGoogle: boolean;
@@ -188,7 +188,9 @@ export function SettingsForm({
                 >
                   {/* Keep whatever is configured selectable even if it is not in
                       the list, so saving cannot silently move every event. */}
-                  {calendars.some((c) => c.id === values.googleCalendarId) ? null : (
+                  {calendars.some(
+                    (c) => c.id === values.googleCalendarId,
+                  ) ? null : (
                     <option value={values.googleCalendarId}>
                       {values.googleCalendarId} (current)
                     </option>
@@ -201,8 +203,8 @@ export function SettingsForm({
                   ))}
                 </select>
                 <p className={helpClass}>
-                  Only calendars you can write to are listed. Changing this moves
-                  existing events: the old copy is deleted and recreated.
+                  Only calendars you can write to are listed. Changing this
+                  moves existing events: the old copy is deleted and recreated.
                 </p>
               </>
             ) : (
@@ -214,8 +216,9 @@ export function SettingsForm({
                   className={`${inputClass} mt-1.5`}
                 />
                 <p className={helpClass}>
-                  Calendar id, or <code>primary</code> for your default calendar.
-                  Connect Google with calendar permission to pick from a list.
+                  Calendar id, or <code>primary</code> for your default
+                  calendar. Connect Google with calendar permission to pick from
+                  a list.
                 </p>
               </>
             )}
@@ -247,11 +250,12 @@ export function SettingsForm({
               <option value="off">Off — plain text only</option>
             </select>
             <p className={helpClass}>
-              Currently using: <strong>{activePlacesProvider}</strong>. OpenStreetMap
-              needs nothing at all. Google Places gives better suggestions for small
-              venues but needs <code>GOOGLE_PLACES_API_KEY</code> in your{" "}
-              <code>.env</code> and billing enabled on the Google Cloud project — the
-              key stays server-side and is never sent to the browser.
+              Currently using: <strong>{activePlacesProvider}</strong>.
+              OpenStreetMap needs nothing at all. Google Places gives better
+              suggestions for small venues but needs{" "}
+              <code>GOOGLE_PLACES_API_KEY</code> in your <code>.env</code> and
+              billing enabled on the Google Cloud project — the key stays
+              server-side and is never sent to the browser.
             </p>
           </div>
         </div>
@@ -278,8 +282,8 @@ export function SettingsForm({
             ))}
           </select>
           <p className={helpClass}>
-            Every new event starts in this zone, and each one can still be changed as you
-            create it.
+            Every new event starts in this zone, and each one can still be
+            changed as you create it.
           </p>
           {/*
             Offered rather than imposed, and only when it would change something.
@@ -304,10 +308,10 @@ export function SettingsForm({
         </div>
         <div className="border-t border-neutral-100 px-5 py-5 dark:border-neutral-800/60">
           <Toggle
-            name="allowHeadThankYous"
-            label="Let the head of the household write my thank-yous"
-            help="A thank-you is signed by whoever sends it, so nobody can take this on your behalf — it is yours to give. Useful for a child whose notes a parent writes."
-            defaultChecked={values.allowHeadThankYous}
+            name="allowManagerThankYous"
+            label="Let a thank-you manager write my thank-yous"
+            help="A thank-you is signed by whoever sends it, so nobody can take this on your behalf — it is yours to give. Useful for a child whose notes a parent writes. Who the managers are is set by whoever runs this Hearth, in HEARTH_THANK_YOU_MANAGERS."
+            defaultChecked={values.allowManagerThankYous}
           />
         </div>
       </Card>

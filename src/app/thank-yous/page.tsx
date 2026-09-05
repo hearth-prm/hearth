@@ -31,10 +31,10 @@ import {
  * was; none of that belongs on a list. Sending from a list is also how you send the wrong
  * note to the wrong person quickly.
  *
- * ## A super user sees everybody's
+ * ## A thank-you manager sees everybody's
  *
  * `thankYouAuditCardsWhere` decides, in `access.ts`. This is the one place the sharing
- * boundary is crossed on purpose: a super user reads gift descriptions and giver names from
+ * boundary is crossed on purpose: a thank-you manager reads gift descriptions and giver names from
  * households they otherwise cannot see. The page says whose list it is showing, and groups
  * by the person who owes it, so a widened view never reads as your own backlog.
  */
@@ -42,7 +42,7 @@ export default async function ThankYousPage() {
   const user = await requireUser();
   const { rows, everyone } = await listThankYousOwed(user.id);
 
-  // Grouped by whose notes they are. For everybody but a super user this is one group, and
+  // Grouped by whose notes they are. For everybody but a thank-you manager this is one group, and
   // the heading is then noise — so the grouping is only rendered when there is more than
   // one, rather than being a different code path.
   const groups = new Map<string, { name: string; rows: typeof rows }>();
@@ -143,8 +143,11 @@ export default async function ThankYousPage() {
       {everyone ? (
         <Hint>
           You are seeing everybody&apos;s because your address is in
-          HEARTH_SUPER_USERS. Only the people who owe a note can write it — this
-          page reads, it does not send.
+          HEARTH_THANK_YOU_MANAGERS. You can write the notes of anybody who
+          ticked &ldquo;let a thank-you manager write my thank-yous&rdquo; in
+          their settings; the rest are listed so you know they are owed. Nothing
+          sends from this page — each row links to the record holding the
+          present.
         </Hint>
       ) : null}
     </div>

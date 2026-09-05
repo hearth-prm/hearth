@@ -149,7 +149,7 @@ model UserSettings {
   /// Off by default and given by the user themselves, because a thank-you is signed by
   /// whoever sends it: this is permission to speak for somebody, which only they can
   /// grant. It exists so a parent can write a small child's notes.
-  allowHeadThankYous Boolean @default(false)
+  allowManagerThankYous Boolean @default(false)
 
   /// light | dark | system. "system" stores nothing on the html element and lets
   /// prefers-color-scheme decide, which is why it is a third value rather than a

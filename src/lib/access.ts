@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { isSuperUserEmail } from "@/lib/super-users";
+import { isThankYouManagerEmail } from "@/lib/thank-you-managers";
 // Type-only: the query language is handed its clauses by loadViewer below rather than
 // importing this module, so that a client component importing people-filter.ts does not
 // reach auth.ts through it. See the note in search/predicates.ts.
@@ -194,9 +194,9 @@ export function writableGiftsWhere(userId: string): Prisma.GiftWhereInput {
  * Hearth. A recipient who needs one written has an account.
  */
 export async function thankableCardIds(userId: string): Promise<Set<string>> {
-  const isHead = await isHeadOfHousehold(userId);
+  const isManager = await isThankYouManager(userId);
   const rows = await prisma.person.findMany({
-    where: thankableCardsWhere(userId, isHead),
+    where: thankableCardsWhere(userId, isManager),
     select: { id: true },
   });
   return new Set(rows.map((row) => row.id));
@@ -214,25 +214,25 @@ export async function thankableCardIds(userId: string): Promise<Set<string>> {
  * not thankable, because a trashed contact is invisible everywhere else too.
  */
 /**
- * Whether this user holds the super-user role.
+ * Whether this user is a thank-you manager.
  *
  * Read from the environment against their address, never from a column — see
- * `super-users.ts` for why. One query, because the role is about the person and the session
+ * `thank-you-managers.ts` for why. One query, because the role is about the person and the session
  * carries only what Auth.js put in it.
  */
-export async function isSuperUser(userId: string): Promise<boolean> {
+export async function isThankYouManager(userId: string): Promise<boolean> {
   const me = await prisma.user.findUnique({
     where: { id: userId },
     select: { email: true },
   });
-  return isSuperUserEmail(me?.email);
+  return isThankYouManagerEmail(me?.email);
 }
 
 /**
  * Whose outstanding thank-yous this viewer may see.
  *
  * The ONE place the sharing boundary is deliberately crossed, and only for the thank-yous
- * page: a super user sees every user's outstanding notes, which means seeing gift
+ * page: a thank-you manager sees every user's outstanding notes, which means seeing gift
  * descriptions and giver names from households they cannot otherwise read. That is the
  * point of the role, and it is expressed here rather than inlined in the page because a
  * second way to read a gift is exactly what `access.ts` exists to prevent.
@@ -246,12 +246,9 @@ export async function isSuperUser(userId: string): Promise<boolean> {
 export async function thankYouAuditCardsWhere(
   userId: string,
 ): Promise<{ cards: Prisma.PersonWhereInput; everyone: boolean }> {
-  const [isHead, isSuper] = await Promise.all([
-    isHeadOfHousehold(userId),
-    isSuperUser(userId),
-  ]);
-  if (!isSuper)
-    return { cards: thankableCardsWhere(userId, isHead), everyone: false };
+  const isManager = await isThankYouManager(userId);
+  if (!isManager)
+    return { cards: thankableCardsWhere(userId, false), everyone: false };
   return {
     cards: { deletedAt: null, linkedUserId: { not: null } },
     everyone: true,
@@ -260,17 +257,22 @@ export async function thankYouAuditCardsWhere(
 
 export function thankableCardsWhere(
   userId: string,
-  isHead: boolean,
+  isManager: boolean,
 ): Prisma.PersonWhereInput {
   return {
     deletedAt: null,
     OR: [
       // Your own card, always.
       { linkedUserId: userId },
-      // And anybody who ticked "let the head of the household write my thank-yous", if you
-      // are that head. The relation implies linkedUserId is set, so no separate test.
-      ...(isHead
-        ? [{ linkedUser: { settings: { allowHeadThankYous: true } } }]
+      // And anybody who ticked "let a thank-you manager write my thank-yous", if you are
+      // one. The relation implies linkedUserId is set, so no separate test.
+      //
+      // This was the head of the household until now. The two roles answer different
+      // questions — the head owns the household's contact cards and can hand that custody
+      // over, while writing somebody's letters for them is an errand — and tying the second
+      // to the first meant you could not have one without the other.
+      ...(isManager
+        ? [{ linkedUser: { settings: { allowManagerThankYous: true } } }]
         : []),
     ],
   };
@@ -294,13 +296,13 @@ export async function isHeadOfHousehold(userId: string): Promise<boolean> {
  * Callers put this in the Promise.all they already have, so it costs no extra round trip.
  */
 export async function loadViewer(userId: string): Promise<Viewer> {
-  const isHead = await isHeadOfHousehold(userId);
+  const isManager = await isThankYouManager(userId);
   return {
     id: userId,
-    isHeadOfHousehold: isHead,
+    isThankYouManager: isManager,
     readablePeople: readablePeopleWhere(userId),
     readableEvents: readableEventsWhere(userId),
-    thankableCards: thankableCardsWhere(userId, isHead),
+    thankableCards: thankableCardsWhere(userId, isManager),
   };
 }
 

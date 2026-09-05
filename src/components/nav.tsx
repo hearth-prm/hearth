@@ -22,7 +22,7 @@ export function AppNav({
   thankYousOwed = 0,
 }: {
   user: CurrentUser;
-  /** The viewer's OWN count, never a super user's wider one — see thank-yous-owed.ts. */
+  /** What the page would list: a manager's is the whole household's backlog. */
   thankYousOwed?: number;
 }) {
   return (

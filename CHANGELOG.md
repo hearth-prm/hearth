@@ -28,6 +28,20 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Changed
 
+- **The role is called Thank-you manager**, set by `HEARTH_THANK_YOU_MANAGERS` (was
+  `HEARTH_SUPER_USERS`). Unreleased, so the old name never shipped.
+- **Writing somebody else's thank-yous moved from the head of the household to a thank-you
+  manager.** The two were conflated: the head owns the household's contact cards and can hand
+  that custody over, which is a different job from chasing unwritten letters — and tying the
+  second to the first meant you could not have one without the other. The per-user opt-in
+  moves with it, and existing opt-ins carry across: the setting now reads *"Let a thank-you
+  manager write my thank-yous"*. If your manager is not the person your household expected to
+  be writing them, re-check that box.
+- **The nav badge counts every outstanding note for a manager**, not just their own. A badge
+  showing only your own letters is a personal to-do list; a manager's job is the household's
+  backlog, and a reminder that stays quiet while notes go unwritten does not remind anybody
+  of anything. Everyone else's badge still counts only theirs.
+
 - **Picking who gave a gift is a filter now, not a scroll.** Both sides of the gift form
   rendered every readable contact — up to 500 — as checkboxes in a small scrolling box. Type
   to narrow them. People already ticked stay pinned above the results, which is not cosmetic:
@@ -53,7 +67,7 @@ of a green test suite alone where a real address book can be asked instead.
   oldest first, one row per giver — a present from a couple earns two notes and may have had
   one of them written. It reads only: each row links to the record holding the present, where
   the note gets written with its addressing choice and attachments.
-- **`HEARTH_SUPER_USERS`** — a role, not a column. Addresses listed there see every user's
+- **`HEARTH_THANK_YOU_MANAGERS`** — a role, not a column. Addresses listed there see every user's
   outstanding thank-yous on that page instead of their own, which is useful when one person
   in a household keeps track of whether the letters went out. It grants nothing else: no
   contacts, no events, no settings, and no sending on somebody else's behalf. A variable

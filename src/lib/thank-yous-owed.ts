@@ -1,10 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
-import {
-  isHeadOfHousehold,
-  thankableCardsWhere,
-  thankYouAuditCardsWhere,
-} from "@/lib/access";
+import { thankYouAuditCardsWhere } from "@/lib/access";
 
 /**
  * The thank-yous somebody still owes.
@@ -46,7 +42,7 @@ export interface OwedThankYou {
 
 export interface OwedThankYous {
   rows: OwedThankYou[];
-  /** True when the viewer is a super user and this is everybody's list, not just theirs. */
+  /** True when the viewer is a thank-you manager and this is everybody's list, not just theirs. */
   everyone: boolean;
 }
 
@@ -60,8 +56,10 @@ export async function listThankYousOwed(
 /**
  * The rows for one set of cards.
  *
- * Split out so the page and the nav badge share the mapping without sharing the clause: the
- * badge must not pay for every household's gifts in order to tell one person what they owe.
+ * Split from the clause that chooses them. That began as a way to give the nav badge a
+ * narrower question than the page's; the badge asks the same question now, so this is only
+ * a seam — but a useful one, because the clause is an access decision and the mapping is
+ * not, and they should not be readable as one thing.
  */
 async function owedFor(
   cards: Prisma.PersonWhereInput,
@@ -162,14 +160,16 @@ async function owedFor(
 /**
  * Just the number, for the nav badge.
  *
- * Deliberately the viewer's OWN count even for a super user: a badge is a prompt to do
- * something, and somebody else's unwritten note is not a thing you can act on. The page
- * says whose list it is showing; the badge says what you owe.
+ * Whatever the page would show — which for a thank-you manager is EVERY user's outstanding
+ * notes, not only their own. That is the opposite of what this did first, and the reasoning
+ * that changed it beats the reasoning that built it: a badge counting only your own letters
+ * is a personal to-do list, but a manager's job IS the household's backlog, and a reminder
+ * that stays quiet while three notes go unwritten is a reminder that does not work.
+ * Somebody has to be nagged about them, and it is the manager.
+ *
+ * So the badge and the page always agree, which also disposes of the question of why they
+ * would differ.
  */
-export async function countThankYousOwedByMe(userId: string): Promise<number> {
-  // thankableCardsWhere, never the audit clause: a super user's badge is about their own
-  // notes, so this must not widen to every household — and counting everybody's and then
-  // filtering would query every gift in the install to render one number in the header.
-  const isHead = await isHeadOfHousehold(userId);
-  return (await owedFor(thankableCardsWhere(userId, isHead))).length;
+export async function countThankYousOwed(userId: string): Promise<number> {
+  return (await listThankYousOwed(userId)).rows.length;
 }
