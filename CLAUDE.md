@@ -248,6 +248,21 @@ contact is meant to persist and change for years. Don't propose `EventVersion`.
   what might fail to be**, and Docker made those files so Docker removes them
   (`remove_pgdata` mounts the parent into a throwaway container using the image the compose
   file already names). §40.7 asserts the order.
+- **One field name, one meaning, per page.** The thank-you dialog's "who to thank"
+  checkboxes were `giverId`, which is also what the gift form's giver picker submits — and
+  both render on an event page. Nothing broke functionally (different forms, different
+  actions), but every selector for one matched the other, and a check counted a name twice
+  while the code was right. The dialog's field is `thankGiverId` now. A comment three hundred
+  lines above had predicted exactly this for `recipientId`: predicting a collision is not the
+  same as checking the other field for it.
+- **A filtered checkbox list drops what it hides.** An input removed from the DOM submits
+  nothing, so `PersonPicker` keeps ticked people rendered above the matches and outside the
+  filter. §16.4m is the check that matters — it asserts the SERVER received the giver who was
+  filtered out of view, not that the element was still in the page.
+- **`mailEnabled()` gates the scope REQUEST, not the send.** Adding it to `canSendMail` looks
+  like a tidy-up and is a behaviour change: it would refuse an install whose operator turned
+  the flag off after consenting. It belongs in `mailBlockedFor`'s explanation — it is usually
+  why the scope is missing — never in the decision.
 - **A probe has to be a control the feature keeps.** Three checks used the guest list's
   per-row form as their evidence that "the controls are showing" — first the RSVP dropdown,
   then the role dropdown, then the Update button — and each stopped existing when a Hearth-only

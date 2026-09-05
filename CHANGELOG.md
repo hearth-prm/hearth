@@ -28,6 +28,16 @@ of a green test suite alone where a real address book can be asked instead.
 
 ### Changed
 
+- **Picking who gave a gift is a filter now, not a scroll.** Both sides of the gift form
+  rendered every readable contact — up to 500 — as checkboxes in a small scrolling box. Type
+  to narrow them. People already ticked stay pinned above the results, which is not cosmetic:
+  a checkbox filtered out of the page submits nothing, so hiding a ticked giver would have
+  dropped them from the gift silently.
+- **A thank-you that cannot be sent says why**, in the row, instead of a faded link that does
+  nothing when clicked. The three causes are told apart — the install's write switch is off,
+  thank-you email was never enabled, or Google has not granted the send permission — because
+  "reconnect Google" is useless advice for the first two. Who may send is unchanged.
+
 - **An event that does not go to Google no longer asks for an attendee's role.** Host,
   required and optional read as though they described the event, but the only thing that
   value has ever done is set `optional` on a Google invitation — HOST and REQUIRED are one
