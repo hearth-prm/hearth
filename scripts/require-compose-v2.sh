@@ -35,14 +35,14 @@ require_compose_v2() {
   if docker --version 2>/dev/null | grep -qi podman; then
     _shim="
   This 'docker' is podman's compatibility shim. It passes compose calls to the
-  docker-compose on your PATH, which here is v1 — so installing Docker Compose v2
-  is what fixes it, whether or not you keep podman."
+  docker-compose on your PATH, which here is v1 — so installing a current Docker
+  Compose is what fixes it, whether or not you keep podman."
   fi
 
   printf '%s\n' "[hearth] Docker Compose ${_cv:-v1 (or older than --short)} cannot read this compose file.
 
   Hearth's docker-compose.yml uses the Compose Specification, whose top-level 'name:'
-  key needs Compose v2. Compose v1 reports it as \"'name' does not match any of the
+  key needs Compose v2 or newer. Compose v1 reports it as \"'name' does not match any of the
   regexes\" and suggests adding a version: key, which does not help.${_shim}
 
   On Debian/Ubuntu/Mint, Docker's own repository carries it:
